@@ -35,7 +35,28 @@ FetchContent_Declare(yaml-cpp
   EXCLUDE_FROM_ALL
   SYSTEM)
 
-FetchContent_MakeAvailable(boringssl asio nlohmann_json yaml-cpp)
+# llhttp: passive HTTP/1.x request parsing for fingerprints.
+set(LLHTTP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(LLHTTP_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+FetchContent_Declare(llhttp
+  URL https://github.com/nodejs/llhttp/archive/refs/tags/release/v9.4.2.tar.gz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  EXCLUDE_FROM_ALL
+  SYSTEM)
+
+# nghttp2: only its HPACK decoder, to read HTTP/2 request headers.
+set(ENABLE_LIB_ONLY ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+set(ENABLE_DOC OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(nghttp2
+  URL https://github.com/nghttp2/nghttp2/releases/download/v1.69.0/nghttp2-1.69.0.tar.xz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  EXCLUDE_FROM_ALL
+  SYSTEM)
+
+FetchContent_MakeAvailable(boringssl asio nlohmann_json yaml-cpp llhttp nghttp2)
 
 add_library(asio INTERFACE)
 target_include_directories(asio SYSTEM INTERFACE ${asio_SOURCE_DIR}/asio/include)

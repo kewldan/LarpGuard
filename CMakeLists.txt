@@ -13,6 +13,8 @@ endif()
 
 option(BOT_SHIELD_BUILD_TESTS "Build unit tests" ON)
 option(BOT_SHIELD_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
+option(BOT_SHIELD_FOXIO
+  "Build JA4T/JA4H (FoxIO License 1.1, see src/fp/foxio/LICENSE.md)" ON)
 
 if(BOT_SHIELD_SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
