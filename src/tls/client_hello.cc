@@ -38,7 +38,7 @@ class Reader {
 
   bool ReadU16(uint16_t* value) {
     if (data_.size() < 2) return false;
-    *value = static_cast<uint16_t>((data_[0] << 8) | data_[1]);
+    *value = static_cast<uint16_t>((unsigned{data_[0]} << 8) | data_[1]);
     data_ = data_.subspan(2);
     return true;
   }
@@ -184,8 +184,7 @@ ParseStatus ParseBody(std::span<const uint8_t> body, ClientHello* hello) {
       return ParseStatus::kInvalid;
     }
     // RFC 8446 4.2: a type must not appear more than once.
-    if (std::find(hello->extensions.begin(), hello->extensions.end(), type) !=
-        hello->extensions.end()) {
+    if (std::ranges::find(hello->extensions, type) != hello->extensions.end()) {
       return ParseStatus::kInvalid;
     }
     hello->extensions.push_back(type);
@@ -197,7 +196,7 @@ ParseStatus ParseBody(std::span<const uint8_t> body, ClientHello* hello) {
 }  // namespace
 
 bool ClientHello::HasAlpn(std::string_view protocol) const {
-  return std::find(alpn.begin(), alpn.end(), protocol) != alpn.end();
+  return std::ranges::find(alpn, protocol) != alpn.end();
 }
 
 ParseStatus ParseClientHello(std::span<const uint8_t> data,
@@ -216,7 +215,7 @@ ParseStatus ParseClientHello(std::span<const uint8_t> data,
     if (header[0] != kContentTypeHandshake || header[1] != 3) {
       return ParseStatus::kInvalid;
     }
-    const std::size_t record_size = (header[3] << 8) | header[4];
+    const std::size_t record_size = (std::size_t{header[3]} << 8) | header[4];
     if (record_size == 0 || record_size > kMaxRecordSize) {
       return ParseStatus::kInvalid;
     }
@@ -229,8 +228,9 @@ ParseStatus ParseClientHello(std::span<const uint8_t> data,
     if (handshake[0] != kHandshakeTypeClientHello) {
       return ParseStatus::kInvalid;
     }
-    const std::size_t message_size =
-        (handshake[1] << 16) | (handshake[2] << 8) | handshake[3];
+    const std::size_t message_size = (std::size_t{handshake[1]} << 16) |
+                                     (std::size_t{handshake[2]} << 8) |
+                                     handshake[3];
     if (message_size > kMaxClientHelloBytes) return ParseStatus::kInvalid;
     if (handshake.size() - 4 >= message_size) {
       return ParseBody(std::span(handshake).subspan(4, message_size), hello);

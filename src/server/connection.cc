@@ -31,11 +31,13 @@ namespace bot_shield {
 namespace {
 
 using asio::ip::tcp;
+// Used by `co_await (a && b)`; clang-tidy does not see operator lookups.
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using asio::experimental::awaitable_operators::operator&&;
 
 constexpr auto kUse = asio::as_tuple(asio::use_awaitable);
 constexpr std::size_t kHelloReadChunk = 4096;
-constexpr std::size_t kPumpBufferSize = 16 * 1024;
+constexpr std::size_t kPumpBufferSize = std::size_t{16} * 1024;
 
 using ClientTlsStream = asio::ssl::stream<PrefixedStream<tcp::socket>>;
 using UpstreamTlsStream = asio::ssl::stream<tcp::socket>;
@@ -86,7 +88,7 @@ std::string SelectedAlpn(const SSL* ssl) {
   const uint8_t* data = nullptr;
   unsigned size = 0;
   SSL_get0_alpn_selected(ssl, &data, &size);
-  return std::string(reinterpret_cast<const char*>(data), size);
+  return {reinterpret_cast<const char*>(data), size};
 }
 
 std::vector<uint8_t> AlpnWireFormat(std::string_view protocol) {

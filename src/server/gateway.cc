@@ -24,7 +24,7 @@ using asio::ip::tcp;
 
 constexpr int kListenBacklog = 4096;
 
-void LogUnhandled(std::exception_ptr error) {
+void LogUnhandled(const std::exception_ptr& error) {
   if (!error) return;
   try {
     std::rethrow_exception(error);
@@ -78,8 +78,8 @@ asio::awaitable<void> AcceptLoop(tcp::acceptor& acceptor, bool https,
       co_await pause.async_wait(kUse);
       continue;
     }
-    if (static_cast<std::size_t>(metrics.connections_active.Get()) >=
-        context.config->max_connections) {
+    if (std::cmp_greater_equal(metrics.connections_active.Get(),
+                               context.config->max_connections)) {
       metrics.rejected_connection_limit.Inc();
       continue;  // `socket` closes here.
     }
@@ -117,11 +117,11 @@ bool ResolveEndpoint(const Endpoint& endpoint, tcp::endpoint* out,
   return true;
 }
 
-Worker::Worker(int index, const GatewayContext& shared, const Config& config)
+Worker::Worker(int index, GatewayContext shared, const Config& config)
     : index_(index),
       io_context_(1),
       upstream_tls_(asio::ssl::context::tls_client),
-      context_(shared) {
+      context_(std::move(shared)) {
   upstream_tls_.set_options(asio::ssl::context::no_tlsv1 |
                             asio::ssl::context::no_tlsv1_1);
   if (config.upstream_tls_verify) {

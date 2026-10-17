@@ -13,20 +13,21 @@ namespace {
 using ::bot_shield::testing::MakeClientHello;
 
 std::vector<uint8_t> Bytes(std::string_view text) {
-  return std::vector<uint8_t>(text.begin(), text.end());
+  return {text.begin(), text.end()};
 }
 
 // Re-encodes the handshake message of a single-record ClientHello as two
 // records split at `split` bytes into the handshake body.
 std::vector<uint8_t> SplitIntoTwoRecords(const std::vector<uint8_t>& hello,
                                          size_t split) {
-  const std::vector<uint8_t> message(hello.begin() + 5, hello.end());
+  const std::span<const uint8_t> message = std::span(hello).subspan(5);
   std::vector<uint8_t> out;
   auto append_record = [&](size_t begin, size_t end) {
     const size_t size = end - begin;
     out.insert(out.end(), {22, 3, 1, static_cast<uint8_t>(size >> 8),
                            static_cast<uint8_t>(size & 0xFF)});
-    out.insert(out.end(), message.begin() + begin, message.begin() + end);
+    const auto fragment = message.subspan(begin, end - begin);
+    out.insert(out.end(), fragment.begin(), fragment.end());
   };
   append_record(0, split);
   append_record(split, message.size());
@@ -103,9 +104,9 @@ TEST(ClientHelloTest, RejectsCorruptedBody) {
   // Drop the last 40 bytes and fix up both length fields, so the record is
   // well-formed but the extensions block claims more data than present.
   constexpr size_t kCut = 40;
-  const size_t record_size = ((bytes[3] << 8) | bytes[4]) - kCut;
+  const size_t record_size = ((size_t{bytes[3]} << 8) | bytes[4]) - kCut;
   const size_t message_size =
-      ((bytes[6] << 16) | (bytes[7] << 8) | bytes[8]) - kCut;
+      ((size_t{bytes[6]} << 16) | (size_t{bytes[7]} << 8) | bytes[8]) - kCut;
   bytes[3] = static_cast<uint8_t>(record_size >> 8);
   bytes[4] = static_cast<uint8_t>(record_size & 0xFF);
   bytes[6] = static_cast<uint8_t>(message_size >> 16);

@@ -1,9 +1,14 @@
-# Static analysis and Google C++ Style naming. Run via `cmake --build build
-# --target tidy` or configure with -DBOT_SHIELD_CLANG_TIDY=ON.
+# Static analysis and Google C++ Style naming. Run via
+# `cmake --build build --target tidy` or configure with
+# -DBOT_SHIELD_CLANG_TIDY=ON.
+#
+# bugprone-signed-bitwise is off: it fires on every uint8_t operand (promoted
+# to int) in byte-level parsing.
 Checks: >
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-signed-bitwise,
   google-*,
   misc-definitions-in-headers,
   misc-misplaced-const,

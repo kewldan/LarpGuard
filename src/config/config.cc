@@ -8,6 +8,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <sstream>
+#include <utility>
 
 #include "common/host.h"
 
@@ -16,8 +17,11 @@ namespace {
 
 bool ParseUnsigned(std::string_view text, uint64_t* value) {
   if (text.empty()) return false;
-  const char* end = text.data() + text.size();
-  auto [ptr, ec] = std::from_chars(text.data(), end, *value);
+  const char* begin =
+      text.data();  // NOLINT(bugprone-suspicious-stringview-data-usage):
+                    // from_chars takes a range.
+  const char* end = begin + text.size();
+  auto [ptr, ec] = std::from_chars(begin, end, *value);
   return ec == std::errc() && ptr == end;
 }
 
@@ -31,7 +35,7 @@ bool CheckKeys(const YAML::Node& node, std::string_view section,
   }
   for (const auto& item : node) {
     const auto key = item.first.as<std::string>();
-    if (std::find(allowed.begin(), allowed.end(), key) == allowed.end()) {
+    if (std::ranges::find(allowed, key) == allowed.end()) {
       *error = section.empty()
                    ? std::format("unknown key '{}'", key)
                    : std::format("{}: unknown key '{}'", section, key);
@@ -106,8 +110,9 @@ bool ParseTraefik(const YAML::Node& node, Config* config, std::string* error) {
                  error)) {
     return false;
   }
-  if (node["acme_json"])
+  if (node["acme_json"]) {
     config->acme_json = node["acme_json"].as<std::string>();
+  }
   if (node["proxy_protocol"]) {
     config->proxy_protocol = node["proxy_protocol"].as<bool>();
   }
@@ -229,14 +234,16 @@ bool ParseDuration(std::string_view text, std::chrono::milliseconds* duration) {
     int64_t millis;
   };
   // "ms" must be tried before "m" and "s".
-  static constexpr Unit kUnits[] = {
-      {"ms", 1}, {"s", 1000}, {"m", 60 * 1000}, {"h", 60 * 60 * 1000}};
+  static constexpr Unit kUnits[] = {{"ms", 1},
+                                    {"s", 1000},
+                                    {"m", int64_t{60} * 1000},
+                                    {"h", int64_t{60} * 60 * 1000}};
   for (const Unit& unit : kUnits) {
     if (!text.ends_with(unit.suffix)) continue;
     uint64_t value = 0;
     if (!ParseUnsigned(text.substr(0, text.size() - unit.suffix.size()),
                        &value) ||
-        value > static_cast<uint64_t>(INT64_MAX / unit.millis)) {
+        std::cmp_greater(value, INT64_MAX / unit.millis)) {
       return false;
     }
     *duration =

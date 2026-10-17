@@ -100,7 +100,7 @@ std::shared_ptr<const CertEntry> CertSnapshot::Find(
   return nullptr;
 }
 
-void CertSnapshot::Add(std::shared_ptr<const CertEntry> entry) {
+void CertSnapshot::Add(const std::shared_ptr<const CertEntry>& entry) {
   for (const std::string& name : entry->names) {
     if (name.starts_with("*.")) {
       Insert(&wildcard_, name.substr(2), entry);
@@ -121,8 +121,8 @@ void CertSnapshot::Insert(Index* index, std::string key,
 
 bool BuildCertEntry(std::string_view cert_pem, std::string_view key_pem,
                     CertEntry* entry, std::string* error) {
-  bssl::UniquePtr<BIO> cert_bio(
-      BIO_new_mem_buf(cert_pem.data(), static_cast<long>(cert_pem.size())));
+  bssl::UniquePtr<BIO> cert_bio(BIO_new_mem_buf(
+      cert_pem.data(), static_cast<ossl_ssize_t>(cert_pem.size())));
   bssl::UniquePtr<X509> leaf(
       PEM_read_bio_X509(cert_bio.get(), nullptr, nullptr, nullptr));
   if (!leaf) {
@@ -136,8 +136,8 @@ bool BuildCertEntry(std::string_view cert_pem, std::string_view key_pem,
   }
   ERR_clear_error();  // PEM_read_bio_X509 reports the end of input as error.
 
-  bssl::UniquePtr<BIO> key_bio(
-      BIO_new_mem_buf(key_pem.data(), static_cast<long>(key_pem.size())));
+  bssl::UniquePtr<BIO> key_bio(BIO_new_mem_buf(
+      key_pem.data(), static_cast<ossl_ssize_t>(key_pem.size())));
   bssl::UniquePtr<EVP_PKEY> key(
       PEM_read_bio_PrivateKey(key_bio.get(), nullptr, nullptr, nullptr));
   if (!key) {
@@ -223,7 +223,7 @@ bool ParseAcmeJson(std::string_view json, CertSnapshot* snapshot,
         warnings->push_back(where + ": certificate has no DNS names");
         continue;
       }
-      snapshot->Add(std::move(entry));
+      snapshot->Add(entry);
     }
   }
   return true;
@@ -232,12 +232,12 @@ bool ParseAcmeJson(std::string_view json, CertSnapshot* snapshot,
 CertStore::CertStore() : snapshot_(std::make_shared<CertSnapshot>()) {}
 
 std::shared_ptr<const CertSnapshot> CertStore::snapshot() const {
-  std::lock_guard lock(mutex_);
+  std::scoped_lock lock(mutex_);
   return snapshot_;
 }
 
 void CertStore::set_snapshot(std::shared_ptr<const CertSnapshot> snapshot) {
-  std::lock_guard lock(mutex_);
+  std::scoped_lock lock(mutex_);
   snapshot_ = std::move(snapshot);
 }
 

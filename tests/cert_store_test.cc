@@ -60,7 +60,8 @@ TEST(CertStoreTest, ParsesAcmeJsonAndLooksUpNames) {
 
 TEST(CertStoreTest, LaterExpiryWinsOnDuplicateNames) {
   const auto short_lived = MakeCertificate({"dup.test"}, 3600);
-  const auto long_lived = MakeCertificate({"dup.test"}, 90L * 24 * 3600);
+  const auto long_lived =
+      MakeCertificate({"dup.test"}, int64_t{90} * 24 * 3600);
   CertSnapshot snapshot;
   std::vector<std::string> warnings;
   std::string error;

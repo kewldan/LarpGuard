@@ -39,7 +39,7 @@ enum class ParseStatus {
 
 // Upper bound on the bytes buffered while waiting for a complete ClientHello.
 // Post-quantum key shares make ~2 KB hellos common; 32 KB leaves headroom.
-inline constexpr std::size_t kMaxClientHelloBytes = 32 * 1024;
+inline constexpr std::size_t kMaxClientHelloBytes = std::size_t{32} * 1024;
 
 // Parses a ClientHello from the first bytes of a connection. The handshake
 // message may be split across several TLS records and several reads.

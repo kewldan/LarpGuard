@@ -23,7 +23,7 @@ namespace bot_shield {
 // no state is shared on the hot path.
 class Worker {
  public:
-  Worker(int index, const GatewayContext& shared, const Config& config);
+  Worker(int index, GatewayContext shared, const Config& config);
 
   Worker(const Worker&) = delete;
   Worker& operator=(const Worker&) = delete;

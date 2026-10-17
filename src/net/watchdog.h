@@ -29,7 +29,7 @@ class Watchdog : public std::enable_shared_from_this<Watchdog> {
 
   void Touch() { last_activity_ = Clock::now(); }
   // Disarms the watchdog; `on_expire` will not be called afterwards.
-  void Stop();
+  void Stop() noexcept;
   bool expired() const { return expired_; }
 
  private:

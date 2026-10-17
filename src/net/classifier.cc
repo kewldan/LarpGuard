@@ -77,10 +77,10 @@ RouteDecision Classifier::Classify(ParseStatus status, const ClientHello& hello,
 }
 
 bool Classifier::IsPassthroughHost(std::string_view host) const {
-  return std::any_of(passthrough_hosts_.begin(), passthrough_hosts_.end(),
-                     [host](const std::string& pattern) {
-                       return HostMatches(pattern, host);
-                     });
+  return std::ranges::any_of(passthrough_hosts_,
+                             [host](const std::string& pattern) {
+                               return HostMatches(pattern, host);
+                             });
 }
 
 }  // namespace bot_shield

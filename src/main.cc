@@ -4,6 +4,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <exception>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -60,9 +61,7 @@ int ParseArgs(int argc, char** argv, Options* options) {
   return -1;
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
+int Run(int argc, char** argv) {
   using bot_shield::log::Error;
   using bot_shield::log::Info;
 
@@ -152,4 +151,18 @@ int main(int argc, char** argv) {
   watcher.Stop();
   Info("stopped");
   return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  try {
+    return Run(argc, argv);
+  } catch (const std::exception& e) {
+    // Plain stdio: nothing in a handler of last resort may throw again.
+    std::fprintf(stderr, "fatal: %s\n", e.what());
+  } catch (...) {
+    std::fputs("fatal: unknown exception\n", stderr);
+  }
+  return 1;
 }

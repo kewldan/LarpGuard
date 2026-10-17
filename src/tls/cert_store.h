@@ -31,7 +31,7 @@ class CertSnapshot {
 
   // Indexes `entry` under each of its names. On a name collision the entry
   // with the later expiry wins.
-  void Add(std::shared_ptr<const CertEntry> entry);
+  void Add(const std::shared_ptr<const CertEntry>& entry);
 
   std::size_t certificate_count() const { return certificate_count_; }
   std::size_t name_count() const { return exact_.size() + wildcard_.size(); }

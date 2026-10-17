@@ -19,7 +19,7 @@ std::string BioContents(BIO* bio) {
   const uint8_t* data = nullptr;
   size_t size = 0;
   BIO_mem_contents(bio, &data, &size);
-  return std::string(reinterpret_cast<const char*>(data), size);
+  return {reinterpret_cast<const char*>(data), size};
 }
 
 void Check(bool ok, const char* what) {
@@ -29,7 +29,7 @@ void Check(bool ok, const char* what) {
 }  // namespace
 
 TestCertificate MakeCertificate(const std::vector<std::string>& dns_names,
-                                long valid_seconds) {
+                                int64_t valid_seconds) {
   bssl::UniquePtr<EC_KEY> ec_key(
       EC_KEY_new_by_curve_name(NID_X9_62_prime256v1));
   Check(ec_key && EC_KEY_generate_key(ec_key.get()), "EC key");
@@ -127,7 +127,7 @@ std::vector<uint8_t> MakeClientHello(std::string_view server_name,
   SSL_set_connect_state(ssl.get());
   SSL_do_handshake(ssl.get());  // Stops waiting for the ServerHello.
   const std::string bytes = BioContents(write_bio);
-  return std::vector<uint8_t>(bytes.begin(), bytes.end());
+  return {bytes.begin(), bytes.end()};
 }
 
 }  // namespace bot_shield::testing

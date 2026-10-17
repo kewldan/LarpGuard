@@ -35,7 +35,7 @@ class AcmeWatcher {
 
  private:
   struct FileStamp {
-    std::filesystem::file_time_type mtime{};
+    std::filesystem::file_time_type mtime;
     std::uintmax_t size = 0;
 
     friend bool operator==(const FileStamp&, const FileStamp&) = default;

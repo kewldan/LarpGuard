@@ -21,10 +21,14 @@ Watchdog::Watchdog(const asio::any_io_executor& executor,
       on_expire_(std::move(on_expire)),
       last_activity_(Clock::now()) {}
 
-void Watchdog::Stop() {
+void Watchdog::Stop() noexcept {
   stopped_ = true;
   on_expire_ = nullptr;
-  timer_.cancel();
+  try {
+    timer_.cancel();
+  } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch)
+    // The pending wait still finds stopped_ set and does nothing.
+  }
 }
 
 void Watchdog::Arm(Clock::duration delay) {

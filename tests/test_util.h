@@ -16,7 +16,8 @@ struct TestCertificate {
 
 // Self-signed P-256 certificate with the given DNS SANs.
 TestCertificate MakeCertificate(const std::vector<std::string>& dns_names,
-                                long valid_seconds = 30L * 24 * 3600);
+                                int64_t valid_seconds = int64_t{30} * 24 *
+                                                        3600);
 
 std::string Base64(std::string_view data);
 

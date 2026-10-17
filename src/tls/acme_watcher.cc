@@ -77,7 +77,7 @@ void AcmeWatcher::Start() {
 
 void AcmeWatcher::Stop() {
   {
-    std::lock_guard lock(mutex_);
+    std::scoped_lock lock(mutex_);
     stopping_ = true;
   }
   wakeup_.notify_all();

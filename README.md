@@ -55,6 +55,22 @@ python3 tests/e2e/run_e2e.py build/src/bot-shield
 
 Сборка с санитайзерами: `-DBOT_SHIELD_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`.
 
+## Стиль и статический анализ
+
+Код следует Google C++ Style Guide: `.clang-format` (`BasedOnStyle: Google`) и
+`.clang-tidy` (bugprone, google, modernize, performance и правила именования).
+
+```bash
+cmake --build build --target format-check
+```
+
+```bash
+cmake --build build --target tidy
+```
+
+`--target format` переформатирует исходники на месте, а
+`-DBOT_SHIELD_CLANG_TIDY=ON` включает clang-tidy прямо при компиляции.
+
 ## Запуск
 
 ```bash

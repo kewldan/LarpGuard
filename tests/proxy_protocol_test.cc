@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <span>
 #include <vector>
 
 namespace bot_shield {
@@ -10,13 +12,13 @@ namespace {
 using asio::ip::make_address;
 using asio::ip::tcp;
 
-const std::vector<uint8_t> kSignature = {0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D,
-                                         0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
+constexpr std::array<uint8_t, 12> kSignature = {
+    0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A};
 
 std::vector<uint8_t> Slice(const std::vector<uint8_t>& data, size_t begin,
                            size_t size) {
-  return std::vector<uint8_t>(data.begin() + begin,
-                              data.begin() + begin + size);
+  const auto bytes = std::span(data).subspan(begin, size);
+  return {bytes.begin(), bytes.end()};
 }
 
 TEST(ProxyProtocolTest, EncodesIpv4) {
@@ -24,7 +26,8 @@ TEST(ProxyProtocolTest, EncodesIpv4) {
       EncodeProxyV2(tcp::endpoint(make_address("203.0.113.7"), 51234),
                     tcp::endpoint(make_address("10.0.0.1"), 443), "");
   ASSERT_EQ(header.size(), 16u + 12u);
-  EXPECT_EQ(Slice(header, 0, 12), kSignature);
+  EXPECT_EQ(Slice(header, 0, 12),
+            std::vector<uint8_t>(kSignature.begin(), kSignature.end()));
   EXPECT_EQ(header[12], 0x21);  // v2, PROXY
   EXPECT_EQ(header[13], 0x11);  // TCP over IPv4
   EXPECT_EQ(header[14], 0);
