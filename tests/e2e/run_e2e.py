@@ -143,7 +143,8 @@ class FakeTraefik:
                 conn = self.context.wrap_socket(conn, server_side=True)
                 alpn = conn.selected_alpn_protocol() or "-"
                 sni = getattr(conn, "sni_seen", "") or "-"
-            line = conn.recv(1024).split(b"\n")[0].decode()
+            line = conn.recv(1024).split(b"\n")[0].decode(errors="replace")
+            line = line.strip().replace(" ", "_") or "-"
             reply = (f"upstream={'tls' if tls else 'plain'} src={src}:{src_port} "
                      f"sni={sni} alpn={alpn} authority={authority or '-'} "
                      f"got={line}\n")
@@ -154,11 +155,88 @@ class FakeTraefik:
             conn.close()
 
 
+class FakeNats:
+    """Minimal NATS server: INFO, PING/PONG, collects PUB payloads as JSON."""
+
+    def __init__(self):
+        self.port = free_port()
+        self.events = []
+        self.lock = threading.Lock()
+        listener = socket.create_server(("127.0.0.1", self.port))
+        threading.Thread(target=self._accept, args=(listener,),
+                         daemon=True).start()
+
+    def _accept(self, listener):
+        while True:
+            conn, _ = listener.accept()
+            threading.Thread(target=self._serve, args=(conn,),
+                             daemon=True).start()
+
+    def _serve(self, conn):
+        conn.sendall(b'INFO {"server_id":"e2e","max_payload":1048576}\r\n')
+        reader = conn.makefile("rb")
+        while True:
+            line = reader.readline()
+            if not line:
+                return
+            line = line.rstrip(b"\r\n")
+            if line == b"PING":
+                conn.sendall(b"PONG\r\n")
+            elif line.startswith(b"PUB "):
+                _, subject, size = line.split(b" ")
+                payload = reader.read(int(size))
+                reader.read(2)
+                with self.lock:
+                    self.events.append((subject.decode(),
+                                        json.loads(payload)))
+
+    def find(self, subject, predicate, timeout=3):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self.lock:
+                for event_subject, event in self.events:
+                    if event_subject == subject and predicate(event):
+                        return event
+            time.sleep(0.05)
+        raise AssertionError(f"no matching {subject} event")
+
+    def payloads(self):
+        with self.lock:
+            return [json.dumps(event) for _, event in self.events]
+
+
+def hpack_literal(name, value):
+    """Literal header field without indexing, new name, no Huffman."""
+    out = b"\x00"
+    for text in (name, value):
+        data = text.encode()
+        assert len(data) < 127
+        out += bytes([len(data)]) + data
+    return out
+
+
+def h2_frame(kind, flags, stream, payload):
+    return (struct.pack("!I", len(payload))[1:] + bytes([kind, flags]) +
+            struct.pack("!I", stream) + payload)
+
+
+def h2_client_request(authority, path):
+    headers = b"".join(hpack_literal(n, v) for n, v in [
+        (":method", "GET"), (":authority", authority), (":scheme", "https"),
+        (":path", path), ("user-agent", "e2e-h2"),
+        ("accept-language", "de-DE,de;q=0.9")])
+    settings = struct.pack("!HI", 1, 65536) + struct.pack("!HI", 4, 6291456)
+    return (b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" +
+            h2_frame(0x4, 0, 0, settings) +
+            h2_frame(0x8, 0, 0, struct.pack("!I", 15663105)) +
+            h2_frame(0x1, 0x5, 1, headers))
+
+
 def parse_reply(reply):
     return dict(item.split("=", 1) for item in reply.strip().split(" "))
 
 
-def tls_request(port, server_name, cafile, alpn=None):
+def tls_request(port, server_name, cafile, alpn=None, payload=b"hello\n"):
     context = ssl.create_default_context(cafile=cafile)
     if alpn:
         context.set_alpn_protocols(alpn)
@@ -166,7 +244,7 @@ def tls_request(port, server_name, cafile, alpn=None):
     with context.wrap_socket(raw, server_hostname=server_name) as tls:
         local_port = tls.getsockname()[1]
         negotiated = tls.selected_alpn_protocol()
-        tls.sendall(b"hello\n")
+        tls.sendall(payload)
         reply = tls.recv(4096).decode()
     fields = parse_reply(reply)
     return fields, local_port, negotiated
@@ -194,6 +272,9 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     binary = os.path.abspath(sys.argv[1])
+    version = subprocess.run([binary, "--version"], capture_output=True,
+                             text=True, check=True).stdout
+    ja4plus = "(ja4plus)" in version
     workdir = tempfile.mkdtemp(prefix="bot-shield-e2e-")
 
     gw_a = make_cert(workdir, "gw-a", ["a.test", "www.a.test"])
@@ -205,6 +286,7 @@ def main():
     write_atomic(acme_path, acme_json([(*gw_a, "a.test"), (*gw_w, "*.w.test")]))
 
     traefik = FakeTraefik(*upstream)
+    nats = FakeNats()
     https_port, http_port, metrics_port = free_port(), free_port(), free_port()
     config_path = os.path.join(workdir, "bot-shield.yaml")
     with open(config_path, "w") as f:
@@ -221,6 +303,10 @@ traefik:
 passthrough_hosts: [grpc.a.test]
 timeouts:
   client_hello: 1s
+events:
+  nats: nats://127.0.0.1:{nats.port}
+  subject_prefix: e2e.events
+  ip_salt: e2e-salt
 metrics:
   listen: 127.0.0.1:{metrics_port}
 log_level: debug
@@ -356,6 +442,69 @@ log_level: debug
             t.join()
         expect(not errors, errors[:3])
 
+    def events_http11_request():
+        request = (b"GET /items/42?token=secret HTTP/1.1\r\nHost: a.test\r\n"
+                   b"User-Agent: e2e-agent\r\nAccept-Language: en-US\r\n\r\n")
+        fields, local_port, _ = tls_request(https_port, "a.test", gw_a_cert,
+                                            ["http/1.1"], request)
+        expect(fields["got"] == "GET_/items/42?token=secret_HTTP/1.1", fields)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("user_agent") == "e2e-agent")
+        expect(event["method"] == "GET", event)
+        expect(event["host"] == "a.test", event)
+        expect(event["path_group"] == "/items/:n", event)
+        expect(event["header_names"] == ["Host", "User-Agent",
+                                         "Accept-Language"], event)
+        expect(event["ja4"].startswith("t13d"), event)
+        expect(event["ip_prefix"] == "127.0.0.0/24", event)
+        if sys.platform.startswith("linux"):
+            expect(event["tcp_fp"].startswith("4:64:"), event)
+            expect(("ja4t" in event) == ja4plus, event)
+        expect(("ja4h" in event) == ja4plus, event)
+        conn = nats.find("e2e.events.conn",
+                         lambda e: e["conn_id"] == event["conn_id"] and
+                         e["instance"] == event["instance"])
+        expect(conn["route"] == "terminate", conn)
+        expect(conn["alpn"] == "http/1.1", conn)
+        expect(conn["requests"] == 1, conn)
+        expect(conn["bytes_in"] == len(request), conn)
+
+    def events_h2_request():
+        tls_request(https_port, "a.test", gw_a_cert, ["h2"],
+                    h2_client_request("a.test", "/h2/7"))
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("user_agent") == "e2e-h2")
+        expect(event["http_version"] == "2", event)
+        expect(event["path_group"] == "/h2/:n", event)
+        expect(event["h2_fp"] == "1:65536;4:6291456|15663105|0|m,a,s,p", event)
+        expect(event["pseudo_order"] == "m,a,s,p", event)
+        if ja4plus:
+            expect(event["ja4h"].startswith("ge20nn02dede_"), event)
+
+    def events_plain_http_and_passthrough():
+        with socket.create_connection(("127.0.0.1", http_port),
+                                      timeout=5) as s:
+            s.sendall(b"GET /plain HTTP/1.1\r\nHost: a.test\r\n"
+                      b"User-Agent: e2e-plain\r\n\r\n")
+            s.recv(4096)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("user_agent") == "e2e-plain")
+        conn = nats.find("e2e.events.conn",
+                         lambda e: e["conn_id"] == event["conn_id"])
+        expect(conn["listener"] == "http", conn)
+        expect(conn["reason"] == "plain_http", conn)
+        # Passthrough TLS: fingerprints only, no requests.
+        nats.find("e2e.events.conn",
+                  lambda e: e.get("sni") == "b.test" and
+                  e["route"] == "passthrough" and "ja4" in e)
+        nats.find("e2e.events.conn",
+                  lambda e: e["reason"] == "not_tls" and e["route"] == "reject")
+
+    def events_keep_secrets():
+        for payload in nats.payloads():
+            expect("secret" not in payload, payload)
+            expect("127.0.0.1" not in payload, payload)
+
     def metrics_exposed():
         body = urllib.request.urlopen(metrics_url + "/metrics",
                                       timeout=2).read().decode()
@@ -374,6 +523,9 @@ log_level: debug
         expect(values['bot_shield_acme_reloads_total{result="error"}'] >= 1,
                "acme error count")
         expect(values["bot_shield_certificates"] == 3, "certificate gauge")
+        expect(values["bot_shield_nats_connected"] == 1, "nats connected")
+        expect(values['bot_shield_events_total{result="published"}'] >= 50,
+               "events published")
 
     for name, fn in [
         ("terminate http/1.1 with PROXY v2", terminate_http11),
@@ -389,6 +541,11 @@ log_level: debug
         ("acme.json reload", acme_reload),
         ("broken acme.json keeps certificates", broken_acme_keeps_certificates),
         ("50 concurrent connections", concurrent_connections),
+        ("events: HTTP/1.1 request", events_http11_request),
+        ("events: HTTP/2 request", events_h2_request),
+        ("events: plain HTTP, passthrough, reject",
+         events_plain_http_and_passthrough),
+        ("events: no secrets or full IPs", events_keep_secrets),
         ("metrics", metrics_exposed),
     ]:
         checks.run(name, fn)

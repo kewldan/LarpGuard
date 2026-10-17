@@ -3,15 +3,21 @@ add_executable(bot_shield_tests
   classifier_test.cc
   client_hello_test.cc
   config_test.cc
+  events_test.cc
   host_test.cc
+  http_tap_test.cc
+  ja4_test.cc
+  nats_publisher_test.cc
   prefixed_stream_test.cc
   proxy_protocol_test.cc
+  tcp_syn_test.cc
   test_util.cc
 )
 target_compile_options(bot_shield_tests PRIVATE -Wall -Wextra)
 target_link_libraries(bot_shield_tests PRIVATE
   bot_shield_core
   nlohmann_json::nlohmann_json
+  nghttp2
   GTest::gtest_main
 )
 

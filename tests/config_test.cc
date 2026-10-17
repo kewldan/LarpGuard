@@ -103,6 +103,35 @@ log_level: debug
   EXPECT_EQ(config.log_level, log::Level::kDebug);
 }
 
+TEST(ConfigTest, ParsesEvents) {
+  const char* yaml = R"(
+events:
+  nats: nats://127.0.0.1:4222
+  subject_prefix: bs.ev
+  token: secret
+  max_queue: 10
+  ip_salt: pepper
+  requests: false
+)";
+  Config config;
+  std::string error;
+  ASSERT_TRUE(ParseConfig(yaml, &config, &error)) << error;
+  ASSERT_TRUE(config.events_nats.has_value());
+  EXPECT_EQ(*config.events_nats, (Endpoint{"127.0.0.1", 4222}));
+  EXPECT_EQ(config.events_subject_prefix, "bs.ev");
+  EXPECT_EQ(config.events_token, "secret");
+  EXPECT_EQ(config.events_max_queue, 10u);
+  EXPECT_EQ(config.events_ip_salt, "pepper");
+  EXPECT_FALSE(config.events_requests);
+
+  Config disabled;
+  ASSERT_TRUE(ParseConfig("events: {nats: \"\"}\n", &disabled, &error));
+  EXPECT_FALSE(disabled.events_nats.has_value());
+  EXPECT_FALSE(
+      ParseConfig("events: {subject_prefix: \"a.*\"}\n", &disabled, &error));
+  EXPECT_FALSE(ParseConfig("events: {max_queue: 0}\n", &disabled, &error));
+}
+
 TEST(ConfigTest, RejectsUnknownKeys) {
   Config config;
   std::string error;

@@ -7,6 +7,8 @@
 #include <string>
 
 #include "config/config.h"
+#include "events/event_sink.h"
+#include "events/events.h"
 #include "net/classifier.h"
 #include "tls/cert_store.h"
 
@@ -22,6 +24,9 @@ struct GatewayContext {
   asio::ip::tcp::endpoint upstream_http;
   // Client-side TLS context for connections to Traefik (per worker).
   asio::ssl::context* upstream_tls = nullptr;
+  // Analytics events; null when disabled.
+  EventSink* events = nullptr;
+  const EventSettings* event_settings = nullptr;
 };
 
 // Port 443: reads the ClientHello, then terminates TLS or passes the

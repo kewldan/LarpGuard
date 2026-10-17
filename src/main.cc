@@ -1,3 +1,4 @@
+#include <openssl/rand.h>
 #include <sys/signal.h>
 
 #include <asio/io_context.hpp>
@@ -5,16 +6,22 @@
 #include <asio/steady_timer.hpp>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
+#include "common/hash.h"
 #include "common/log.h"
 #include "common/metrics.h"
 #include "config/config.h"
+#include "events/events.h"
+#include "events/nats_publisher.h"
 #include "server/gateway.h"
 #include "tls/acme_watcher.h"
 #include "tls/cert_store.h"
@@ -22,6 +29,11 @@
 namespace {
 
 constexpr std::string_view kVersion = "0.1.0";
+#if BOT_SHIELD_FOXIO
+constexpr const char* kFeatures = "ja4plus";
+#else
+constexpr const char* kFeatures = "no-ja4plus";
+#endif
 constexpr const char* kDefaultConfigPath = "/etc/bot-shield/bot-shield.yaml";
 
 void PrintUsage() {
@@ -49,8 +61,8 @@ int ParseArgs(int argc, char** argv, Options* options) {
     } else if (arg == "--check-config") {
       options->check_config = true;
     } else if (arg == "--version") {
-      std::printf("bot-shield %.*s\n", static_cast<int>(kVersion.size()),
-                  kVersion.data());
+      std::printf("bot-shield %.*s (%s)\n", static_cast<int>(kVersion.size()),
+                  kVersion.data(), kFeatures);
       return 0;
     } else if (arg == "-h" || arg == "--help") {
       PrintUsage();
@@ -62,6 +74,12 @@ int ParseArgs(int argc, char** argv, Options* options) {
     }
   }
   return -1;
+}
+
+std::string RandomHex(std::size_t bytes) {
+  std::string raw(bytes, '\0');
+  RAND_bytes(reinterpret_cast<uint8_t*>(raw.data()), raw.size());
+  return bot_shield::HexEncode(raw);
 }
 
 int Run(int argc, char** argv) {
@@ -96,7 +114,32 @@ int Run(int argc, char** argv) {
   }
   watcher.Start();
 
-  bot_shield::Gateway gateway(config, &certificates);
+  bot_shield::EventSettings event_settings;
+  event_settings.instance = RandomHex(8);
+  event_settings.ip_salt =
+      config.events_ip_salt.empty() ? RandomHex(32) : config.events_ip_salt;
+  event_settings.requests = config.events_requests;
+  std::unique_ptr<bot_shield::NatsPublisher> publisher;
+  if (config.events_nats) {
+    bot_shield::NatsSettings nats;
+    if (!bot_shield::ResolveEndpoint(*config.events_nats, &nats.server,
+                                     &error)) {
+      Error("events: {}", error);
+      return 1;
+    }
+    nats.subject_prefix = config.events_subject_prefix;
+    nats.token = config.events_token;
+    nats.user = config.events_user;
+    nats.password = config.events_password;
+    nats.max_queue = config.events_max_queue;
+    publisher = std::make_unique<bot_shield::NatsPublisher>(std::move(nats));
+    publisher->Start();
+    Info("events: publishing to {} as {}.*", config.events_nats->ToString(),
+         config.events_subject_prefix);
+  }
+
+  bot_shield::Gateway gateway(config, &certificates, publisher.get(),
+                              &event_settings);
   if (!gateway.Start(&error)) {
     Error("startup: {}", error);
     return 1;
@@ -151,6 +194,7 @@ int Run(int argc, char** argv) {
 
   control.run();
   gateway.Join();
+  if (publisher) publisher->Stop();
   watcher.Stop();
   Info("stopped");
   return 0;

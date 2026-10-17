@@ -40,6 +40,24 @@ timeouts:
 
 max_connections: 100000
 
+events:
+  # NATS server for analytics events (subjects <subject_prefix>.conn and
+  # <subject_prefix>.req, JSON). "" disables events and the HTTP taps.
+  nats: ""
+  # nats: "nats://127.0.0.1:4222"
+  subject_prefix: botshield.events
+  # Optional NATS auth: token, or user + password.
+  token: ""
+  user: ""
+  password: ""
+  # Events buffered while NATS is slow or down; the rest is dropped.
+  max_queue: 100000
+  # Key for IP hashes in events. "" = random per start (hashes then do not
+  # match across restarts). Full client IPs are never sent.
+  ip_salt: ""
+  # One event per HTTP request, read passively from decrypted traffic.
+  requests: true
+
 metrics:
   # Prometheus /metrics and /health. "" disables.
   listen: "127.0.0.1:9900"

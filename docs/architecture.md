@@ -226,12 +226,29 @@ accept ─► TCP_SAVED_SYN ─► peek ClientHello ─► классифика�
 
 | Уровень   | Что собираем                                                                 | Отпечаток            |
 |-----------|-------------------------------------------------------------------------------|----------------------|
-| TCP/IP    | TTL (с нормализацией к 64/128/255), window, MSS, window scale, порядок опций, DF | JA4T + p0f-подобная ОС |
+| TCP/IP    | TTL (с нормализацией к 64/128/255), window, MSS, window scale, порядок опций, DF, ECN | свой `tcp_fp` (+ JA4T, ADR-014) |
 | TLS       | версия, cipher suites, порядок расширений, GREASE, supported_groups, sig_algs, ALPN, key_share, ECH | JA4 (+ JA3 для совместимости) |
 | HTTP/2    | SETTINGS (порядок и значения), WINDOW_UPDATE, PRIORITY/priority frames, порядок псевдозаголовков | H2-fp (формат Akamai) |
-| HTTP/1.1  | порядок и регистр заголовков, `Connection`, `Accept-*`                        | JA4H                 |
+| HTTP/1.1  | порядок и регистр заголовков, `Connection`, `Accept-*`                        | свой `header_fp` (+ JA4H, ADR-014) |
 | Заголовки | `User-Agent`, `sec-ch-ua*`, `sec-fetch-*`, `accept-language`, `accept-encoding` | согласованность      |
 | Сеть      | ASN, тип (датацентр, хостинг, мобильный, резидентный), Tor, известные прокси  | репутация            |
+
+Форматы (реализация в `src/fp/`):
+
+- `tcp_fp` — `<ip>:<начальный TTL>:<window>:<mss>:<wscale>:<опции>:<флаги>`,
+  опции буквами в порядке на проводе, например `4:64:64240:1460:7:MSTNW:df`.
+- `ja4` / `ja4_r` — JA4 по спецификации FoxIO (BSD-3), сверен с эталоном
+  `t13d1516h2_8daaf6152771_e5627efa2ab1`.
+- `h2_fp` — формат Akamai: `SETTINGS|WINDOW_UPDATE|PRIORITY|псевдозаголовки`,
+  например `1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p`.
+- `header_fp` — `<версия>:<число заголовков>:<sha256 имён по порядку, 12>`;
+  регистр имён на HTTP/1.x сохраняется.
+- `ja4t`, `ja4h` — только при сборке с `BOT_SHIELD_FOXIO=ON` (ADR-014).
+
+HTTP читается пассивно: копия потока клиент → Traefik идёт в разборщик
+(llhttp для HTTP/1.x, свой разбор кадров + HPACK из nghttp2 для HTTP/2).
+Разборщик ничего не меняет и при любой ошибке, апгрейде (WebSocket) или
+превышении лимитов (64 КБ заголовков, 128 запросов) просто отключается.
 
 TCP SYN берётся через `setsockopt(TCP_SAVE_SYN)` на слушающем сокете и
 `getsockopt(TCP_SAVED_SYN)` после `accept`. Для этого нужен Linux, а
@@ -519,18 +536,27 @@ events:
 
 ## 10. Данные, аналитика, приватность
 
-### 10.1. Событие запроса
+### 10.1. События
 
-```
-ts, request_id, host, method, path_group, status, latency_us,
-ip_prefix, asn, asn_type, country,
-ja4, ja4t, ja4h, h2_fp, ua_family, ua_major, os_claimed, os_tcp,
-token_class, score, class, reasons[], action, would_action (shadow),
-ratelimit_key, ratelimit_remaining
-```
+Два типа, JSON в NATS (`<prefix>.conn`, `<prefix>.req`), схема ClickHouse —
+`deploy/clickhouse/schema.sql`:
 
-Сериализация — protobuf или FlatBuffers в NATS. В ClickHouse данные хранятся
-в `MergeTree` с партиционированием по дню.
+- **conn** — при закрытии соединения: `ts_ms, instance, conn_id, listener,
+  ip_prefix, ip_hash, route, reason, duration_ms, bytes_in, bytes_out,
+  requests, sni, tls_version, alpn_offered, alpn, ja4, ja4_r, tcp_fp, ja4t,
+  h2_fp`. Отправляется для всех маршрутов, включая reject.
+- **req** — на каждый увиденный HTTP-запрос: `ts_ms, instance, conn_id, seq,
+  ip_prefix, ip_hash, http_version, method, host, path_group, header_fp,
+  header_names[], pseudo_order, has_cookie, has_referer, ja4h` + отпечатки
+  соединения + `user_agent, accept*, sec_ch_ua*, sec_fetch_*`.
+
+Пустые поля не передаются. С M2 добавятся `score, class, reasons[], action,
+would_action`; с M3 — поля rate limit; ASN/страна — с IP-базами.
+
+Сериализация — JSON (ADR-010): ClickHouse читает его NATS engine без
+промежуточного сервиса. В ClickHouse события лежат в `MergeTree` с
+партиционированием по дню, рядом — почасовая агрегация по отпечаткам
+(`fp_hourly`) для кластеризации.
 
 ### 10.2. Хранение
 
@@ -619,8 +645,8 @@ ratelimit_key, ratelimit_remaining
 | Этап | Содержание                                                                                          |
 |------|------------------------------------------------------------------------------------------------------|
 | M0 ✅ | Каркас: CMake, event loop, listener, L4-классификатор, passthrough, `acme.json` loader, TLS-терминация с TLS-туннелем в Traefik (ADR-013), PROXY v2, метрики, graceful shutdown. Шлюз прозрачен. |
-| M1   | Пассивные отпечатки (TCP, JA4, JA4H, H2), события в NATS, ClickHouse-схема, shadow mode, `X-Bot-*`. |
-| M2   | Библиотека отпечатков, проверки согласованности, скоринг, правила CEL, действия block/tag/throttle. |
+| M1 ✅ | Пассивные отпечатки (TCP, JA4, H2, порядок заголовков; JA4T/JA4H опционально), события в NATS, ClickHouse-схема. `X-Bot-*` и shadow-решения перенесены в M2 (нужен HTTP-aware прокси, ADR-013). |
+| M2   | HTTP-aware прокси вместо туннеля, библиотека отпечатков, проверки согласованности, скоринг, правила CEL, shadow mode, `X-Bot-*`, действия block/tag/throttle. |
 | M3   | Rate limiter (local → synced/strict), docker-лейблы, `admin/api`.                                    |
 | M4   | JS-челлендж + PoW, токены, хорошие боты (rDNS, Web Bot Auth).                                       |
 | M5   | Поведенческие сигналы, honeypot, tarpit/decoy, офлайн-кластеризация, fail-open watchdog.            |
@@ -651,6 +677,27 @@ ratelimit_key, ratelimit_remaining
 Отложено осознанно: `splice(2)`, пул и HTTP-aware прокси (M2), fail-open
 watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-хостам (пока
 `passthrough_hosts`).
+
+
+### Статус M1
+
+Сделано:
+
+- `fp/tcp_syn` — разбор сохранённого SYN (IPv4/IPv6), свой `tcp_fp`.
+- `fp/ja4` — JA4 и JA4_r, сверены с эталоном FoxIO.
+- `fp/h1_tap`, `fp/h2_tap` — пассивное чтение HTTP/1.x и HTTP/2 (включая
+  CONTINUATION, padding, PRIORITY, динамическую таблицу HPACK), Akamai `h2_fp`.
+- `fp/http_fingerprint` — свой `header_fp`.
+- `fp/foxio/` — JA4T и JA4H за опцией `BOT_SHIELD_FOXIO` (ADR-014).
+- `events/` — JSON-события `conn` и `req`, IP только префиксом и HMAC-хешем,
+  путь без query с нормализацией (`/items/:n`), замена невалидного UTF-8.
+- `events/nats_publisher` — свой NATS-клиент: отдельный поток, ограниченная
+  очередь с отбрасыванием, пакетная запись, PING/PONG, переподключение с
+  backoff; метрики `events_total`, `nats_connected`, `nats_reconnects`.
+- `deploy/clickhouse/schema.sql` — NATS engine → MergeTree (14 дней) и
+  `fp_hourly` (180 дней); проверено на ClickHouse 25.8 + NATS 2.11.
+- Тесты: 70 юнит-тестов, e2e с фейковым NATS (события HTTP/1.1, HTTP/2,
+  plain HTTP, passthrough, reject; нет query и полных IP).
 
 ---
 
@@ -813,13 +860,18 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
 - **Статус:** принято.
 - **Контекст.** Аналитика и кластеризация требуют всех не-`allow` событий и
   сэмпла `allow`, а горячий путь не должен от этого зависеть.
-- **Решение.** Неблокирующая отправка в NATS JetStream из отдельного потока с
+- **Решение.** Неблокирующая отправка в NATS из отдельного потока с
   ограниченным буфером; при переполнении события сбрасываются с метрикой.
-  ClickHouse забирает данные через NATS engine или консьюмер.
+  Клиент свой, минимальный (core-протокол: CONNECT/PUB/PING/PONG), а не
+  `nats.c`. События — JSON: ClickHouse читает их NATS engine напрямую.
+  JetStream-поток на тех же subject'ах можно включить на сервере для
+  буферизации и повторного чтения другими потребителями.
 - **Альтернативы.** *Kafka* — избыточна для одного владельца. *Прямая вставка
   в ClickHouse* — нужна своя буферизация и ретраи в шлюзе.
 - **Последствия.** Две дополнительные сущности в инфраструктуре; обе
-  опциональны для работы шлюза.
+  опциональны для работы шлюза. NATS engine ClickHouse подписан на core
+  NATS: пока ClickHouse лежит, события теряются (это аналитика, не учёт).
+  JSON больше бинарных форматов, но при текущих объёмах это не узкое место.
 
 ### ADR-011. HTTP/3 на входе отложен
 
@@ -868,6 +920,26 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
   каждое клиентское соединение, без переиспользования. На loopback это доли
   миллисекунды, но при большом числе коротких соединений — заметный CPU;
   уходит вместе с туннелем в M2. Заголовки `X-Bot-*` до M2 не передаются.
+
+
+### ADR-014. Свои отпечатки TCP/HTTP, JA4T/JA4H — отдельным модулем
+
+- **Статус:** принято.
+- **Контекст.** JA4 (TLS) распространяется под BSD-3. JA4T и JA4H — под
+  FoxIO License 1.1: бесплатно для защиты своих систем, но монетизация
+  (продажа продукта или сервиса с ними) требует лицензии FoxIO. При этом
+  они совместимы с внешними базами отпечатков.
+- **Решение.** Основа скоринга и библиотеки — свои форматы без ограничений:
+  `tcp_fp`, `header_fp` и открытый Akamai-формат `h2_fp`. JA4 считается
+  всегда. JA4T и JA4H живут в `src/fp/foxio/` и собираются только с
+  `-DBOT_SHIELD_FOXIO=ON` (по умолчанию включено, пока шлюз защищает свои
+  сайты); они пишутся в события дополнительными полями.
+- **Альтернативы.** *Только JA4+* — проще, но привязывает продукт к
+  лицензии. *Только свои форматы* — теряется совместимость с внешними базами.
+- **Последствия.** Сборка с `BOT_SHIELD_FOXIO=OFF` не содержит кода JA4+
+  (проверено: 0 символов `foxio::` в бинарнике). Правила и библиотека
+  отпечатков не должны зависеть от `ja4t`/`ja4h` как от единственного
+  признака.
 
 ---
 

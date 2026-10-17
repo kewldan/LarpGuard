@@ -1,8 +1,17 @@
 add_library(bot_shield_core STATIC
+  common/hash.cc
   common/host.cc
   common/log.cc
   common/metrics.cc
   config/config.cc
+  events/events.cc
+  events/nats_publisher.cc
+  fp/h1_tap.cc
+  fp/h2_tap.cc
+  fp/http_fingerprint.cc
+  fp/http_request.cc
+  fp/ja4.cc
+  fp/tcp_syn.cc
   net/classifier.cc
   net/proxy_protocol.cc
   net/socket_options.cc
@@ -20,13 +29,23 @@ target_compile_options(bot_shield_core PRIVATE -Wall -Wextra)
 target_link_libraries(bot_shield_core
   PUBLIC
     asio
+    llhttp::llhttp
     ssl
     crypto
     Threads::Threads
   PRIVATE
     nlohmann_json::nlohmann_json
     yaml-cpp::yaml-cpp
+    nghttp2
 )
+
+# JA4+ methods under the FoxIO License 1.1 (src/fp/foxio/LICENSE.md).
+if(BOT_SHIELD_FOXIO)
+  target_sources(bot_shield_core PRIVATE fp/foxio/ja4plus.cc)
+  target_compile_definitions(bot_shield_core PUBLIC BOT_SHIELD_FOXIO=1)
+else()
+  target_compile_definitions(bot_shield_core PUBLIC BOT_SHIELD_FOXIO=0)
+endif()
 
 add_executable(bot-shield main.cc)
 target_compile_options(bot-shield PRIVATE -Wall -Wextra)

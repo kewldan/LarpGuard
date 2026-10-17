@@ -110,6 +110,27 @@ std::string Metrics::RenderPrometheus() const {
                "Connections with a captured TCP SYN (Linux only).");
   AppendSample(&out, "bot_shield_syn_captured_total", "", syn_captured.Get());
 
+  AppendHeader(&out, "bot_shield_http_requests_observed_total", "counter",
+               "HTTP requests seen by the passive taps.");
+  AppendSample(&out, "bot_shield_http_requests_observed_total", "",
+               http_requests_observed.Get());
+
+  AppendHeader(&out, "bot_shield_events_total", "counter",
+               "Analytics events by outcome.");
+  AppendSample(&out, "bot_shield_events_total", R"(result="published")",
+               events_published.Get());
+  AppendSample(&out, "bot_shield_events_total", R"(result="dropped")",
+               events_dropped.Get());
+
+  AppendHeader(&out, "bot_shield_nats_connected", "gauge",
+               "1 while connected to NATS.");
+  AppendSample(&out, "bot_shield_nats_connected", "", nats_connected.Get());
+
+  AppendHeader(&out, "bot_shield_nats_reconnects_total", "counter",
+               "NATS reconnect attempts.");
+  AppendSample(&out, "bot_shield_nats_reconnects_total", "",
+               nats_reconnects.Get());
+
   AppendHeader(&out, "bot_shield_certificates", "gauge",
                "Certificates loaded from acme.json.");
   AppendSample(&out, "bot_shield_certificates", "", certificates.Get());

@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "config/config.h"
+#include "events/event_sink.h"
+#include "events/events.h"
 #include "net/classifier.h"
 #include "server/connection.h"
 #include "tls/cert_store.h"
@@ -57,7 +59,9 @@ class Worker {
 
 class Gateway {
  public:
-  Gateway(const Config& config, const CertStore* certificates);
+  // `events` may be null (events disabled); both must outlive the gateway.
+  Gateway(const Config& config, const CertStore* certificates,
+          EventSink* events, const EventSettings* event_settings);
   ~Gateway();
 
   Gateway(const Gateway&) = delete;
@@ -73,6 +77,8 @@ class Gateway {
  private:
   const Config& config_;
   const CertStore* certificates_;
+  EventSink* events_;
+  const EventSettings* event_settings_;
   Classifier classifier_;
   std::vector<std::unique_ptr<Worker>> workers_;
 };

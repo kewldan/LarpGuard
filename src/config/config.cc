@@ -152,11 +152,61 @@ bool ParseTimeouts(const YAML::Node& node, Config* config, std::string* error) {
          ReadDuration(node, "timeouts", "drain", &config->drain_timeout, error);
 }
 
+bool ParseEvents(const YAML::Node& node, Config* config, std::string* error) {
+  if (!CheckKeys(node, "events",
+                 {"nats", "subject_prefix", "token", "user", "password",
+                  "max_queue", "ip_salt", "requests"},
+                 error)) {
+    return false;
+  }
+  if (const YAML::Node nats = node["nats"]) {
+    std::string text = nats.IsNull() ? std::string() : nats.as<std::string>();
+    if (text.starts_with("nats://")) text.erase(0, 7);
+    if (text.empty()) {
+      config->events_nats.reset();
+    } else {
+      Endpoint endpoint;
+      if (!ParseEndpoint(text, &endpoint)) {
+        *error = "events.nats: expected host:port or nats://host:port";
+        return false;
+      }
+      config->events_nats = endpoint;
+    }
+  }
+  if (node["subject_prefix"]) {
+    config->events_subject_prefix = node["subject_prefix"].as<std::string>();
+    if (config->events_subject_prefix.empty() ||
+        config->events_subject_prefix.find_first_of(" \t*>") !=
+            std::string::npos) {
+      *error = "events.subject_prefix: expected a plain NATS subject";
+      return false;
+    }
+  }
+  if (node["token"]) config->events_token = node["token"].as<std::string>();
+  if (node["user"]) config->events_user = node["user"].as<std::string>();
+  if (node["password"]) {
+    config->events_password = node["password"].as<std::string>();
+  }
+  if (node["max_queue"]) {
+    const auto value = node["max_queue"].as<int64_t>();
+    if (value <= 0) {
+      *error = "events.max_queue: expected a positive number";
+      return false;
+    }
+    config->events_max_queue = static_cast<std::size_t>(value);
+  }
+  if (node["ip_salt"]) {
+    config->events_ip_salt = node["ip_salt"].as<std::string>();
+  }
+  if (node["requests"]) config->events_requests = node["requests"].as<bool>();
+  return true;
+}
+
 bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   if (!CheckKeys(
           root, "",
           {"listen", "workers", "traefik", "passthrough_hosts", "non_tls",
-           "timeouts", "max_connections", "metrics", "log_level"},
+           "timeouts", "max_connections", "events", "metrics", "log_level"},
           error)) {
     return false;
   }
@@ -211,6 +261,9 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       return false;
     }
     config->max_connections = static_cast<std::size_t>(value);
+  }
+  if (root["events"] && !ParseEvents(root["events"], config, error)) {
+    return false;
   }
   if (const YAML::Node metrics = root["metrics"]) {
     if (!CheckKeys(metrics, "metrics", {"listen"}, error) ||

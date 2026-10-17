@@ -50,6 +50,12 @@ struct Metrics {
   Counter bytes_upstream_to_client;
   Counter syn_captured;
 
+  Counter events_published;
+  Counter events_dropped;
+  Gauge nats_connected;
+  Counter nats_reconnects;
+  Counter http_requests_observed;
+
   Gauge certificates;
   Counter acme_reloads_ok;
   Counter acme_reloads_failed;

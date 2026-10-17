@@ -6,26 +6,21 @@ Self-hosted шлюз для фильтрации ботов, скреперов 
 
 Архитектура, ADR и план этапов: [docs/architecture.md](docs/architecture.md).
 
-## Статус: M0
+## Статус: M1
 
-Пока шлюз прозрачен. Для хостов, сертификат которых есть в `acme.json`
-Traefik, он терминирует TLS и пробрасывает трафик в Traefik, всё остальное
-передаёт как есть. Отпечатки и решения появятся в M1–M2.
+Шлюз встаёт перед Traefik, терминирует TLS для хостов с сертификатом в
+`acme.json` и пропускает остальное как есть (M0). С M1 он снимает пассивные
+отпечатки и отправляет события в NATS → ClickHouse. Решений «бот / не бот»
+пока нет — они появятся в M2.
 
-- Читает ClientHello и выбирает маршрут для соединения:
-  - terminate — сертификат для SNI известен;
-  - passthrough — SNI неизвестен или отсутствует, ALPN `acme-tls/1` или хост
-    из `passthrough_hosts`;
-  - reject — не TLS или битый ClientHello.
-- Берёт сертификаты из `acme.json` и опрашивает его на изменения. Поддерживает
-  wildcard; при битом файле продолжает работать на прежних сертификатах.
-- На каждое соединение отправляет в Traefik PROXY protocol v2, чтобы тот видел
-  реальный IP клиента.
-- На плече до Traefik сохраняет ALPN клиента: HTTP/1.1, HTTP/2 и WebSocket
-  работают без изменений.
-- Воркеры thread-per-core с `SO_REUSEPORT`. На Linux сохраняет TCP SYN.
-  Отдаёт `/metrics` для Prometheus и `/health`, по SIGTERM корректно
-  дорабатывает открытые соединения.
+- Маршрутизация по ClientHello: terminate, passthrough (неизвестный SNI,
+  `acme-tls/1`, `passthrough_hosts`) или reject; сертификаты из `acme.json`
+  с перезагрузкой; PROXY protocol v2 к Traefik; HTTP/1.1, HTTP/2, WebSocket.
+- Отпечатки: TCP SYN (Linux), JA4, HTTP/2 (Akamai), порядок заголовков;
+  JA4T/JA4H опционально (`BOT_SHIELD_FOXIO`, см. `src/fp/foxio/LICENSE.md`).
+- События `conn` и `req` в NATS (JSON) без полных IP и query-строк; схема
+  ClickHouse с почасовой агрегацией по отпечаткам — `deploy/clickhouse/`.
+- Воркеры thread-per-core, `/metrics` и `/health`, graceful drain.
 
 ## Сборка
 
@@ -54,6 +49,7 @@ python3 tests/e2e/run_e2e.py build/src/bot-shield
 ```
 
 Сборка с санитайзерами: `-DBOT_SHIELD_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`.
+Без JA4T/JA4H (FoxIO License): `-DBOT_SHIELD_FOXIO=OFF`.
 
 ## Стиль и статический анализ
 
@@ -82,7 +78,9 @@ build/src/bot-shield --config deploy/bot-shield.yaml --check-config
 - `bot-shield.yaml` — конфиг шлюза со всеми ключами и значениями по умолчанию;
 - `traefik.yml` — единственная правка в Traefik: entrypoint'ы переезжают на
   loopback и получают `proxyProtocol.trustedIPs`;
-- `docker-compose.yml` — оба сервиса в host network.
+- `docker-compose.yml` — Traefik и bot-shield в host network, опционально
+  NATS и ClickHouse для аналитики;
+- `clickhouse/schema.sql` — таблицы событий и агрегатов.
 
 HTTP/3 в Traefik должен оставаться выключенным, иначе QUIC пойдёт в обход
 шлюза.

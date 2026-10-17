@@ -56,6 +56,18 @@ struct Config {
 
   std::size_t max_connections = 100000;
 
+  // Analytics events. No NATS server means no events (and no HTTP taps).
+  std::optional<Endpoint> events_nats;
+  std::string events_subject_prefix = "botshield.events";
+  std::string events_token;
+  std::string events_user;
+  std::string events_password;
+  std::size_t events_max_queue = 100000;
+  // Key for IP hashes; empty means a random key per process start.
+  std::string events_ip_salt;
+  // One event per HTTP request (passive taps on decrypted traffic).
+  bool events_requests = true;
+
   std::optional<Endpoint> metrics_listen = Endpoint{"127.0.0.1", 9900};
   log::Level log_level = log::Level::kInfo;
 };

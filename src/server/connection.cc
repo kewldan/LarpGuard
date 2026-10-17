@@ -14,9 +14,11 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <format>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -26,6 +28,13 @@
 #include "common/log.h"
 #include "common/metrics.h"
 #include "config/config.h"
+#include "events/event_sink.h"
+#include "events/events.h"
+#include "fp/h1_tap.h"
+#include "fp/h2_tap.h"
+#include "fp/http_request.h"
+#include "fp/ja4.h"
+#include "fp/tcp_syn.h"
 #include "net/classifier.h"
 #include "net/prefixed_stream.h"
 #include "net/proxy_protocol.h"
@@ -33,6 +42,10 @@
 #include "net/watchdog.h"
 #include "tls/cert_store.h"
 #include "tls/client_hello.h"
+
+#if BOT_SHIELD_FOXIO
+#include "fp/foxio/ja4plus.h"
+#endif
 
 namespace bot_shield {
 namespace {
@@ -73,6 +86,108 @@ class ActiveConnection {
 
   ActiveConnection(const ActiveConnection&) = delete;
   ActiveConnection& operator=(const ActiveConnection&) = delete;
+};
+
+// Per-connection observation: fingerprints, byte counters and the passive HTTP
+// taps. Emits a "conn" event when the handler finishes and a "req" event for
+// every request the taps see. Never touches the proxied bytes.
+class ConnectionObserver {
+ public:
+  ConnectionObserver(const GatewayContext& context, const ConnectionInfo& info,
+                     std::string listener)
+      : context_(context) {
+    record_.id = info.id;
+    record_.started_ms = UnixMillis();
+    record_.listener = std::move(listener);
+    record_.peer = info.peer.address();
+  }
+
+  ~ConnectionObserver() {
+    if (context_.events == nullptr) return;
+    try {
+      if (h2_) record_.h2_fingerprint = h2_->fingerprint();
+      context_.events->Publish(
+          "conn",
+          ConnectionEventJson(record_, *context_.event_settings, UnixMillis()));
+    } catch (...) {
+      // Destructors must not throw; logging could throw again.
+      GlobalMetrics().events_dropped.Inc();
+    }
+  }
+
+  ConnectionObserver(const ConnectionObserver&) = delete;
+  ConnectionObserver& operator=(const ConnectionObserver&) = delete;
+
+  ConnectionRecord& record() { return record_; }
+
+  void OnSyn(std::span<const uint8_t> packet) {
+    TcpSyn syn;
+    if (!ParseTcpSyn(packet, &syn)) return;
+    record_.tcp_fingerprint = TcpFingerprint(syn);
+#if BOT_SHIELD_FOXIO
+    record_.ja4t = foxio::Ja4t(syn);
+#endif
+  }
+
+  void OnClientHello(const ClientHello& hello) {
+    record_.server_name = hello.server_name;
+    record_.tls_version = TlsVersionCode(hello);
+    if (!hello.alpn.empty()) record_.alpn_offered = hello.alpn.front();
+    record_.ja4 = Ja4(hello);
+    record_.ja4_raw = Ja4Raw(hello);
+  }
+
+  void OnRoute(std::string_view route, std::string_view reason) {
+    record_.route = route;
+    record_.reason = reason;
+  }
+
+  // Starts reading plaintext HTTP sent by the client. Only with events on:
+  // nothing else consumes what the taps produce.
+  void StartHttpTap(std::string_view alpn) {
+    if (context_.events == nullptr || !context_.event_settings->requests) {
+      return;
+    }
+    auto on_request = [this](HttpRequest&& request) {
+      OnRequest(std::move(request));
+    };
+    if (alpn == "h2") {
+      h2_ = std::make_unique<H2Tap>(on_request);
+    } else {
+      h1_ = std::make_unique<H1Tap>(on_request);
+    }
+  }
+
+  void OnClientData(std::span<const uint8_t> data) {
+    record_.bytes_in += data.size();
+    GlobalMetrics().bytes_client_to_upstream.Inc(data.size());
+    if (h1_ && h1_->active()) h1_->Feed(data);
+    if (h2_ && h2_->active()) h2_->Feed(data);
+  }
+
+  void OnUpstreamData(std::span<const uint8_t> data) {
+    record_.bytes_out += data.size();
+    GlobalMetrics().bytes_upstream_to_client.Inc(data.size());
+  }
+
+ private:
+  void OnRequest(HttpRequest&& request) {
+    ++record_.requests;
+    GlobalMetrics().http_requests_observed.Inc();
+    if (h2_) record_.h2_fingerprint = h2_->fingerprint();
+    try {
+      context_.events->Publish(
+          "req", RequestEventJson(record_, request, record_.requests,
+                                  *context_.event_settings, UnixMillis()));
+    } catch (const std::exception& e) {
+      log::Warn("conn={} request event dropped: {}", record_.id, e.what());
+    }
+  }
+
+  const GatewayContext& context_;
+  ConnectionRecord record_;
+  std::unique_ptr<H1Tap> h1_;
+  std::unique_ptr<H2Tap> h2_;
 };
 
 template <typename Socket>
@@ -138,10 +253,12 @@ void CountRoute(const RouteDecision& decision) {
 }
 
 // Copies `from` -> `to` until EOF or error. Every read touches the idle
-// watchdog. `on_eof` runs on a clean end of stream, `on_error` on failures.
-template <typename From, typename To, typename OnEof, typename OnError>
+// watchdog; `on_data` sees each chunk after it was forwarded. `on_eof` runs
+// on a clean end of stream, `on_error` on failures.
+template <typename From, typename To, typename OnData, typename OnEof,
+          typename OnError>
 asio::awaitable<void> Pump(From& from, To& to, Watchdog& watchdog,
-                           Counter& bytes, OnEof on_eof, OnError on_error) {
+                           OnData on_data, OnEof on_eof, OnError on_error) {
   std::vector<uint8_t> buffer(kPumpBufferSize);
   while (true) {
     auto [read_ec, n] =
@@ -154,7 +271,7 @@ asio::awaitable<void> Pump(From& from, To& to, Watchdog& watchdog,
         on_error();
         co_return;
       }
-      bytes.Inc(written);
+      on_data(std::span<const uint8_t>(buffer.data(), written));
     }
     if (read_ec) {
       if (read_ec == asio::error::eof) {
@@ -169,7 +286,8 @@ asio::awaitable<void> Pump(From& from, To& to, Watchdog& watchdog,
 
 // Bidirectional TCP relay with half-close support.
 asio::awaitable<void> RelayTcp(tcp::socket& client, tcp::socket& upstream,
-                               const Config& config) {
+                               const Config& config,
+                               ConnectionObserver& observer) {
   auto executor = co_await asio::this_coro::executor;
   Metrics& metrics = GlobalMetrics();
   auto close_both = [&client, &upstream] {
@@ -180,11 +298,17 @@ asio::awaitable<void> RelayTcp(tcp::socket& client, tcp::socket& upstream,
     metrics.idle_timeouts.Inc();
     close_both();
   });
+  auto on_client_data = [&observer](std::span<const uint8_t> data) {
+    observer.OnClientData(data);
+  };
+  auto on_upstream_data = [&observer](std::span<const uint8_t> data) {
+    observer.OnUpstreamData(data);
+  };
   co_await (Pump(
-                client, upstream, *idle, metrics.bytes_client_to_upstream,
+                client, upstream, *idle, on_client_data,
                 [&upstream] { ShutdownSend(upstream); }, close_both) &&
             Pump(
-                upstream, client, *idle, metrics.bytes_upstream_to_client,
+                upstream, client, *idle, on_upstream_data,
                 [&client] { ShutdownSend(client); }, close_both));
 }
 
@@ -192,7 +316,8 @@ asio::awaitable<void> RelayTcp(tcp::socket& client, tcp::socket& upstream,
 // in asio, so the first side to finish closes both.
 asio::awaitable<void> RelayTls(ClientTlsStream& client,
                                UpstreamTlsStream& upstream,
-                               const Config& config) {
+                               const Config& config,
+                               ConnectionObserver& observer) {
   auto executor = co_await asio::this_coro::executor;
   Metrics& metrics = GlobalMetrics();
   auto close_both = [&client, &upstream] {
@@ -203,10 +328,15 @@ asio::awaitable<void> RelayTls(ClientTlsStream& client,
     metrics.idle_timeouts.Inc();
     close_both();
   });
-  co_await (Pump(client, upstream, *idle, metrics.bytes_client_to_upstream,
-                 close_both, close_both) &&
-            Pump(upstream, client, *idle, metrics.bytes_upstream_to_client,
-                 close_both, close_both));
+  auto on_client_data = [&observer](std::span<const uint8_t> data) {
+    observer.OnClientData(data);
+  };
+  auto on_upstream_data = [&observer](std::span<const uint8_t> data) {
+    observer.OnUpstreamData(data);
+  };
+  co_await (
+      Pump(client, upstream, *idle, on_client_data, close_both, close_both) &&
+      Pump(upstream, client, *idle, on_upstream_data, close_both, close_both));
 }
 
 // Connects to Traefik and sends the PROXY header if enabled.
@@ -247,7 +377,8 @@ asio::awaitable<void> RunPassthrough(tcp::socket client,
                                      const tcp::endpoint& upstream_endpoint,
                                      const ConnectionInfo& info,
                                      std::string_view authority,
-                                     const GatewayContext& context) {
+                                     const GatewayContext& context,
+                                     ConnectionObserver& observer) {
   std::optional<tcp::socket> upstream = co_await ConnectUpstream(
       upstream_endpoint, info, authority, *context.config);
   if (!upstream) co_return;
@@ -255,9 +386,9 @@ asio::awaitable<void> RunPassthrough(tcp::socket client,
     auto [ec, n] =
         co_await asio::async_write(*upstream, asio::buffer(prefix), kUse);
     if (ec) co_return;
-    GlobalMetrics().bytes_client_to_upstream.Inc(n);
+    observer.OnClientData(std::span<const uint8_t>(prefix.data(), n));
   }
-  co_await RelayTcp(client, *upstream, *context.config);
+  co_await RelayTcp(client, *upstream, *context.config, observer);
 }
 
 asio::awaitable<void> RunTerminate(tcp::socket socket,
@@ -265,7 +396,8 @@ asio::awaitable<void> RunTerminate(tcp::socket socket,
                                    std::shared_ptr<const CertEntry> certificate,
                                    std::string server_name,
                                    const ConnectionInfo& info,
-                                   const GatewayContext& context) {
+                                   const GatewayContext& context,
+                                   ConnectionObserver& observer) {
   const Config& config = *context.config;
   Metrics& metrics = GlobalMetrics();
   auto executor = co_await asio::this_coro::executor;
@@ -286,6 +418,7 @@ asio::awaitable<void> RunTerminate(tcp::socket socket,
     }
   }
   const std::string alpn = SelectedAlpn(client.native_handle());
+  observer.record().alpn = alpn;
 
   std::optional<tcp::socket> upstream_socket = co_await ConnectUpstream(
       context.upstream_https, info, server_name, config);
@@ -328,7 +461,8 @@ asio::awaitable<void> RunTerminate(tcp::socket socket,
     co_return;
   }
 
-  co_await RelayTls(client, upstream, config);
+  observer.StartHttpTap(alpn);
+  co_await RelayTls(client, upstream, config, observer);
 }
 
 }  // namespace
@@ -347,9 +481,10 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
   Metrics& metrics = GlobalMetrics();
   metrics.connections_https.Inc();
   const ConnectionInfo info = MakeConnectionInfo(socket);
-  // The SYN is kept for fingerprinting (M1); for now only counted.
-  if (!ReadSavedSyn(socket.native_handle()).empty()) {
+  ConnectionObserver observer(context, info, "https");
+  if (const auto syn = ReadSavedSyn(socket.native_handle()); !syn.empty()) {
     metrics.syn_captured.Inc();
+    observer.OnSyn(syn);
   }
   SetNoDelay(socket);
 
@@ -366,6 +501,8 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
       auto [ec, n] = co_await socket.async_read_some(asio::buffer(chunk), kUse);
       if (ec) {
         if (deadline->expired()) metrics.client_hello_timeouts.Inc();
+        observer.OnRoute("reject", deadline->expired() ? "client_hello_timeout"
+                                                       : "closed_before_hello");
         co_return;
       }
       buffer.insert(buffer.end(), chunk.begin(), chunk.begin() + n);
@@ -376,6 +513,8 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
   RouteDecision decision = context.classifier->Classify(
       status, hello, *context.certificates->snapshot());
   CountRoute(decision);
+  if (status == ParseStatus::kOk) observer.OnClientHello(hello);
+  observer.OnRoute(RouteName(decision.route), RouteReasonName(decision.reason));
   log::Debug("conn={} peer={} sni={} alpn={} route={} reason={}", info.id,
              FormatEndpoint(info.peer),
              hello.server_name.empty() ? "-" : hello.server_name,
@@ -388,12 +527,12 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
     case Route::kPassthrough:
       co_await RunPassthrough(std::move(socket), std::move(buffer),
                               context.upstream_https, info, hello.server_name,
-                              context);
+                              context, observer);
       co_return;
     case Route::kTerminate:
-      co_await RunTerminate(std::move(socket), std::move(buffer),
-                            std::move(decision.certificate),
-                            std::move(hello.server_name), info, context);
+      co_await RunTerminate(
+          std::move(socket), std::move(buffer), std::move(decision.certificate),
+          std::move(hello.server_name), info, context, observer);
       co_return;
   }
 }
@@ -401,11 +540,20 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
 asio::awaitable<void> HandleHttpConnection(tcp::socket socket,
                                            const GatewayContext& context) {
   ActiveConnection active;
-  GlobalMetrics().connections_http.Inc();
+  Metrics& metrics = GlobalMetrics();
+  metrics.connections_http.Inc();
   const ConnectionInfo info = MakeConnectionInfo(socket);
+  ConnectionObserver observer(context, info, "http");
+  if (const auto syn = ReadSavedSyn(socket.native_handle()); !syn.empty()) {
+    metrics.syn_captured.Inc();
+    observer.OnSyn(syn);
+  }
+  observer.OnRoute("passthrough", "plain_http");
+  // Plain HTTP is readable as is: tap it like a terminated HTTP/1.1 stream.
+  observer.StartHttpTap("http/1.1");
   SetNoDelay(socket);
   co_await RunPassthrough(std::move(socket), {}, context.upstream_http, info,
-                          "", context);
+                          "", context, observer);
 }
 
 }  // namespace bot_shield

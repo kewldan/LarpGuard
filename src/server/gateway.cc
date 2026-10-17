@@ -20,6 +20,8 @@
 #include "common/log.h"
 #include "common/metrics.h"
 #include "config/config.h"
+#include "events/event_sink.h"
+#include "events/events.h"
 #include "net/socket_options.h"
 #include "server/connection.h"
 #include "server/metrics_server.h"
@@ -206,9 +208,12 @@ void Worker::Join() {
   if (thread_.joinable()) thread_.join();
 }
 
-Gateway::Gateway(const Config& config, const CertStore* certificates)
+Gateway::Gateway(const Config& config, const CertStore* certificates,
+                 EventSink* events, const EventSettings* event_settings)
     : config_(config),
       certificates_(certificates),
+      events_(events),
+      event_settings_(event_settings),
       classifier_(config.passthrough_hosts, config.non_tls) {}
 
 Gateway::~Gateway() {
@@ -221,6 +226,8 @@ bool Gateway::Start(std::string* error) {
   shared.config = &config_;
   shared.certificates = certificates_;
   shared.classifier = &classifier_;
+  shared.events = events_;
+  shared.event_settings = event_settings_;
   if (!ResolveEndpoint(config_.upstream_https, &shared.upstream_https, error) ||
       !ResolveEndpoint(config_.upstream_http, &shared.upstream_http, error)) {
     return false;

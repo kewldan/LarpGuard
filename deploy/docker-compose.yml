@@ -23,7 +23,30 @@ services:
     volumes:
       - ./bot-shield.yaml:/etc/bot-shield/bot-shield.yaml:ro
       - traefik-acme:/traefik:ro
-    depends_on: [traefik]
+    depends_on: [traefik, nats]
+
+  # Analytics pipeline (optional): bot-shield -> NATS -> ClickHouse.
+  # Enable with events.nats: "nats://127.0.0.1:4222" in bot-shield.yaml.
+  nats:
+    image: nats:2.11
+    command: ["-js", "-sd", "/data"]
+    restart: unless-stopped
+    ports: ["127.0.0.1:4222:4222"]
+    volumes:
+      - nats-data:/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    restart: unless-stopped
+    ports: ["127.0.0.1:8123:8123"]
+    environment:
+      CLICKHOUSE_DB: bot_shield
+    volumes:
+      - ./clickhouse/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - clickhouse-data:/var/lib/clickhouse
+    depends_on: [nats]
 
 volumes:
   traefik-acme:
+  nats-data:
+  clickhouse-data:
