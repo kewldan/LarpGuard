@@ -1,6 +1,10 @@
 #include "tls/client_hello.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <vector>
 
 #include "common/host.h"
 

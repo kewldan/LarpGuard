@@ -1,9 +1,15 @@
 #include "net/classifier.h"
 
 #include <algorithm>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include "common/host.h"
+#include "config/config.h"
+#include "tls/cert_store.h"
+#include "tls/client_hello.h"
 
 namespace bot_shield {
 

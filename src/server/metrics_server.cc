@@ -8,9 +8,12 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
 #include <chrono>
+#include <cstddef>
 #include <format>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
 
 #include "common/log.h"
 #include "common/metrics.h"

@@ -9,8 +9,14 @@
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace bot_shield::testing {
 namespace {

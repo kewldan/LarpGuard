@@ -1,8 +1,11 @@
 #include "net/socket_options.h"
 
-#include <netinet/in.h>
-#include <netinet/tcp.h>
+#include <netinet/in.h>   // IWYU pragma: keep (IPPROTO_TCP on Linux)
+#include <netinet/tcp.h>  // IWYU pragma: keep (TCP_SAVE_SYN on Linux)
 #include <sys/socket.h>
+
+#include <cstdint>
+#include <vector>
 
 #if defined(__linux__)
 #ifndef TCP_SAVE_SYN

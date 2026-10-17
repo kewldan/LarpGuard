@@ -4,22 +4,30 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <fstream>
 #include <initializer_list>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 
 #include "common/host.h"
+#include "common/log.h"
 
 namespace bot_shield {
 namespace {
 
 bool ParseUnsigned(std::string_view text, uint64_t* value) {
   if (text.empty()) return false;
-  const char* begin =
-      text.data();  // NOLINT(bugprone-suspicious-stringview-data-usage):
-                    // from_chars takes a range.
+  // from_chars takes a [begin, end) range, so no terminator is needed.
+  // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
+  const char* begin = text.data();
   const char* end = begin + text.size();
   auto [ptr, ec] = std::from_chars(begin, end, *value);
   return ec == std::errc() && ptr == end;

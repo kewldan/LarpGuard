@@ -11,7 +11,10 @@
 #include <asio/ssl/stream.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
+#include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "test_util.h"
 #include "tls/cert_store.h"

@@ -1,0 +1,15 @@
+# Editor diagnostics aligned with .clang-tidy (include-what-you-use).
+CompileFlags:
+  CompilationDatabase: build
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  Includes:
+    IgnoreHeader:
+      - asio/.*
+      - asio\.hpp
+      - openssl/.*
+      - nlohmann/.*
+      - yaml-cpp/.*
+      - gtest/.*
+      - gmock/.*

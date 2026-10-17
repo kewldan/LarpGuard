@@ -1,3 +1,5 @@
+#include <sys/signal.h>
+
 #include <asio/io_context.hpp>
 #include <asio/signal_set.hpp>
 #include <asio/steady_timer.hpp>
@@ -8,6 +10,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "common/log.h"
 #include "common/metrics.h"

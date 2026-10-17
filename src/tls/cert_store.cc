@@ -8,9 +8,17 @@
 #include <openssl/x509.h>
 
 #include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <format>
+#include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include "common/host.h"
 

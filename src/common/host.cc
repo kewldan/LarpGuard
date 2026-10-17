@@ -1,5 +1,8 @@
 #include "common/host.h"
 
+#include <string>
+#include <string_view>
+
 namespace bot_shield {
 
 std::string NormalizeHost(std::string_view host) {

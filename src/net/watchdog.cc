@@ -1,6 +1,9 @@
 #include "net/watchdog.h"
 
 #include <asio/error.hpp>
+#include <functional>
+#include <memory>
+#include <system_error>
 #include <utility>
 
 namespace bot_shield {

@@ -4,8 +4,13 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include "config/config.h"
 #include "test_util.h"
+#include "tls/cert_store.h"
+#include "tls/client_hello.h"
 
 namespace bot_shield {
 namespace {

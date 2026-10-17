@@ -2,6 +2,7 @@
 
 #include <format>
 #include <iterator>
+#include <string>
 #include <string_view>
 
 namespace bot_shield {

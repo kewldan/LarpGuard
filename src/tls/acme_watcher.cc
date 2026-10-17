@@ -1,12 +1,22 @@
 #include "tls/acme_watcher.h"
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
+#include <ios>
+#include <memory>
+#include <mutex>
 #include <sstream>
+#include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "common/log.h"
 #include "common/metrics.h"
+#include "tls/cert_store.h"
 
 namespace bot_shield {
 

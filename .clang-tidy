@@ -11,6 +11,7 @@ Checks: >
   -bugprone-signed-bitwise,
   google-*,
   misc-definitions-in-headers,
+  misc-include-cleaner,
   misc-misplaced-const,
   misc-redundant-expression,
   misc-static-assert,
@@ -40,6 +41,11 @@ HeaderFilterRegex: "/(src|tests)/"
 FormatStyle: file
 
 CheckOptions:
+  # Include what you use for the standard library and our own headers.
+  # Third-party libraries without IWYU annotations are left alone: their
+  # public entry points are not the headers that define each symbol.
+  - { key: misc-include-cleaner.IgnoreHeaders, value: "asio/.*;asio\\.hpp;openssl/.*;nlohmann/.*;yaml-cpp/.*;gtest/.*;gmock/.*" }
+
   # Types: PascalCase.
   - { key: readability-identifier-naming.ClassCase, value: CamelCase }
   - { key: readability-identifier-naming.StructCase, value: CamelCase }

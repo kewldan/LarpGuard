@@ -2,7 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <string>
+#include <vector>
+
+#include "common/log.h"
 
 namespace bot_shield {
 namespace {

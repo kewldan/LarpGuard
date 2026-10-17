@@ -12,19 +12,26 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include "common/log.h"
 #include "common/metrics.h"
+#include "config/config.h"
+#include "net/classifier.h"
 #include "net/prefixed_stream.h"
 #include "net/proxy_protocol.h"
 #include "net/socket_options.h"
 #include "net/watchdog.h"
+#include "tls/cert_store.h"
 #include "tls/client_hello.h"
 
 namespace bot_shield {

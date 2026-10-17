@@ -4,7 +4,9 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <format>
 #include <string>
+#include <string_view>
 
 namespace bot_shield::log {
 namespace {

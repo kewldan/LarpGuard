@@ -10,12 +10,20 @@
 #include <chrono>
 #include <exception>
 #include <format>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 
 #include "common/log.h"
 #include "common/metrics.h"
+#include "config/config.h"
 #include "net/socket_options.h"
+#include "server/connection.h"
 #include "server/metrics_server.h"
+#include "tls/cert_store.h"
 
 namespace bot_shield {
 namespace {
