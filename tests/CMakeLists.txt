@@ -17,3 +17,5 @@ target_link_libraries(bot_shield_tests PRIVATE
 
 include(GoogleTest)
 gtest_discover_tests(bot_shield_tests)
+
+bot_shield_enable_tidy(bot_shield_tests)

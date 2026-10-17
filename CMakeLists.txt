@@ -20,6 +20,7 @@ if(BOT_SHIELD_SANITIZE)
 endif()
 
 include(cmake/dependencies.cmake)
+include(cmake/tooling.cmake)
 
 add_subdirectory(src)
 

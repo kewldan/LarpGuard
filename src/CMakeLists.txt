@@ -31,3 +31,6 @@ target_link_libraries(bot_shield_core
 add_executable(bot-shield main.cc)
 target_compile_options(bot-shield PRIVATE -Wall -Wextra)
 target_link_libraries(bot-shield PRIVATE bot_shield_core)
+
+bot_shield_enable_tidy(bot_shield_core)
+bot_shield_enable_tidy(bot-shield)
