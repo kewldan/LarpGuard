@@ -1,0 +1,29 @@
+# Example: Traefik and bot-shield on one host. Both use host networking so
+# bot-shield sees real client SYNs and Traefik is reachable on loopback.
+services:
+  traefik:
+    image: traefik:v3.5
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-acme:/acme   # acme.json lives here
+
+  bot-shield:
+    build: ..
+    network_mode: host
+    restart: unless-stopped
+    # Runs as root so it can read acme.json (Traefik requires mode 0600), but
+    # with every capability dropped except binding to ports below 1024.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    volumes:
+      - ./bot-shield.yaml:/etc/bot-shield/bot-shield.yaml:ro
+      - traefik-acme:/traefik:ro
+    depends_on: [traefik]
+
+volumes:
+  traefik-acme:

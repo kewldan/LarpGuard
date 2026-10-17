@@ -1,0 +1,47 @@
+# bot-shield configuration (M0). All keys are optional; values shown are the
+# defaults unless marked otherwise. Unknown keys are rejected.
+
+listen:
+  https: "0.0.0.0:443"
+  # Plain HTTP is passed through to Traefik (ACME HTTP-01, redirects).
+  # Set to "" to leave port 80 to Traefik itself.
+  http: "0.0.0.0:80"
+
+# 0 = one worker per CPU. Workers share the ports via SO_REUSEPORT (Linux).
+workers: 0
+
+traefik:
+  # Traefik's ACME storage, mounted read-only. Polled for changes.
+  acme_json: /traefik/acme.json
+  acme_reload_interval: 2s
+  # Traefik entrypoints moved to loopback (see deploy/traefik.yml).
+  upstream_https: "127.0.0.1:8443"
+  upstream_http: "127.0.0.1:8080"
+  # Send PROXY protocol v2 so Traefik sees real client addresses. The
+  # entrypoints must have proxyProtocol.trustedIPs including 127.0.0.1.
+  proxy_protocol: true
+  # Verify Traefik's certificate on the loopback hop.
+  tls_verify: false
+
+# Hosts never terminated here (e.g. gRPC until the HTTP/2-aware proxy lands).
+# Exact names or "*.parent".
+passthrough_hosts: []
+#  - grpc.example.com
+
+# HTTPS-port traffic that is not TLS: reject | passthrough.
+non_tls: reject
+
+timeouts:
+  client_hello: 5s
+  tls_handshake: 10s
+  upstream_connect: 5s
+  idle: 300s
+  drain: 30s
+
+max_connections: 100000
+
+metrics:
+  # Prometheus /metrics and /health. "" disables.
+  listen: "127.0.0.1:9900"
+
+log_level: info
