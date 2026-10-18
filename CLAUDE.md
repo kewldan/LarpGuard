@@ -18,7 +18,7 @@ UI отложен; оставшиеся хвосты — в Roadmap в `README.m
 cmake -S . -B build -G Ninja          # первый configure качает зависимости
 cmake --build build
 ctest --test-dir build --output-on-failure
-python3 -I tests/e2e/run_e2e.py build/src/bot-shield   # нужен curl с HTTP/2
+python3 -I tests/e2e/run_e2e.py build/src/bot-shield   # нужны curl с HTTP/2 и node
 cmake --build build --target format        # clang-format на месте
 cmake --build build --target format-check
 cmake --build build --target tidy          # clang-tidy, должно быть 0 предупреждений
@@ -30,7 +30,7 @@ cmake --build build --target tidy          # clang-tidy, должно быть 0
 
 Linux-проверка (`SO_REUSEPORT` с несколькими воркерами, `TCP_SAVED_SYN`
 работают только там) — в контейнере `debian:trixie` с `build-essential cmake
-ninja-build git python3 openssl`, исходники монтировать read-only.
+ninja-build git python3 openssl curl nodejs`, исходники монтировать read-only.
 
 CI — `.github/workflows/ci.yml`: format (clang-format 23.1.3 из PyPI),
 clang-tidy (23.1.3, `debian:trixie`), тесты и e2e обычные и под ASan/UBSan;

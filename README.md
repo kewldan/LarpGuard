@@ -256,7 +256,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 The end-to-end suite runs against a fake Traefik. It needs `python3`,
-`openssl` and a `curl` with HTTP/2:
+`openssl`, `node` (runs the challenge script) and a `curl` with HTTP/2:
 
 ```bash
 python3 -I tests/e2e/run_e2e.py build/src/bot-shield
