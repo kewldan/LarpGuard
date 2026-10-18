@@ -21,6 +21,13 @@ if(BOT_SHIELD_SANITIZE)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
+# GCC flags asio's coroutine frame allocator (operator new/delete pair it
+# cannot match across the frame) as -Wmismatched-new-delete: a known false
+# positive.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options(-Wno-mismatched-new-delete)
+endif()
+
 include(cmake/dependencies.cmake)
 include(cmake/tooling.cmake)
 

@@ -108,7 +108,7 @@ TEST(EventsTest, InvalidUtf8IsReplaced) {
   const EventSettings settings{"inst", "salt", true};
   std::string text;
   ASSERT_NO_THROW(text = RequestEventJson(Record(), request, 1, settings, 0));
-  EXPECT_NO_THROW(static_cast<void>(nlohmann::json::parse(text)));
+  EXPECT_TRUE(nlohmann::json::parse(text).is_object());
 }
 
 }  // namespace

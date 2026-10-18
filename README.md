@@ -6,21 +6,24 @@ Self-hosted шлюз для фильтрации ботов, скреперов 
 
 Архитектура, ADR и план этапов: [docs/architecture.md](docs/architecture.md).
 
-## Статус: M1
+## Статус: M2 в работе
 
-Шлюз встаёт перед Traefik, терминирует TLS для хостов с сертификатом в
-`acme.json` и пропускает остальное как есть (M0). С M1 он снимает пассивные
-отпечатки и отправляет события в NATS → ClickHouse. Решений «бот / не бот»
-пока нет — они появятся в M2.
+Шлюз встаёт перед Traefik и терминирует TLS для хостов с сертификатом в
+`acme.json`; остальное пропускает как есть. Терминированный трафик
+обрабатывается полноценным HTTP-прокси, снимаются отпечатки, события уходят
+в NATS → ClickHouse. Решений «бот / не бот» пока нет — следующий шаг M2.
 
 - Маршрутизация по ClientHello: terminate, passthrough (неизвестный SNI,
   `acme-tls/1`, `passthrough_hosts`) или reject; сертификаты из `acme.json`
-  с перезагрузкой; PROXY protocol v2 к Traefik; HTTP/1.1, HTTP/2, WebSocket.
+  с перезагрузкой.
+- HTTP-прокси: HTTP/1.1 и HTTP/2 к клиенту, пул HTTP/2-соединений к Traefik,
+  WebSocket, потоковые тела с управлением потоком, реальный IP в
+  `X-Forwarded-For` (подделка от клиента вырезается), `502` при недоступном
+  Traefik. Passthrough и порт 80 — с PROXY protocol v2.
 - Отпечатки: TCP SYN (Linux), JA4, HTTP/2 (Akamai), порядок заголовков;
   JA4T/JA4H опционально (`BOT_SHIELD_FOXIO`, см. `src/fp/foxio/LICENSE.md`).
-- События `conn` и `req` в NATS (JSON) без полных IP и query-строк; схема
-  ClickHouse с почасовой агрегацией по отпечаткам — `deploy/clickhouse/`.
-- Воркеры thread-per-core, `/metrics` и `/health`, graceful drain.
+- События `conn` и `req` (со статусом и длительностью) в NATS без полных IP
+  и query-строк; схема ClickHouse — `deploy/clickhouse/`.
 
 ## Сборка
 
@@ -42,7 +45,8 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Сквозной тест против фейкового Traefik (нужны `python3` и `openssl`):
+Сквозной тест против фейкового Traefik (нужны `python3`, `openssl` и
+`curl` с HTTP/2):
 
 ```bash
 python3 tests/e2e/run_e2e.py build/src/bot-shield
@@ -77,7 +81,8 @@ build/src/bot-shield --config deploy/bot-shield.yaml --check-config
 
 - `bot-shield.yaml` — конфиг шлюза со всеми ключами и значениями по умолчанию;
 - `traefik.yml` — единственная правка в Traefik: entrypoint'ы переезжают на
-  loopback и получают `proxyProtocol.trustedIPs`;
+  loopback и получают `proxyProtocol.trustedIPs` и
+  `forwardedHeaders.trustedIPs`;
 - `docker-compose.yml` — Traefik и bot-shield в host network, опционально
   NATS и ClickHouse для аналитики;
 - `clickhouse/schema.sql` — таблицы событий и агрегатов.

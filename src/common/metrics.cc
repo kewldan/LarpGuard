@@ -88,6 +88,23 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_upstream_connect_failures_total", "",
                upstream_connect_failures.Get());
 
+  AppendHeader(&out, "bot_shield_upstream_connections_opened_total", "counter",
+               "HTTP/2 connections opened to Traefik.");
+  AppendSample(&out, "bot_shield_upstream_connections_opened_total", "",
+               upstream_connections_opened.Get());
+
+  AppendHeader(&out, "bot_shield_proxied_requests_total", "counter",
+               "Requests handled by the HTTP proxy, by who answered.");
+  AppendSample(&out, "bot_shield_proxied_requests_total",
+               R"(source="upstream")", proxied_requests.Get());
+  AppendSample(&out, "bot_shield_proxied_requests_total", R"(source="local")",
+               local_responses.Get());
+
+  AppendHeader(&out, "bot_shield_websocket_tunnels_total", "counter",
+               "Upgraded (WebSocket) connections tunnelled to Traefik.");
+  AppendSample(&out, "bot_shield_websocket_tunnels_total", "",
+               websocket_tunnels.Get());
+
   AppendHeader(&out, "bot_shield_alpn_mismatches_total", "counter",
                "Upstream negotiated a different ALPN than the client.");
   AppendSample(&out, "bot_shield_alpn_mismatches_total", "",

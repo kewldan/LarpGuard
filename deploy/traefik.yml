@@ -12,7 +12,14 @@ entryPoints:
   websecure:
     # Was ":443".
     address: "127.0.0.1:8443"
+    # Passed-through TLS arrives with a PROXY v2 header; Traefik uses it when
+    # present and accepts connections without it.
     proxyProtocol:
+      trustedIPs:
+        - "127.0.0.1/32"
+    # Terminated requests arrive over pooled HTTP/2 connections and carry the
+    # client address in X-Forwarded-For / X-Real-IP set by bot-shield.
+    forwardedHeaders:
       trustedIPs:
         - "127.0.0.1/32"
     # Keep HTTP/3 off: QUIC would bypass bot-shield (ADR-011).

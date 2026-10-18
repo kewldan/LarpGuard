@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "fp/h2_fingerprint.h"
 #include "fp/http_request.h"
 
 struct nghttp2_hd_inflater;
@@ -32,7 +33,7 @@ class H2Tap {
   int requests() const { return requests_; }
 
   // Empty until the first request HEADERS frame has been decoded.
-  const std::string& fingerprint() const { return fingerprint_; }
+  const std::string& fingerprint() const { return builder_.fingerprint(); }
 
  private:
   enum class State { kPreface, kFrameHeader, kPayload, kSkip };
@@ -68,10 +69,7 @@ class H2Tap {
 
   bool settings_seen_ = false;
   bool headers_seen_ = false;
-  std::string settings_;
-  std::string window_update_;
-  std::vector<std::string> priorities_;
-  std::string fingerprint_;
+  H2FingerprintBuilder builder_;
 
   int requests_ = 0;
   bool active_ = true;

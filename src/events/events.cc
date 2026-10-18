@@ -165,7 +165,8 @@ std::string ConnectionEventJson(const ConnectionRecord& record,
 
 std::string RequestEventJson(const ConnectionRecord& record,
                              const HttpRequest& request, int sequence,
-                             const EventSettings& settings, int64_t time_ms) {
+                             const EventSettings& settings, int64_t time_ms,
+                             const RequestOutcome* outcome) {
   nlohmann::json names = nlohmann::json::array();
   for (const std::string& name : request.header_names) {
     names.push_back(Clip(name));
@@ -192,6 +193,12 @@ std::string RequestEventJson(const ConnectionRecord& record,
       {"has_cookie", request.HasHeader("cookie")},
       {"has_referer", request.HasHeader("referer")},
   };
+  if (outcome != nullptr) {
+    json["status"] = outcome->status;
+    json["duration_ms"] = outcome->duration_ms;
+    json["response_bytes"] = outcome->response_bytes;
+    json["local"] = outcome->local;
+  }
 #if BOT_SHIELD_FOXIO
   json["ja4h"] = foxio::Ja4h(request);
   SetIfNotEmpty(json, "ja4t", record.ja4t);

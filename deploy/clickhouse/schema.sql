@@ -110,7 +110,11 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     sec_fetch_site     String,
     sec_fetch_mode     String,
     sec_fetch_dest     String,
-    sec_fetch_user     String
+    sec_fetch_user     String,
+    status             UInt16,
+    duration_ms        UInt32,
+    response_bytes     UInt64,
+    local              Bool
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -151,7 +155,13 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     sec_fetch_site     LowCardinality(String),
     sec_fetch_mode     LowCardinality(String),
     sec_fetch_dest     LowCardinality(String),
-    sec_fetch_user     LowCardinality(String)
+    sec_fetch_user     LowCardinality(String),
+    -- 0 when the client left before a response; absent for port 80 taps.
+    status             UInt16,
+    duration_ms        UInt32,
+    response_bytes     UInt64,
+    -- Answered by the gateway itself (502, later block/challenge pages).
+    local              Bool
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)

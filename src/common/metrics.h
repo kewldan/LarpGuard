@@ -44,6 +44,10 @@ struct Metrics {
   Counter tls_handshake_failures_client;
   Counter tls_handshake_failures_upstream;
   Counter upstream_connect_failures;
+  Counter upstream_connections_opened;
+  Counter proxied_requests;
+  Counter local_responses;
+  Counter websocket_tunnels;
   Counter alpn_mismatches;
   Counter idle_timeouts;
   Counter bytes_client_to_upstream;

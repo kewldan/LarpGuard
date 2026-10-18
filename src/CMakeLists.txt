@@ -7,6 +7,7 @@ add_library(bot_shield_core STATIC
   events/events.cc
   events/nats_publisher.cc
   fp/h1_tap.cc
+  fp/h2_fingerprint.cc
   fp/h2_tap.cc
   fp/http_fingerprint.cc
   fp/http_request.cc
@@ -16,6 +17,13 @@ add_library(bot_shield_core STATIC
   net/proxy_protocol.cc
   net/socket_options.cc
   net/watchdog.cc
+  proxy/exchange.cc
+  proxy/h1_server.cc
+  proxy/h2_connection.cc
+  proxy/h2_server.cc
+  proxy/h2_upstream.cc
+  proxy/http_message.cc
+  proxy/upstream_pool.cc
   server/connection.cc
   server/gateway.cc
   server/metrics_server.cc
@@ -30,13 +38,13 @@ target_link_libraries(bot_shield_core
   PUBLIC
     asio
     llhttp::llhttp
+    nghttp2
     ssl
     crypto
     Threads::Threads
   PRIVATE
     nlohmann_json::nlohmann_json
     yaml-cpp::yaml-cpp
-    nghttp2
 )
 
 # JA4+ methods under the FoxIO License 1.1 (src/fp/foxio/LICENSE.md).

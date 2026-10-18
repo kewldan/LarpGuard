@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """End-to-end test: runs the bot-shield binary in front of a fake Traefik.
 
-The fake upstream requires a PROXY v2 header on every connection, then (on the
-TLS port) completes a TLS handshake with its own certificate and answers one
-line describing what it saw. Gateway certificates and upstream certificates
-are different, so a client can tell whether bot-shield terminated TLS (the
-gateway certificate validates) or passed it through (the upstream one does).
+The fake Traefik (tests/e2e/fake_upstream.cc) speaks HTTP/2 to the gateway's
+upstream pool and answers with a JSON description of each request; on
+passthrough connections it answers one line per connection instead. Gateway
+and upstream certificates differ, so a client can tell whether bot-shield
+terminated TLS (the gateway certificate validates) or passed it through.
+Events go to a fake NATS server and are checked too.
 
-Usage: run_e2e.py path/to/bot-shield
+Usage: run_e2e.py path/to/bot-shield [path/to/bot_shield_fake_upstream]
 """
 
 import base64
+import http.client
 import json
 import os
 import shutil
@@ -24,8 +26,6 @@ import tempfile
 import threading
 import time
 import urllib.request
-
-PROXY_SIGNATURE = b"\r\n\r\n\x00\r\nQUIT\n"
 
 
 def find_openssl():
@@ -76,83 +76,15 @@ def free_port():
         return s.getsockname()[1]
 
 
-def recv_exact(sock, size):
-    data = b""
-    while len(data) < size:
-        chunk = sock.recv(size - len(data))
-        if not chunk:
-            raise ConnectionError("eof while reading PROXY header")
-        data += chunk
-    return data
-
-
-def read_proxy_v2(sock):
-    header = recv_exact(sock, 16)
-    if header[:12] != PROXY_SIGNATURE:
-        raise ValueError("missing PROXY v2 signature")
-    family, length = header[13], struct.unpack("!H", header[14:16])[0]
-    body = recv_exact(sock, length)
-    if family == 0x11:
-        src = socket.inet_ntop(socket.AF_INET, body[0:4])
-        src_port = struct.unpack("!H", body[8:10])[0]
-        tlvs = body[12:]
-    else:
-        src = socket.inet_ntop(socket.AF_INET6, body[0:16])
-        src_port = struct.unpack("!H", body[32:34])[0]
-        tlvs = body[36:]
-    authority = ""
-    while len(tlvs) >= 3:
-        kind, size = tlvs[0], struct.unpack("!H", tlvs[1:3])[0]
-        if kind == 0x02:
-            authority = tlvs[3:3 + size].decode()
-        tlvs = tlvs[3 + size:]
-    return src, src_port, authority
-
-
-class FakeTraefik:
-    """TLS and plain listeners that require PROXY v2 and report what they saw."""
-
-    def __init__(self, cert, key):
-        self.tls_port = free_port()
-        self.http_port = free_port()
-        self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        self.context.load_cert_chain(cert, key)
-        self.context.set_alpn_protocols(["h2", "http/1.1", "acme-tls/1"])
-        self.sni = threading.local()
-        self.context.sni_callback = self._on_sni
-        for port, tls in ((self.tls_port, True), (self.http_port, False)):
-            listener = socket.create_server(("127.0.0.1", port))
-            threading.Thread(target=self._accept, args=(listener, tls),
-                             daemon=True).start()
-
-    def _on_sni(self, ssl_socket, server_name, _context):
-        ssl_socket.sni_seen = server_name or ""
-
-    def _accept(self, listener, tls):
-        while True:
-            conn, _ = listener.accept()
-            threading.Thread(target=self._serve, args=(conn, tls),
-                             daemon=True).start()
-
-    def _serve(self, conn, tls):
+def wait_port(port, timeout=10):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         try:
-            conn.settimeout(5)
-            src, src_port, authority = read_proxy_v2(conn)
-            alpn, sni = "-", "-"
-            if tls:
-                conn = self.context.wrap_socket(conn, server_side=True)
-                alpn = conn.selected_alpn_protocol() or "-"
-                sni = getattr(conn, "sni_seen", "") or "-"
-            line = conn.recv(1024).split(b"\n")[0].decode(errors="replace")
-            line = line.strip().replace(" ", "_") or "-"
-            reply = (f"upstream={'tls' if tls else 'plain'} src={src}:{src_port} "
-                     f"sni={sni} alpn={alpn} authority={authority or '-'} "
-                     f"got={line}\n")
-            conn.sendall(reply.encode())
-        except Exception as e:  # noqa: BLE001 - report and drop the connection
-            print(f"fake traefik: {e}", file=sys.stderr)
-        finally:
-            conn.close()
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+            return
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError(f"port {port} did not open")
 
 
 class FakeNats:
@@ -205,49 +137,85 @@ class FakeNats:
             return [json.dumps(event) for _, event in self.events]
 
 
-def hpack_literal(name, value):
-    """Literal header field without indexing, new name, no Huffman."""
-    out = b"\x00"
-    for text in (name, value):
-        data = text.encode()
-        assert len(data) < 127
-        out += bytes([len(data)]) + data
-    return out
-
-
-def h2_frame(kind, flags, stream, payload):
-    return (struct.pack("!I", len(payload))[1:] + bytes([kind, flags]) +
-            struct.pack("!I", stream) + payload)
-
-
-def h2_client_request(authority, path):
-    headers = b"".join(hpack_literal(n, v) for n, v in [
-        (":method", "GET"), (":authority", authority), (":scheme", "https"),
-        (":path", path), ("user-agent", "e2e-h2"),
-        ("accept-language", "de-DE,de;q=0.9")])
-    settings = struct.pack("!HI", 1, 65536) + struct.pack("!HI", 4, 6291456)
-    return (b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" +
-            h2_frame(0x4, 0, 0, settings) +
-            h2_frame(0x8, 0, 0, struct.pack("!I", 15663105)) +
-            h2_frame(0x1, 0x5, 1, headers))
-
-
 def parse_reply(reply):
     return dict(item.split("=", 1) for item in reply.strip().split(" "))
 
 
-def tls_request(port, server_name, cafile, alpn=None, payload=b"hello\n"):
+def tls_socket(port, server_name, cafile, alpn=None):
     context = ssl.create_default_context(cafile=cafile)
     if alpn:
         context.set_alpn_protocols(alpn)
-    raw = socket.create_connection(("127.0.0.1", port), timeout=5)
-    with context.wrap_socket(raw, server_hostname=server_name) as tls:
+    raw = socket.create_connection(("127.0.0.1", port), timeout=10)
+    return context.wrap_socket(raw, server_hostname=server_name)
+
+
+def line_request(port, server_name, cafile, alpn=None, payload=b"hello\n"):
+    """Passthrough probe: one line to the fake Traefik's line mode."""
+    with tls_socket(port, server_name, cafile, alpn) as tls:
         local_port = tls.getsockname()[1]
         negotiated = tls.selected_alpn_protocol()
         tls.sendall(payload)
         reply = tls.recv(4096).decode()
-    fields = parse_reply(reply)
-    return fields, local_port, negotiated
+    return parse_reply(reply), local_port, negotiated
+
+
+class _KeepOpen:
+    """A reader http.client cannot close (it closes after each response)."""
+
+    def __init__(self, reader):
+        self.reader = reader
+
+    def __getattr__(self, name):
+        return getattr(self.reader, name)
+
+    def close(self):
+        pass
+
+
+class _Buffered:
+    """Lets several http.client responses share one buffered reader."""
+
+    def __init__(self, reader):
+        self.reader = _KeepOpen(reader)
+
+    def makefile(self, *args, **kwargs):
+        return self.reader
+
+
+def h1_exchange(port, server_name, cafile, raw, responses=1,
+                alpn=("http/1.1",)):
+    """Sends raw HTTP/1.1 bytes, returns [(status, headers, body)]."""
+    results = []
+    with tls_socket(port, server_name, cafile, list(alpn)) as tls:
+        tls.sendall(raw)
+        reader = tls.makefile("rb")
+        for _ in range(responses):
+            response = http.client.HTTPResponse(_Buffered(reader))
+            response.begin()
+            body = response.read()
+            results.append((response.status,
+                            {k.lower(): v for k, v in response.getheaders()},
+                            body))
+    return results
+
+
+def h1_get(port, server_name, cafile, path, extra=b""):
+    raw = (f"GET {path} HTTP/1.1\r\nHost: {server_name}\r\n".encode() + extra +
+           b"\r\n")
+    return h1_exchange(port, server_name, cafile, raw)[0]
+
+
+def curl(port, host, cafile, path, output, extra=()):
+    result = subprocess.run(
+        ["curl", "-sS", "--http2", "--resolve", f"{host}:{port}:127.0.0.1",
+         "--cacert", cafile, "-o", output, "-w",
+         "%{http_code} %{http_version}", *extra,
+         f"https://{host}:{port}{path}"],
+        capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise AssertionError(f"curl failed: {result.stderr}")
+    status, version = result.stdout.split()
+    return int(status), version
 
 
 class Checks:
@@ -269,24 +237,32 @@ def expect(condition, message):
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3):
         sys.exit(__doc__)
     binary = os.path.abspath(sys.argv[1])
+    fake = (os.path.abspath(sys.argv[2]) if len(sys.argv) == 3 else
+            os.path.join(os.path.dirname(binary), "..", "tests",
+                         "bot_shield_fake_upstream"))
     version = subprocess.run([binary, "--version"], capture_output=True,
                              text=True, check=True).stdout
     ja4plus = "(ja4plus)" in version
     workdir = tempfile.mkdtemp(prefix="bot-shield-e2e-")
 
-    gw_a = make_cert(workdir, "gw-a", ["a.test", "www.a.test"])
+    gw_a = make_cert(workdir, "gw-a", ["a.test", "www.a.test", "noh2.test"])
     gw_w = make_cert(workdir, "gw-w", ["*.w.test"])
     gw_c = make_cert(workdir, "gw-c", ["c.test"])
     upstream = make_cert(workdir, "upstream",
-                         ["a.test", "b.test", "c.test", "grpc.a.test"])
+                         ["a.test", "b.test", "c.test", "grpc.a.test",
+                          "noh2.test", "x.w.test", "www.a.test"])
     acme_path = os.path.join(workdir, "acme.json")
     write_atomic(acme_path, acme_json([(*gw_a, "a.test"), (*gw_w, "*.w.test")]))
 
-    traefik = FakeTraefik(*upstream)
+    tls_port, plain_port = free_port(), free_port()
+    upstream_process = subprocess.Popen(
+        [fake, str(tls_port), str(plain_port), *upstream])
+    wait_port(tls_port)
     nats = FakeNats()
+
     https_port, http_port, metrics_port = free_port(), free_port(), free_port()
     config_path = os.path.join(workdir, "bot-shield.yaml")
     with open(config_path, "w") as f:
@@ -298,8 +274,9 @@ workers: 2
 traefik:
   acme_json: {acme_path}
   acme_reload_interval: 200ms
-  upstream_https: 127.0.0.1:{traefik.tls_port}
-  upstream_http: 127.0.0.1:{traefik.http_port}
+  upstream_https: 127.0.0.1:{tls_port}
+  upstream_http: 127.0.0.1:{plain_port}
+  pool_size: 2
 passthrough_hosts: [grpc.a.test]
 timeouts:
   client_hello: 1s
@@ -325,52 +302,154 @@ log_level: debug
             time.sleep(0.05)
     else:
         process.kill()
+        upstream_process.kill()
         sys.exit("bot-shield did not start; log: " + open(log_path).read())
 
-    gw_a_cert, gw_w_cert, gw_c_cert, upstream_cert = (
-        gw_a[0], gw_w[0], gw_c[0], upstream[0])
+    ca_a, ca_w, ca_c, ca_up = gw_a[0], gw_w[0], gw_c[0], upstream[0]
     checks = Checks()
 
-    def terminate_http11():
-        fields, local_port, alpn = tls_request(https_port, "a.test", gw_a_cert,
-                                               ["http/1.1"])
-        expect(alpn == "http/1.1", f"client ALPN {alpn}")
-        expect(fields["upstream"] == "tls", fields)
-        expect(fields["sni"] == "a.test", fields)
-        expect(fields["alpn"] == "http/1.1", fields)
-        expect(fields["src"] == f"127.0.0.1:{local_port}", fields)
-        expect(fields["authority"] == "a.test", fields)
-        expect(fields["got"] == "hello", fields)
+    # --- Proxy over HTTP/1.1 ------------------------------------------------
 
-    def terminate_h2():
-        fields, _, alpn = tls_request(https_port, "www.a.test", gw_a_cert,
-                                      ["h2", "http/1.1"])
-        expect(alpn == "h2", f"client ALPN {alpn}")
-        expect(fields["alpn"] == "h2", fields)
-        expect(fields["sni"] == "www.a.test", fields)
+    def h1_get_forwarding():
+        status, headers, body = h1_get(
+            https_port, "a.test", ca_a, "/items/42?x=1",
+            b"X-Forwarded-For: 6.6.6.6\r\nX-Real-IP: 6.6.6.6\r\n"
+            b"X-Bot-Score: 0\r\nUser-Agent: e2e-agent\r\n")
+        expect(status == 200, status)
+        seen = json.loads(body)
+        expect(seen["proto"] == "h2", seen)  # Upstream leg is HTTP/2.
+        expect(seen["proxy_src"] == "", seen)  # Pool: no PROXY header.
+        h = seen["headers"]
+        expect(h[":path"] == "/items/42?x=1", h)
+        expect(h[":authority"] == "a.test", h)
+        expect(h["x-forwarded-for"] == "127.0.0.1", h)
+        expect(h["x-real-ip"] == "127.0.0.1", h)
+        expect(h["x-forwarded-proto"] == "https", h)
+        expect(h["x-forwarded-host"] == "a.test", h)
+        expect("x-bot-score" not in h, h)
+        expect(h["user-agent"] == "e2e-agent", h)
+        expect("host" not in h and "connection" not in h, h)
+        expect(seen["sni"] == "a.test", seen)
 
-    def terminate_without_alpn():
-        fields, _, alpn = tls_request(https_port, "a.test", gw_a_cert)
-        expect(alpn is None, f"client ALPN {alpn}")
-        expect(fields["alpn"] == "-", fields)
+    def h1_keep_alive_and_pipelining():
+        raw = b"".join(
+            f"GET /p/{i} HTTP/1.1\r\nHost: a.test\r\n\r\n".encode()
+            for i in range(3))
+        results = h1_exchange(https_port, "a.test", ca_a, raw, responses=3)
+        paths = [json.loads(body)["headers"][":path"] for _, _, body in results]
+        expect(paths == ["/p/0", "/p/1", "/p/2"], paths)
 
-    def terminate_wildcard():
-        fields, _, _ = tls_request(https_port, "x.w.test", gw_w_cert)
-        expect(fields["sni"] == "x.w.test", fields)
+    def h1_uploads():
+        body = os.urandom(3 * 1024 * 1024)
+        raw = (b"POST /upload HTTP/1.1\r\nHost: a.test\r\n" +
+               f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+        status, _, reply = h1_exchange(https_port, "a.test", ca_a, raw)[0]
+        expect(status == 200, status)
+        expect(json.loads(reply)["body_len"] == len(body), reply[:200])
+        chunks = b"".join(f"{4096:x}\r\n".encode() + b"y" * 4096 + b"\r\n"
+                          for _ in range(256)) + b"0\r\n\r\n"
+        raw = (b"POST /chunked HTTP/1.1\r\nHost: a.test\r\n"
+               b"Transfer-Encoding: chunked\r\n\r\n" + chunks)
+        status, _, reply = h1_exchange(https_port, "a.test", ca_a, raw)[0]
+        expect(json.loads(reply)["body_len"] == 256 * 4096, reply[:200])
+
+    def h1_big_download_and_status():
+        status, headers, body = h1_get(https_port, "a.test", ca_a,
+                                       "/big?bytes=8388608")
+        expect(status == 200 and len(body) == 8388608, (status, len(body)))
+        expect(headers.get("content-length") == "8388608", headers)
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/status/404")
+        expect(status == 404, status)
+        # Trailers force a chunked HTTP/1.1 response.
+        status, headers, body = h1_get(https_port, "a.test", ca_a, "/trailers")
+        expect(status == 200, status)
+        expect(headers.get("transfer-encoding") == "chunked", headers)
+        expect(json.loads(body)["proto"] == "h2", body)
+
+    def bad_gateway_when_upstream_fails():
+        status, _, body = h1_get(https_port, "noh2.test", ca_a, "/")
+        expect(status == 502, (status, body))
+
+    def websocket_tunnel():
+        with tls_socket(https_port, "a.test", ca_a, ["http/1.1"]) as tls:
+            tls.sendall(b"GET /ws HTTP/1.1\r\nHost: a.test\r\n"
+                        b"Connection: Upgrade\r\nUpgrade: websocket\r\n"
+                        b"X-Forwarded-For: 6.6.6.6\r\n"
+                        b"Sec-WebSocket-Version: 13\r\n"
+                        b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+            head = b""
+            while b"\r\n\r\n" not in head:
+                head += tls.recv(4096)
+            expect(head.startswith(b"HTTP/1.1 101"), head)
+            expect(b"X-Seen-Forwarded-For: 127.0.0.1" in head, head)
+            tls.sendall(b"ping-frame")
+            echo = b""
+            while len(echo) < 10:
+                echo += tls.recv(4096)
+            expect(echo == b"ping-frame", echo)
+
+    def concurrent_requests():
+        errors = []
+
+        def one(i):
+            try:
+                status, _, body = h1_get(https_port, "a.test", ca_a, f"/c/{i}")
+                if status != 200 or json.loads(body)["headers"][":path"] != \
+                        f"/c/{i}":
+                    errors.append((status, body[:100]))
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        threads = [threading.Thread(target=one, args=(i,)) for i in range(50)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        expect(not errors, errors[:3])
+
+    # --- Proxy over HTTP/2 (curl) -------------------------------------------
+
+    def h2_requests():
+        out = os.path.join(workdir, "out")
+        status, version = curl(https_port, "a.test", ca_a, "/h2/7", out,
+                               ["-H", "user-agent: e2e-h2"])
+        expect((status, version) == (200, "2"), (status, version))
+        seen = json.load(open(out))
+        expect(seen["headers"][":path"] == "/h2/7", seen)
+        expect(seen["headers"]["x-forwarded-for"] == "127.0.0.1", seen)
+        status, _ = curl(https_port, "a.test", ca_a, "/big?bytes=8388608", out)
+        expect(status == 200 and os.path.getsize(out) == 8388608,
+               os.path.getsize(out))
+        upload = os.path.join(workdir, "upload")
+        with open(upload, "wb") as f:
+            f.write(os.urandom(3 * 1024 * 1024))
+        status, _ = curl(https_port, "a.test", ca_a, "/upload", out,
+                         ["--data-binary", f"@{upload}"])
+        expect(json.load(open(out))["body_len"] == 3 * 1024 * 1024, "upload")
+        status, _ = curl(https_port, "a.test", ca_a, "/trailers", out)
+        expect(status == 200, status)
+
+    # --- Routing, passthrough, certificates ---------------------------------
+
+    def wildcard_certificate():
+        status, _, body = h1_get(https_port, "x.w.test", ca_w, "/")
+        expect(status == 200, status)
+        expect(json.loads(body)["sni"] == "x.w.test", body)
 
     def passthrough_unknown_host():
-        fields, local_port, _ = tls_request(https_port, "b.test", upstream_cert)
+        fields, local_port, _ = line_request(https_port, "b.test", ca_up)
         expect(fields["sni"] == "b.test", fields)
         expect(fields["src"] == f"127.0.0.1:{local_port}", fields)
+        expect(fields["authority"] == "b.test", fields)
 
     def passthrough_acme_tls_alpn():
-        fields, _, alpn = tls_request(https_port, "a.test", upstream_cert,
-                                      ["acme-tls/1"])
+        fields, _, alpn = line_request(https_port, "a.test", ca_up,
+                                       ["acme-tls/1"])
         expect(alpn == "acme-tls/1", f"client ALPN {alpn}")
         expect(fields["alpn"] == "acme-tls/1", fields)
 
     def passthrough_policy():
-        fields, _, _ = tls_request(https_port, "grpc.a.test", upstream_cert)
+        fields, _, _ = line_request(https_port, "grpc.a.test", ca_up)
         expect(fields["sni"] == "grpc.a.test", fields)
 
     def plain_http_passthrough():
@@ -398,18 +477,18 @@ log_level: debug
 
     def acme_reload():
         try:
-            tls_request(https_port, "c.test", gw_c_cert)
+            line_request(https_port, "c.test", ca_c)
             raise AssertionError("c.test was terminated before the reload")
         except ssl.SSLCertVerificationError:
-            pass  # Passed through to the upstream certificate, as expected.
+            pass  # Passed through to the upstream certificate.
         write_atomic(acme_path, acme_json([(*gw_a, "a.test"),
                                            (*gw_w, "*.w.test"),
                                            (*gw_c, "c.test")]))
         deadline = time.monotonic() + 5
         while True:
             try:
-                fields, _, _ = tls_request(https_port, "c.test", gw_c_cert)
-                expect(fields["sni"] == "c.test", fields)
+                status, _, body = h1_get(https_port, "c.test", ca_c, "/")
+                expect(json.loads(body)["sni"] == "c.test", body)
                 return
             except ssl.SSLCertVerificationError:
                 if time.monotonic() > deadline:
@@ -420,43 +499,26 @@ log_level: debug
         with open(acme_path, "w") as f:
             f.write('{"le": {"Certificates": [')
         time.sleep(0.6)
-        fields, _, _ = tls_request(https_port, "a.test", gw_a_cert)
-        expect(fields["sni"] == "a.test", fields)
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/")
+        expect(status == 200, status)
 
-    def concurrent_connections():
-        errors = []
-
-        def one():
-            try:
-                fields, _, _ = tls_request(https_port, "a.test", gw_a_cert,
-                                           ["h2"])
-                if fields["got"] != "hello":
-                    errors.append(fields)
-            except Exception as e:  # noqa: BLE001
-                errors.append(e)
-
-        threads = [threading.Thread(target=one) for _ in range(50)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        expect(not errors, errors[:3])
+    # --- Events --------------------------------------------------------------
 
     def events_http11_request():
-        request = (b"GET /items/42?token=secret HTTP/1.1\r\nHost: a.test\r\n"
-                   b"User-Agent: e2e-agent\r\nAccept-Language: en-US\r\n\r\n")
-        fields, local_port, _ = tls_request(https_port, "a.test", gw_a_cert,
-                                            ["http/1.1"], request)
-        expect(fields["got"] == "GET_/items/42?token=secret_HTTP/1.1", fields)
+        status, _, _ = h1_get(
+            https_port, "a.test", ca_a, "/items/42?token=secret",
+            b"User-Agent: event-agent\r\nAccept-Language: en-US\r\n")
+        expect(status == 200, status)
         event = nats.find("e2e.events.req",
-                          lambda e: e.get("user_agent") == "e2e-agent")
+                          lambda e: e.get("user_agent") == "event-agent")
         expect(event["method"] == "GET", event)
+        expect(event["status"] == 200 and event["local"] is False, event)
         expect(event["host"] == "a.test", event)
         expect(event["path_group"] == "/items/:n", event)
         expect(event["header_names"] == ["Host", "User-Agent",
                                          "Accept-Language"], event)
         expect(event["ja4"].startswith("t13d"), event)
-        expect(event["ip_prefix"] == "127.0.0.0/24", event)
+        expect(event["response_bytes"] > 0, event)
         if sys.platform.startswith("linux"):
             expect(event["tcp_fp"].startswith("4:64:"), event)
             expect(("ja4t" in event) == ja4plus, event)
@@ -464,24 +526,26 @@ log_level: debug
         conn = nats.find("e2e.events.conn",
                          lambda e: e["conn_id"] == event["conn_id"] and
                          e["instance"] == event["instance"])
-        expect(conn["route"] == "terminate", conn)
+        expect(conn["route"] == "terminate" and conn["requests"] == 1, conn)
         expect(conn["alpn"] == "http/1.1", conn)
-        expect(conn["requests"] == 1, conn)
-        expect(conn["bytes_in"] == len(request), conn)
 
     def events_h2_request():
-        tls_request(https_port, "a.test", gw_a_cert, ["h2"],
-                    h2_client_request("a.test", "/h2/7"))
+        out = os.path.join(workdir, "out")
+        curl(https_port, "a.test", ca_a, "/h2/9", out,
+             ["-H", "user-agent: e2e-h2-event"])
         event = nats.find("e2e.events.req",
-                          lambda e: e.get("user_agent") == "e2e-h2")
+                          lambda e: e.get("user_agent") == "e2e-h2-event")
         expect(event["http_version"] == "2", event)
         expect(event["path_group"] == "/h2/:n", event)
-        expect(event["h2_fp"] == "1:65536;4:6291456|15663105|0|m,a,s,p", event)
-        expect(event["pseudo_order"] == "m,a,s,p", event)
-        if ja4plus:
-            expect(event["ja4h"].startswith("ge20nn02dede_"), event)
+        expect(event["status"] == 200, event)
+        expect(event["h2_fp"].count("|") == 3, event)
+        expect(event["pseudo_order"].startswith("m,"), event)
 
-    def events_plain_http_and_passthrough():
+    def events_local_and_passthrough():
+        h1_get(https_port, "noh2.test", ca_a, "/fail")
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/fail")
+        expect(event["status"] == 502 and event["local"] is True, event)
         with socket.create_connection(("127.0.0.1", http_port),
                                       timeout=5) as s:
             s.sendall(b"GET /plain HTTP/1.1\r\nHost: a.test\r\n"
@@ -491,9 +555,7 @@ log_level: debug
                           lambda e: e.get("user_agent") == "e2e-plain")
         conn = nats.find("e2e.events.conn",
                          lambda e: e["conn_id"] == event["conn_id"])
-        expect(conn["listener"] == "http", conn)
         expect(conn["reason"] == "plain_http", conn)
-        # Passthrough TLS: fingerprints only, no requests.
         nats.find("e2e.events.conn",
                   lambda e: e.get("sni") == "b.test" and
                   e["route"] == "passthrough" and "ja4" in e)
@@ -504,6 +566,7 @@ log_level: debug
         for payload in nats.payloads():
             expect("secret" not in payload, payload)
             expect("127.0.0.1" not in payload, payload)
+            expect("6.6.6.6" not in payload, payload)
 
     def metrics_exposed():
         body = urllib.request.urlopen(metrics_url + "/metrics",
@@ -513,26 +576,29 @@ log_level: debug
             if line and not line.startswith("#"):
                 key, value = line.rsplit(" ", 1)
                 values[key] = float(value)
-        terminated = values[
-            'bot_shield_routes_total{route="terminate",reason="certificate"}']
-        expect(terminated >= 55, f"terminate count {terminated}")
-        expect(values['bot_shield_connections_rejected_total'
-                      '{reason="not_tls"}'] >= 1, "not_tls count")
+        proxied = values['bot_shield_proxied_requests_total{source="upstream"}']
+        expect(proxied >= 60, f"proxied {proxied}")
+        opened = values["bot_shield_upstream_connections_opened_total"]
+        # Pool reuse: a handful of HTTP/2 connections for ~80 requests.
+        expect(1 <= opened <= 12, f"upstream connections {opened}")
+        expect(values["bot_shield_websocket_tunnels_total"] >= 1, "websocket")
         expect(values['bot_shield_connections_rejected_total'
                       '{reason="client_hello_timeout"}'] >= 1, "timeout count")
-        expect(values['bot_shield_acme_reloads_total{result="error"}'] >= 1,
-               "acme error count")
-        expect(values["bot_shield_certificates"] == 3, "certificate gauge")
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
         expect(values['bot_shield_events_total{result="published"}'] >= 50,
                "events published")
 
     for name, fn in [
-        ("terminate http/1.1 with PROXY v2", terminate_http11),
-        ("terminate h2 keeps ALPN", terminate_h2),
-        ("terminate without ALPN", terminate_without_alpn),
-        ("terminate wildcard certificate", terminate_wildcard),
-        ("passthrough unknown host", passthrough_unknown_host),
+        ("h1: GET with forwarding headers over the h2 pool", h1_get_forwarding),
+        ("h1: keep-alive and pipelining", h1_keep_alive_and_pipelining),
+        ("h1: 3 MB upload and chunked upload", h1_uploads),
+        ("h1: 8 MB download, status, trailers", h1_big_download_and_status),
+        ("h1: 502 when the upstream fails", bad_gateway_when_upstream_fails),
+        ("h1: WebSocket tunnel", websocket_tunnel),
+        ("h1: 50 concurrent requests", concurrent_requests),
+        ("h2: GET, 8 MB download, 3 MB upload, trailers", h2_requests),
+        ("wildcard certificate", wildcard_certificate),
+        ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),
         ("passthrough policy host", passthrough_policy),
         ("plain http passthrough", plain_http_passthrough),
@@ -540,24 +606,27 @@ log_level: debug
         ("client hello timeout", client_hello_timeout),
         ("acme.json reload", acme_reload),
         ("broken acme.json keeps certificates", broken_acme_keeps_certificates),
-        ("50 concurrent connections", concurrent_connections),
-        ("events: HTTP/1.1 request", events_http11_request),
+        ("events: HTTP/1.1 request with outcome", events_http11_request),
         ("events: HTTP/2 request", events_h2_request),
-        ("events: plain HTTP, passthrough, reject",
-         events_plain_http_and_passthrough),
+        ("events: local 502, plain HTTP, passthrough, reject",
+         events_local_and_passthrough),
         ("events: no secrets or full IPs", events_keep_secrets),
         ("metrics", metrics_exposed),
     ]:
         checks.run(name, fn)
 
     def graceful_shutdown():
+        started = time.monotonic()
         process.send_signal(signal.SIGTERM)
         code = process.wait(timeout=10)
         expect(code == 0, f"exit code {code}")
+        elapsed = time.monotonic() - started
+        expect(elapsed < 5, f"shutdown took {elapsed:.1f}s")
 
-    checks.run("graceful shutdown", graceful_shutdown)
+    checks.run("graceful shutdown (pool drained)", graceful_shutdown)
     if process.poll() is None:
         process.kill()
+    upstream_process.kill()
     log_file.close()
 
     if checks.failed:

@@ -10,6 +10,7 @@ add_executable(bot_shield_tests
   nats_publisher_test.cc
   prefixed_stream_test.cc
   proxy_protocol_test.cc
+  proxy_test.cc
   tcp_syn_test.cc
   test_util.cc
 )
@@ -25,3 +26,8 @@ include(GoogleTest)
 gtest_discover_tests(bot_shield_tests)
 
 bot_shield_enable_tidy(bot_shield_tests)
+
+# Fake Traefik (HTTP/2 over TLS) for tests/e2e/run_e2e.py.
+add_executable(bot_shield_fake_upstream e2e/fake_upstream.cc)
+target_link_libraries(bot_shield_fake_upstream PRIVATE
+  ssl crypto nghttp2 nlohmann_json::nlohmann_json Threads::Threads)

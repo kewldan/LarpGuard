@@ -1,0 +1,141 @@
+#include <gtest/gtest.h>
+
+#include <asio/ip/address.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <string>
+#include <vector>
+
+#include "proxy/exchange.h"
+#include "proxy/http_message.h"
+
+namespace bot_shield {
+namespace {
+
+TEST(HttpMessageTest, FiltersHopByHopAndSpoofableHeaders) {
+  const HeaderList input = {
+      {"host", "a.test"},
+      {"connection", "keep-alive, x-drop"},
+      {"keep-alive", "timeout=5"},
+      {"x-drop", "1"},
+      {"transfer-encoding", "chunked"},
+      {"upgrade", "h2c"},
+      {"te", "trailers"},
+      {"te", "gzip"},
+      {"x-forwarded-for", "6.6.6.6"},
+      {"forwarded", "for=6.6.6.6"},
+      {"x-real-ip", "6.6.6.6"},
+      {"x-bot-score", "0"},
+      {"user-agent", "ua"},
+      {"cookie", "a=1"},
+  };
+  const HeaderList expected = {
+      {"te", "trailers"}, {"user-agent", "ua"}, {"cookie", "a=1"}};
+  EXPECT_EQ(FilterRequestHeaders(input), expected);
+}
+
+TEST(HttpMessageTest, AddsForwardingHeaders) {
+  ClientInfo client;
+  client.address = asio::ip::make_address("::ffff:203.0.113.7");
+  client.local_port = 443;
+  HeaderList headers;
+  AddForwardingHeaders(client, "shop.test:8443", &headers);
+  EXPECT_EQ(FindHeader(headers, "x-forwarded-for"), "203.0.113.7");
+  EXPECT_EQ(FindHeader(headers, "x-real-ip"), "203.0.113.7");
+  EXPECT_EQ(FindHeader(headers, "x-forwarded-proto"), "https");
+  EXPECT_EQ(FindHeader(headers, "x-forwarded-host"), "shop.test");
+  EXPECT_EQ(FindHeader(headers, "x-forwarded-port"), "443");
+}
+
+TEST(HttpMessageTest, ResponseBodyRules) {
+  EXPECT_TRUE(ResponseHasBody("GET", 200));
+  EXPECT_FALSE(ResponseHasBody("HEAD", 200));
+  EXPECT_FALSE(ResponseHasBody("GET", 204));
+  EXPECT_FALSE(ResponseHasBody("GET", 304));
+  EXPECT_FALSE(ResponseHasBody("GET", 101));
+}
+
+TEST(HttpMessageTest, FormatsH1ResponseHead) {
+  EXPECT_EQ(FormatH1ResponseHead("1.1", 404, {{"content-length", "0"}}),
+            "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n");
+  EXPECT_EQ(ReasonPhrase(299), "OK");
+  EXPECT_EQ(ReasonPhrase(599), "Error");
+}
+
+TEST(BodyQueueTest, ReadsAcrossChunks) {
+  BodyQueue queue;
+  const std::string a = "hello ";
+  const std::string b = "world";
+  queue.Push(std::span(reinterpret_cast<const uint8_t*>(a.data()), a.size()));
+  queue.Push(std::span(reinterpret_cast<const uint8_t*>(b.data()), b.size()));
+  EXPECT_EQ(queue.size(), 11u);
+  std::vector<uint8_t> out(4);
+  std::string read;
+  while (const std::size_t n = queue.Read(out)) {
+    read.append(reinterpret_cast<const char*>(out.data()), n);
+  }
+  EXPECT_EQ(read, "hello world");
+  EXPECT_TRUE(queue.empty());
+}
+
+TEST(ExchangeTest, HooksAndFlowControlCredit) {
+  Exchange exchange;
+  int upstream_wakes = 0;
+  int client_wakes = 0;
+  std::size_t request_credit = 0;
+  std::size_t response_credit = 0;
+  exchange.wake_upstream = [&] { ++upstream_wakes; };
+  exchange.wake_client = [&] { ++client_wakes; };
+  exchange.request_consumed = [&](std::size_t n) { request_credit += n; };
+  exchange.response_consumed = [&](std::size_t n) { response_credit += n; };
+
+  const std::string body = "abcdef";
+  const auto bytes =
+      std::span(reinterpret_cast<const uint8_t*>(body.data()), body.size());
+  exchange.PushRequestBody(bytes);
+  exchange.EndRequest();
+  EXPECT_EQ(upstream_wakes, 2);
+  std::vector<uint8_t> out(16);
+  EXPECT_EQ(exchange.ReadRequestBody(out), 6u);
+  EXPECT_EQ(request_credit, 6u);
+
+  exchange.SetResponse(ProxyResponse{200, {}});
+  exchange.PushResponseBody(bytes);
+  exchange.EndResponse();
+  EXPECT_EQ(client_wakes, 3);
+  EXPECT_EQ(exchange.ReadResponseBody(out), 6u);
+  EXPECT_EQ(response_credit, 6u);
+  EXPECT_EQ(exchange.response_bytes, 6u);
+}
+
+TEST(ExchangeTest, LocalResponseIgnoresUpstream) {
+  Exchange exchange;
+  bool cancelled = false;
+  exchange.cancel_upstream = [&] { cancelled = true; };
+  exchange.RespondLocally(403, "no\n");
+  EXPECT_TRUE(cancelled);
+  EXPECT_TRUE(exchange.local);
+  EXPECT_EQ(exchange.response.status, 403);
+  EXPECT_EQ(FindHeader(exchange.response.headers, "content-length"), "3");
+  // A late upstream response must not replace the local one.
+  exchange.SetResponse(ProxyResponse{200, {}});
+  exchange.FailUpstream();
+  EXPECT_EQ(exchange.response.status, 403);
+  EXPECT_FALSE(exchange.upstream_failed);
+}
+
+TEST(ExchangeTest, CancelFromClientDropsClientHooks) {
+  Exchange exchange;
+  int wakes = 0;
+  bool cancelled = false;
+  exchange.wake_client = [&] { ++wakes; };
+  exchange.cancel_upstream = [&] { cancelled = true; };
+  exchange.CancelFromClient();
+  EXPECT_TRUE(cancelled);
+  exchange.FailUpstream();
+  EXPECT_EQ(wakes, 0);
+}
+
+}  // namespace
+}  // namespace bot_shield

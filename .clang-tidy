@@ -43,8 +43,10 @@ FormatStyle: file
 CheckOptions:
   # Include what you use for the standard library and our own headers.
   # Third-party libraries without IWYU annotations are left alone: their
-  # public entry points are not the headers that define each symbol.
-  - { key: misc-include-cleaner.IgnoreHeaders, value: "asio/.*;asio\\.hpp;openssl/.*;nlohmann/.*;yaml-cpp/.*;gtest/.*;gmock/.*" }
+  # public entry points are not the headers that define each symbol. Darwin's
+  # private system headers (sys/_*.h) must never be suggested: Linux lacks
+  # them.
+  - { key: misc-include-cleaner.IgnoreHeaders, value: "asio/.*;asio\\.hpp;openssl/.*;nlohmann/.*;yaml-cpp/.*;gtest/.*;gmock/.*;sys/_.*;_.*\\.h;__.*" }
 
   # Types: PascalCase.
   - { key: readability-identifier-naming.ClassCase, value: CamelCase }

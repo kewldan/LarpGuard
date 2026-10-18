@@ -10,6 +10,8 @@
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "net/classifier.h"
+#include "proxy/proxy_hooks.h"
+#include "proxy/upstream_pool.h"
 #include "tls/cert_store.h"
 
 namespace bot_shield {
@@ -24,6 +26,9 @@ struct GatewayContext {
   asio::ip::tcp::endpoint upstream_http;
   // Client-side TLS context for connections to Traefik (per worker).
   asio::ssl::context* upstream_tls = nullptr;
+  // Per-worker HTTP/2 connection pool to Traefik.
+  UpstreamPool* pool = nullptr;
+  ProxySettings proxy_settings;
   // Analytics events; null when disabled.
   EventSink* events = nullptr;
   const EventSettings* event_settings = nullptr;

@@ -58,9 +58,20 @@ std::string ConnectionEventJson(const ConnectionRecord& record,
                                 const EventSettings& settings,
                                 int64_t ended_ms);
 
+// How a proxied request ended (absent for passively observed requests).
+struct RequestOutcome {
+  // 0 when no response was produced (client went away first).
+  int status = 0;
+  int64_t duration_ms = 0;
+  uint64_t response_bytes = 0;
+  // Answered by the gateway itself.
+  bool local = false;
+};
+
 std::string RequestEventJson(const ConnectionRecord& record,
                              const HttpRequest& request, int sequence,
-                             const EventSettings& settings, int64_t time_ms);
+                             const EventSettings& settings, int64_t time_ms,
+                             const RequestOutcome* outcome = nullptr);
 
 }  // namespace bot_shield
 

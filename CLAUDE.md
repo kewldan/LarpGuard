@@ -8,7 +8,8 @@ Self-hosted шлюз фильтрации ботов перед Traefik. Осн�
 Готовы M0 (TLS-фронт с маршрутизацией по ClientHello, сертификаты из
 `acme.json`, TLS-туннель до Traefik с PROXY v2) и M1 (пассивные отпечатки
 TCP/JA4/HTTP2/заголовков, события в NATS → ClickHouse). Следующий этап — M2:
-HTTP-aware прокси, библиотека отпечатков, скоринг, shadow mode, `X-Bot-*`.
+HTTP-aware прокси (сделан, ADR-015), дальше библиотека отпечатков, скоринг,
+shadow mode, `X-Bot-*`.
 
 ## Команды
 
@@ -16,7 +17,7 @@ HTTP-aware прокси, библиотека отпечатков, скорин
 cmake -S . -B build -G Ninja          # первый configure качает зависимости
 cmake --build build
 ctest --test-dir build --output-on-failure
-python3 -I tests/e2e/run_e2e.py build/src/bot-shield
+python3 -I tests/e2e/run_e2e.py build/src/bot-shield   # нужен curl с HTTP/2
 cmake --build build --target format        # clang-format на месте
 cmake --build build --target format-check
 cmake --build build --target tidy          # clang-tidy, должно быть 0 предупреждений
@@ -64,6 +65,10 @@ ninja-build git python3 openssl`, исходники монтировать read
 - `src/fp/` — отпечатки и пассивные HTTP-разборщики. `src/fp/foxio/` —
   JA4T/JA4H под FoxIO License, только за `BOT_SHIELD_FOXIO`; код вне этой
   папки не должен от них зависеть (только `#if BOT_SHIELD_FOXIO`).
+- `src/proxy/` — HTTP-прокси: `h1_server`, `h2_server` (к клиенту),
+  `h2_upstream` + `upstream_pool` (к Traefik), `exchange` связывает стороны.
+  Вердикты по запросу — в `ConnectionObserver::OnProxyRequest`
+  (`exchange.RespondLocally()` или правка `exchange.request.headers`).
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в
@@ -77,6 +82,11 @@ ninja-build git python3 openssl`, исходники монтировать read
 - Тайм-ауты делаются через `ScopedWatchdog`, который закрывает сокет; его
   колбэк ссылается на объекты кадра корутины, поэтому watchdog обязан жить
   в той же области видимости.
+- nghttp2 нельзя вызывать повторно из его же колбэков: запись только через
+  `H2Connection::Flush()` (отложенный проход). Байты тела подтверждаются
+  (`consume`) только после передачи дальше — так работает backpressure.
+- Клиентские `X-Forwarded-*`, `X-Real-IP`, `Forwarded`, `X-Bot-*` всегда
+  вырезаются (`FilterRequestHeaders`): Traefik доверяет им от шлюза.
 - Пассивные разборщики (`H1Tap`, `H2Tap`) только читают копию потока и при
   любой проблеме отключаются; они не могут повлиять на проксирование.
 - Всё, что шлюз не может корректно обслужить, уходит в Traefik

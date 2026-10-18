@@ -17,9 +17,13 @@ traefik:
   # Traefik entrypoints moved to loopback (see deploy/traefik.yml).
   upstream_https: "127.0.0.1:8443"
   upstream_http: "127.0.0.1:8080"
-  # Send PROXY protocol v2 so Traefik sees real client addresses. The
-  # entrypoints must have proxyProtocol.trustedIPs including 127.0.0.1.
+  # PROXY protocol v2 on passed-through connections (and port 80) so Traefik
+  # sees real client addresses; needs proxyProtocol.trustedIPs on the
+  # entrypoints. Terminated requests use X-Forwarded-For instead (needs
+  # forwardedHeaders.trustedIPs), see deploy/traefik.yml.
   proxy_protocol: true
+  # HTTP/2 connections to Traefik per SNI and worker; requests multiplex.
+  pool_size: 4
   # Verify Traefik's certificate on the loopback hop.
   tls_verify: false
 
@@ -37,6 +41,8 @@ timeouts:
   upstream_connect: 5s
   idle: 300s
   drain: 30s
+  # Idle pooled HTTP/2 connections to Traefik are closed after this.
+  upstream_idle: 90s
 
 max_connections: 100000
 

@@ -114,7 +114,7 @@ bool ParseListen(const YAML::Node& node, Config* config, std::string* error) {
 bool ParseTraefik(const YAML::Node& node, Config* config, std::string* error) {
   if (!CheckKeys(node, "traefik",
                  {"acme_json", "acme_reload_interval", "upstream_https",
-                  "upstream_http", "proxy_protocol", "tls_verify"},
+                  "upstream_http", "proxy_protocol", "tls_verify", "pool_size"},
                  error)) {
     return false;
   }
@@ -127,6 +127,14 @@ bool ParseTraefik(const YAML::Node& node, Config* config, std::string* error) {
   if (node["tls_verify"]) {
     config->upstream_tls_verify = node["tls_verify"].as<bool>();
   }
+  if (node["pool_size"]) {
+    const auto value = node["pool_size"].as<int64_t>();
+    if (value <= 0 || value > 64) {
+      *error = "traefik.pool_size: expected 1..64";
+      return false;
+    }
+    config->upstream_pool_size = static_cast<std::size_t>(value);
+  }
   return ReadDuration(node, "traefik", "acme_reload_interval",
                       &config->acme_reload_interval, error) &&
          ReadEndpoint(node, "traefik", "upstream_https",
@@ -138,7 +146,7 @@ bool ParseTraefik(const YAML::Node& node, Config* config, std::string* error) {
 bool ParseTimeouts(const YAML::Node& node, Config* config, std::string* error) {
   if (!CheckKeys(node, "timeouts",
                  {"client_hello", "tls_handshake", "upstream_connect", "idle",
-                  "drain"},
+                  "drain", "upstream_idle"},
                  error)) {
     return false;
   }
@@ -149,7 +157,10 @@ bool ParseTimeouts(const YAML::Node& node, Config* config, std::string* error) {
          ReadDuration(node, "timeouts", "upstream_connect",
                       &config->upstream_connect_timeout, error) &&
          ReadDuration(node, "timeouts", "idle", &config->idle_timeout, error) &&
-         ReadDuration(node, "timeouts", "drain", &config->drain_timeout, error);
+         ReadDuration(node, "timeouts", "drain", &config->drain_timeout,
+                      error) &&
+         ReadDuration(node, "timeouts", "upstream_idle",
+                      &config->upstream_idle_timeout, error);
 }
 
 bool ParseEvents(const YAML::Node& node, Config* config, std::string* error) {

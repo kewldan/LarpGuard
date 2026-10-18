@@ -43,6 +43,9 @@ struct Config {
   Endpoint upstream_http{"127.0.0.1", 8080};
   bool proxy_protocol = true;
   bool upstream_tls_verify = false;
+  // HTTP/2 connections to Traefik per SNI and worker.
+  std::size_t upstream_pool_size = 4;
+  std::chrono::milliseconds upstream_idle_timeout{90000};
 
   // Hosts never terminated here (exact names or "*.parent").
   std::vector<std::string> passthrough_hosts;

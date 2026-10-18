@@ -31,7 +31,6 @@
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "fp/h1_tap.h"
-#include "fp/h2_tap.h"
 #include "fp/http_request.h"
 #include "fp/ja4.h"
 #include "fp/tcp_syn.h"
@@ -40,6 +39,12 @@
 #include "net/proxy_protocol.h"
 #include "net/socket_options.h"
 #include "net/watchdog.h"
+#include "proxy/exchange.h"
+#include "proxy/h1_server.h"
+#include "proxy/h2_server.h"
+#include "proxy/http_message.h"
+#include "proxy/proxy_hooks.h"
+#include "proxy/transport.h"
 #include "tls/cert_store.h"
 #include "tls/client_hello.h"
 
@@ -60,7 +65,6 @@ constexpr std::size_t kHelloReadChunk = 4096;
 constexpr std::size_t kPumpBufferSize = std::size_t{16} * 1024;
 
 using ClientTlsStream = asio::ssl::stream<PrefixedStream<tcp::socket>>;
-using UpstreamTlsStream = asio::ssl::stream<tcp::socket>;
 
 struct ConnectionInfo {
   uint64_t id = 0;
@@ -105,7 +109,6 @@ class ConnectionObserver {
   ~ConnectionObserver() {
     if (context_.events == nullptr) return;
     try {
-      if (h2_) record_.h2_fingerprint = h2_->fingerprint();
       context_.events->Publish(
           "conn",
           ConnectionEventJson(record_, *context_.event_settings, UnixMillis()));
@@ -142,39 +145,63 @@ class ConnectionObserver {
     record_.reason = reason;
   }
 
-  // Starts reading plaintext HTTP sent by the client. Only with events on:
-  // nothing else consumes what the taps produce.
-  void StartHttpTap(std::string_view alpn) {
+  // Starts reading the plaintext HTTP/1.x a client sends on port 80. Only
+  // with events on: nothing else consumes what the tap produces. Terminated
+  // TLS traffic goes through the proxy instead.
+  void StartHttpTap() {
     if (context_.events == nullptr || !context_.event_settings->requests) {
       return;
     }
-    auto on_request = [this](HttpRequest&& request) {
-      OnRequest(std::move(request));
-    };
-    if (alpn == "h2") {
-      h2_ = std::make_unique<H2Tap>(on_request);
-    } else {
-      h1_ = std::make_unique<H1Tap>(on_request);
-    }
+    h1_ = std::make_unique<H1Tap>(
+        [this](HttpRequest&& request) { OnRequest(std::move(request)); });
   }
 
   void OnClientData(std::span<const uint8_t> data) {
     record_.bytes_in += data.size();
     GlobalMetrics().bytes_client_to_upstream.Inc(data.size());
     if (h1_ && h1_->active()) h1_->Feed(data);
-    if (h2_ && h2_->active()) h2_->Feed(data);
   }
 
   void OnUpstreamData(std::span<const uint8_t> data) {
-    record_.bytes_out += data.size();
-    GlobalMetrics().bytes_upstream_to_client.Inc(data.size());
+    OnBytesToClient(data.size());
+  }
+
+  void OnBytesToClient(std::size_t size) {
+    record_.bytes_out += size;
+    GlobalMetrics().bytes_upstream_to_client.Inc(size);
+  }
+
+  // Request headers parsed by the proxy; the place for verdicts (M2 scoring).
+  void OnProxyRequest(Exchange& /*exchange*/) {}
+
+  void OnProxyDone(const Exchange& exchange) {
+    ++record_.requests;
+    GlobalMetrics().http_requests_observed.Inc();
+    if (!exchange.h2_fingerprint.empty()) {
+      record_.h2_fingerprint = exchange.h2_fingerprint;
+    }
+    if (context_.events == nullptr || !context_.event_settings->requests) {
+      return;
+    }
+    RequestOutcome outcome;
+    outcome.status = exchange.response_started ? exchange.response.status : 0;
+    outcome.duration_ms = SteadyMillis() - exchange.started_ms;
+    outcome.response_bytes = exchange.response_bytes;
+    outcome.local = exchange.local;
+    try {
+      context_.events->Publish(
+          "req",
+          RequestEventJson(record_, exchange.observed, record_.requests,
+                           *context_.event_settings, UnixMillis(), &outcome));
+    } catch (const std::exception& e) {
+      log::Warn("conn={} request event dropped: {}", record_.id, e.what());
+    }
   }
 
  private:
   void OnRequest(HttpRequest&& request) {
     ++record_.requests;
     GlobalMetrics().http_requests_observed.Inc();
-    if (h2_) record_.h2_fingerprint = h2_->fingerprint();
     try {
       context_.events->Publish(
           "req", RequestEventJson(record_, request, record_.requests,
@@ -187,7 +214,6 @@ class ConnectionObserver {
   const GatewayContext& context_;
   ConnectionRecord record_;
   std::unique_ptr<H1Tap> h1_;
-  std::unique_ptr<H2Tap> h2_;
 };
 
 template <typename Socket>
@@ -211,14 +237,6 @@ std::string SelectedAlpn(const SSL* ssl) {
   unsigned size = 0;
   SSL_get0_alpn_selected(ssl, &data, &size);
   return {reinterpret_cast<const char*>(data), size};
-}
-
-std::vector<uint8_t> AlpnWireFormat(std::string_view protocol) {
-  std::vector<uint8_t> wire;
-  wire.reserve(protocol.size() + 1);
-  wire.push_back(static_cast<uint8_t>(protocol.size()));
-  wire.insert(wire.end(), protocol.begin(), protocol.end());
-  return wire;
 }
 
 void CountRoute(const RouteDecision& decision) {
@@ -312,33 +330,6 @@ asio::awaitable<void> RelayTcp(tcp::socket& client, tcp::socket& upstream,
                 [&client] { ShutdownSend(client); }, close_both));
 }
 
-// Bidirectional relay between two TLS streams. TLS has no portable half-close
-// in asio, so the first side to finish closes both.
-asio::awaitable<void> RelayTls(ClientTlsStream& client,
-                               UpstreamTlsStream& upstream,
-                               const Config& config,
-                               ConnectionObserver& observer) {
-  auto executor = co_await asio::this_coro::executor;
-  Metrics& metrics = GlobalMetrics();
-  auto close_both = [&client, &upstream] {
-    CloseQuietly(client.lowest_layer());
-    CloseQuietly(upstream.lowest_layer());
-  };
-  ScopedWatchdog idle(executor, config.idle_timeout, [&metrics, close_both] {
-    metrics.idle_timeouts.Inc();
-    close_both();
-  });
-  auto on_client_data = [&observer](std::span<const uint8_t> data) {
-    observer.OnClientData(data);
-  };
-  auto on_upstream_data = [&observer](std::span<const uint8_t> data) {
-    observer.OnUpstreamData(data);
-  };
-  co_await (
-      Pump(client, upstream, *idle, on_client_data, close_both, close_both) &&
-      Pump(upstream, client, *idle, on_upstream_data, close_both, close_both));
-}
-
 // Connects to Traefik and sends the PROXY header if enabled.
 asio::awaitable<std::optional<tcp::socket>> ConnectUpstream(
     const tcp::endpoint& endpoint, const ConnectionInfo& info,
@@ -420,49 +411,40 @@ asio::awaitable<void> RunTerminate(tcp::socket socket,
   const std::string alpn = SelectedAlpn(client.native_handle());
   observer.record().alpn = alpn;
 
-  std::optional<tcp::socket> upstream_socket = co_await ConnectUpstream(
-      context.upstream_https, info, server_name, config);
-  if (!upstream_socket) co_return;
+  ClientInfo client_info;
+  client_info.address = info.peer.address();
+  client_info.local_port = info.local.port();
+  client_info.server_name = std::move(server_name);
+  ProxyHooks hooks;
+  hooks.on_request = [&observer](Exchange& exchange) {
+    observer.OnProxyRequest(exchange);
+  };
+  hooks.on_done = [&observer](const Exchange& exchange) {
+    observer.OnProxyDone(exchange);
+  };
+  hooks.on_client_bytes = [&observer](std::span<const uint8_t> data) {
+    observer.OnClientData(data);
+  };
+  hooks.on_bytes_to_client = [&observer](std::size_t size) {
+    observer.OnBytesToClient(size);
+  };
 
-  UpstreamTlsStream upstream(std::move(*upstream_socket),
-                             *context.upstream_tls);
-  SSL_set_tlsext_host_name(upstream.native_handle(), server_name.c_str());
-  if (!alpn.empty()) {
-    // Offer only what the client negotiated so both legs speak the same
-    // protocol and bytes can be relayed without re-framing.
-    const std::vector<uint8_t> wire = AlpnWireFormat(alpn);
-    SSL_set_alpn_protos(upstream.native_handle(), wire.data(), wire.size());
+  auto transport =
+      std::make_unique<StreamTransport<ClientTlsStream>>(std::move(client));
+  if (alpn == "h2") {
+    auto server = H2ServerConnection::Create(
+        std::move(transport), context.pool, std::move(client_info),
+        std::move(hooks), context.proxy_settings);
+    server->Start();
+    co_await server->WaitClosed();
+    server->DetachHooks();
+  } else {
+    auto server = H1ServerConnection::Create(
+        std::move(transport), context.pool, std::move(client_info),
+        std::move(hooks), context.proxy_settings);
+    co_await server->Run();
+    server->DetachHooks();
   }
-  if (config.upstream_tls_verify) {
-    upstream.set_verify_callback(
-        asio::ssl::host_name_verification(server_name));
-  }
-  {
-    ScopedWatchdog deadline(
-        executor, config.tls_handshake_timeout,
-        [&upstream] { CloseQuietly(upstream.lowest_layer()); });
-    auto [ec] =
-        co_await upstream.async_handshake(asio::ssl::stream_base::client, kUse);
-    if (ec) {
-      metrics.tls_handshake_failures_upstream.Inc();
-      log::Warn("conn={} upstream handshake for {} failed: {}", info.id,
-                server_name, deadline->expired() ? "timeout" : ec.message());
-      co_return;
-    }
-  }
-  const std::string upstream_alpn = SelectedAlpn(upstream.native_handle());
-  // No ALPN on the upstream leg means HTTP/1.1, which is fine for a client
-  // that negotiated http/1.1 explicitly.
-  if (upstream_alpn != alpn && !(alpn == "http/1.1" && upstream_alpn.empty())) {
-    metrics.alpn_mismatches.Inc();
-    log::Warn("conn={} ALPN mismatch for {}: client={} upstream={}", info.id,
-              server_name, alpn.empty() ? "-" : alpn,
-              upstream_alpn.empty() ? "-" : upstream_alpn);
-    co_return;
-  }
-
-  observer.StartHttpTap(alpn);
-  co_await RelayTls(client, upstream, config, observer);
 }
 
 }  // namespace
@@ -550,7 +532,7 @@ asio::awaitable<void> HandleHttpConnection(tcp::socket socket,
   }
   observer.OnRoute("passthrough", "plain_http");
   // Plain HTTP is readable as is: tap it like a terminated HTTP/1.1 stream.
-  observer.StartHttpTap("http/1.1");
+  observer.StartHttpTap();
   SetNoDelay(socket);
   co_await RunPassthrough(std::move(socket), {}, context.upstream_http, info,
                           "", context, observer);

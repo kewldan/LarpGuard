@@ -5,11 +5,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "fp/http_request.h"
 
@@ -174,29 +174,24 @@ void H2Tap::OnSettings() {
     Stop();
     return;
   }
+  std::vector<std::pair<uint16_t, uint32_t>> settings;
   for (std::size_t i = 0; i < buffer_.size(); i += 6) {
-    if (!settings_.empty()) settings_.push_back(';');
-    settings_ +=
-        std::format("{}:{}", ReadU16(buffer_, i), ReadU32(buffer_, i + 2));
+    settings.emplace_back(ReadU16(buffer_, i), ReadU32(buffer_, i + 2));
   }
+  builder_.OnSettings(settings);
 }
 
 void H2Tap::OnWindowUpdate() {
-  if (headers_seen_ || frame_.stream_id != 0 || !window_update_.empty() ||
-      buffer_.size() != 4) {
-    return;
-  }
-  window_update_ = std::to_string(ReadU32(buffer_, 0) & 0x7FFFFFFF);
+  if (buffer_.size() != 4) return;
+  builder_.OnWindowUpdate(frame_.stream_id, ReadU32(buffer_, 0) & 0x7FFFFFFF);
 }
 
 void H2Tap::OnPriority() {
-  if (headers_seen_ || buffer_.size() != 5) return;
+  if (buffer_.size() != 5) return;
   const uint32_t dependency = ReadU32(buffer_, 0);
-  const bool exclusive = (dependency & 0x80000000) != 0;
-  const int weight = static_cast<uint8_t>(buffer_[4]) + 1;
-  priorities_.push_back(std::format("{}:{}:{}:{}", frame_.stream_id,
-                                    exclusive ? 1 : 0, dependency & 0x7FFFFFFF,
-                                    weight));
+  builder_.OnPriority(frame_.stream_id, (dependency & 0x80000000) != 0,
+                      dependency & 0x7FFFFFFF,
+                      static_cast<uint8_t>(buffer_[4]) + 1);
 }
 
 void H2Tap::OnHeaders() {
@@ -274,19 +269,7 @@ void H2Tap::DecodeHeaderBlock() {
 
   if (!headers_seen_) {
     headers_seen_ = true;
-    std::string pseudo;
-    for (const std::string& name : request.pseudo_header_order) {
-      if (!pseudo.empty()) pseudo.push_back(',');
-      pseudo.push_back(name.size() > 1 ? name[1] : '?');
-    }
-    std::string priorities;
-    for (const std::string& priority : priorities_) {
-      if (!priorities.empty()) priorities.push_back(',');
-      priorities += priority;
-    }
-    fingerprint_ = std::format("{}|{}|{}|{}", settings_,
-                               window_update_.empty() ? "00" : window_update_,
-                               priorities.empty() ? "0" : priorities, pseudo);
+    builder_.OnFirstRequest(request.pseudo_header_order);
   }
   ++requests_;
   if (on_request_) on_request_(std::move(request));

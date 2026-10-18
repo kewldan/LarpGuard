@@ -23,6 +23,7 @@
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "net/socket_options.h"
+#include "proxy/upstream_pool.h"
 #include "server/connection.h"
 #include "server/metrics_server.h"
 #include "tls/cert_store.h"
@@ -141,6 +142,18 @@ Worker::Worker(int index, GatewayContext shared, const Config& config)
     upstream_tls_.set_verify_mode(asio::ssl::verify_none);
   }
   context_.upstream_tls = &upstream_tls_;
+
+  UpstreamSettings upstream;
+  upstream.endpoint = context_.upstream_https;
+  upstream.tls = &upstream_tls_;
+  upstream.verify = config.upstream_tls_verify;
+  upstream.connect_timeout = config.upstream_connect_timeout;
+  upstream.handshake_timeout = config.tls_handshake_timeout;
+  upstream.idle_timeout = config.upstream_idle_timeout;
+  upstream.max_connections_per_host = config.upstream_pool_size;
+  pool_ = std::make_unique<UpstreamPool>(io_context_.get_executor(), upstream);
+  context_.pool = pool_.get();
+  context_.proxy_settings.idle_timeout = config.idle_timeout;
 }
 
 bool Worker::Listen(const tcp::endpoint& https,
@@ -199,6 +212,8 @@ void Worker::StopAccepting() {
       std::error_code ec;
       acceptor->close(ec);
     }
+    // Pooled connections to Traefik would keep the loop alive otherwise.
+    pool_->Drain();
   });
 }
 

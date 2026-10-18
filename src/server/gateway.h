@@ -15,6 +15,7 @@
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "net/classifier.h"
+#include "proxy/upstream_pool.h"
 #include "server/connection.h"
 #include "tls/cert_store.h"
 
@@ -53,6 +54,7 @@ class Worker {
   asio::ssl::context upstream_tls_;
   GatewayContext context_;
   std::vector<std::unique_ptr<asio::ip::tcp::acceptor>> acceptors_;
+  std::unique_ptr<UpstreamPool> pool_;
   std::thread thread_;
   std::atomic<bool> finished_{false};
 };
