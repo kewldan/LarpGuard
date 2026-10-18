@@ -7,11 +7,26 @@
 It looks at how a client really talks (TCP, TLS, HTTP/2, HTTP/3, JS) and
 checks that against what the client says it is.
 
-![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)
-![BoringSSL](https://img.shields.io/badge/TLS-BoringSSL-4285F4)
-![HTTP/1.1 · HTTP/2 · HTTP/3](https://img.shields.io/badge/HTTP-1.1%20%C2%B7%202%20%C2%B7%203-success)
-![Traefik](https://img.shields.io/badge/works%20with-Traefik-24A1C1?logo=traefikproxy&logoColor=white)
-![Status](https://img.shields.io/badge/status-M6%20done-brightgreen)
+<p>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow?style=for-the-badge"></a>
+  <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=for-the-badge&logo=cplusplus&logoColor=white">
+  <img alt="CMake" src="https://img.shields.io/badge/CMake-3.28+-064F8C?style=for-the-badge&logo=cmake&logoColor=white">
+  <img alt="Linux" src="https://img.shields.io/badge/Linux-ready-FCC624?style=for-the-badge&logo=linux&logoColor=black">
+</p>
+<p>
+  <img alt="HTTP/1.1, HTTP/2, HTTP/3" src="https://img.shields.io/badge/HTTP-1.1%20%C2%B7%202%20%C2%B7%203-2ea44f?style=for-the-badge">
+  <img alt="QUIC" src="https://img.shields.io/badge/QUIC-ngtcp2-8A2BE2?style=for-the-badge">
+  <img alt="BoringSSL" src="https://img.shields.io/badge/TLS-BoringSSL-4285F4?style=for-the-badge&logo=google&logoColor=white">
+  <img alt="Traefik" src="https://img.shields.io/badge/works%20with-Traefik-24A1C1?style=for-the-badge&logo=traefikproxy&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-labels-2496ED?style=for-the-badge&logo=docker&logoColor=white">
+  <img alt="ClickHouse" src="https://img.shields.io/badge/analytics-ClickHouse-FFCC01?style=for-the-badge&logo=clickhouse&logoColor=black">
+</p>
+<p>
+  <a href="https://github.com/kewldan/LarpGuard/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/kewldan/LarpGuard?style=flat-square&logo=github"></a>
+  <a href="https://github.com/kewldan/LarpGuard/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/kewldan/LarpGuard?style=flat-square"></a>
+  <img alt="Code size" src="https://img.shields.io/github/languages/code-size/kewldan/LarpGuard?style=flat-square">
+  <img alt="Status" src="https://img.shields.io/badge/status-M6%20done-brightgreen?style=flat-square">
+</p>
 
 </div>
 
@@ -274,3 +289,9 @@ Russian.
 - [ ] Canvas, WebGL and audio probes in the challenge; CAPTCHA plugin
 - [ ] Crawler IP ranges and Web Bot Auth
 - [ ] ASN rate-limit key, XDP pre-filter
+
+## 📄 License
+
+[MIT](LICENSE). The JA4T/JA4H code in `src/fp/foxio/` is under the
+[FoxIO License 1.1](src/fp/foxio/LICENSE.md) instead. Build with
+`-DBOT_SHIELD_FOXIO=OFF` to leave it out.
