@@ -46,7 +46,7 @@ std::vector<uint8_t> ReadSavedSyn(int fd) {
 #if defined(__linux__)
   // IPv6 (40) + TCP with maximum options (60) fits comfortably.
   std::vector<uint8_t> syn(256);
-  socklen_t size = static_cast<socklen_t>(syn.size());
+  auto size = static_cast<socklen_t>(syn.size());
   if (getsockopt(fd, IPPROTO_TCP, TCP_SAVED_SYN, syn.data(), &size) != 0) {
     return {};
   }

@@ -22,6 +22,8 @@ checks that against what the client says it is.
   <img alt="ClickHouse" src="https://img.shields.io/badge/analytics-ClickHouse-FFCC01?style=for-the-badge&logo=clickhouse&logoColor=black">
 </p>
 <p>
+  <a href="https://github.com/kewldan/LarpGuard/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/kewldan/LarpGuard/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
+  <a href="https://github.com/kewldan/LarpGuard/pkgs/container/larpguard"><img alt="Image" src="https://img.shields.io/badge/image-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white"></a>
   <a href="https://github.com/kewldan/LarpGuard/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/kewldan/LarpGuard?style=flat-square&logo=github"></a>
   <a href="https://github.com/kewldan/LarpGuard/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/kewldan/LarpGuard?style=flat-square"></a>
   <img alt="Code size" src="https://img.shields.io/github/languages/code-size/kewldan/LarpGuard?style=flat-square">
@@ -110,13 +112,42 @@ over ports 443/80, and Traefik moves to loopback behind it.
 
 ## 🚀 Quick start
 
+### 🐳 Pull the image
+
+CI publishes a multi-arch image (`linux/amd64`, `linux/arm64`) to GHCR on
+every push to `main`. The image contains `bot-shield`, `bot-shield-watchdog`,
+nftables and the default config.
+
+```bash
+docker pull ghcr.io/kewldan/larpguard:latest
+```
+
+```bash
+docker run --rm ghcr.io/kewldan/larpguard:latest --check-config
+```
+
+For a real deployment, use [`deploy/docker-compose.yml`](deploy/docker-compose.yml).
+It runs Traefik, the gateway and the watchdog in host network:
+
+```bash
+cd deploy && docker compose up -d
+```
+
+| Tag | Points to |
+|-----|-----------|
+| `latest` | The current `main`, after CI passes |
+| `sha-<commit>` | One exact commit |
+| `1.2.3`, `1.2`, `1` | A release, from a `v1.2.3` git tag |
+
+The binaries, config file and labels still use the working name
+`bot-shield` (`bot-shield`, `bot-shield-watchdog`, `botshield.*`).
+
+### 🔨 Build from source
+
 **Requirements:** CMake ≥ 3.28, a C++20 compiler, and network access on the
 first configure. Pinned dependencies are fetched automatically: BoringSSL,
 Asio, nghttp2, ngtcp2, nghttp3, llhttp, yaml-cpp, nlohmann/json and
 GoogleTest.
-
-The binaries, config file and labels still use the working name
-`bot-shield` (`bot-shield`, `bot-shield-watchdog`, `botshield.*`).
 
 ```bash
 cmake -S . -B build -G Ninja
@@ -130,11 +161,10 @@ cmake --build build
 build/src/bot-shield --config deploy/bot-shield.yaml --check-config
 ```
 
-Or build the container image (it includes `bot-shield-watchdog` and
-nftables):
+Or build the container image yourself:
 
 ```bash
-docker build -t bot-shield .
+docker build -t larpguard .
 ```
 
 ### 📦 Deploying next to Traefik
@@ -240,6 +270,9 @@ cmake --build build --target format-check
 cmake --build build --target tidy
 ```
 
+- **CI.** [`ci.yml`](.github/workflows/ci.yml) runs format, clang-tidy,
+  unit and e2e tests (plain and under ASan/UBSan) in `debian:trixie` for every
+  push and PR. On `main` and `v*` tags it then publishes the image.
 - **Style.** Google C++ Style, enforced by `clang-format` and
   `clang-tidy`. `tidy` must report 0 warnings.
 - **Sanitizers.** Build with `-DBOT_SHIELD_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`.

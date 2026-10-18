@@ -18,8 +18,13 @@
 #include <nghttp2/nghttp2.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-#include <sys/signal.h>
+// SIGPIPE is POSIX, not part of <csignal>: include-cleaner wants <signal.h>
+// on Linux and <sys/signal.h> on macOS.
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <signal.h>      // IWYU pragma: keep
+#include <sys/signal.h>  // IWYU pragma: keep
 #include <sys/socket.h>
+#include <sys/types.h>  // IWYU pragma: keep (ssize_t on Linux)
 #include <unistd.h>
 
 #include <algorithm>

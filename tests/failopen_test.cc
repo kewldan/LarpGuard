@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
+// setenv/unsetenv are POSIX, declared only by <stdlib.h>.
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <stdlib.h>  // IWYU pragma: keep
 #include <sys/socket.h>
+#include <sys/types.h>  // IWYU pragma: keep (ssize_t on Linux)
 #include <sys/un.h>
 #include <unistd.h>
 

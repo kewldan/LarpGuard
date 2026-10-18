@@ -14,7 +14,9 @@ services:
       - traefik-acme:/acme   # acme.json lives here
 
   bot-shield:
-    build: ..
+    # Prebuilt multi-arch image (amd64, arm64) from CI; replace with
+    # `build: ..` to build from this checkout.
+    image: ghcr.io/kewldan/larpguard:latest
     network_mode: host
     restart: unless-stopped
     # Runs as root so it can read acme.json (Traefik requires mode 0600), but
@@ -36,7 +38,7 @@ services:
   # Fail-open (docs/architecture.md, section 11). Needs NET_ADMIN on the
   # host network namespace for nftables.
   bot-shield-watchdog:
-    build: ..
+    image: ghcr.io/kewldan/larpguard:latest
     network_mode: host
     restart: unless-stopped
     cap_drop: [ALL]

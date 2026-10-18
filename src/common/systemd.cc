@@ -1,6 +1,7 @@
 #include "common/systemd.h"
 
 #include <sys/socket.h>
+#include <sys/types.h>  // IWYU pragma: keep (ssize_t on Linux)
 #include <sys/un.h>
 #include <unistd.h>
 

@@ -32,6 +32,12 @@ Linux-проверка (`SO_REUSEPORT` с несколькими воркера�
 работают только там) — в контейнере `debian:trixie` с `build-essential cmake
 ninja-build git python3 openssl`, исходники монтировать read-only.
 
+CI — `.github/workflows/ci.yml`: format (clang-format 23.1.3 из PyPI),
+clang-tidy (23.1.3, `debian:trixie`), тесты и e2e обычные и под ASan/UBSan;
+на `main` и тегах `v*` после них — мультиархитектурный образ
+`ghcr.io/kewldan/larpguard` (`latest`, `sha-…`, semver). Версию
+clang-format/clang-tidy менять в CI вместе с локальной.
+
 ## Готово, когда
 
 - собирается без предупреждений в наших файлах;

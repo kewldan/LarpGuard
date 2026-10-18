@@ -1,5 +1,6 @@
 #include "admin/server.h"
 
+#include <fcntl.h>  // IWYU pragma: keep (S_IRUSR on Linux)
 #include <sys/stat.h>
 
 #include <algorithm>

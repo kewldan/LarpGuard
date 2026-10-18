@@ -40,6 +40,7 @@ if(RUN_CLANG_TIDY_EXE)
   add_custom_target(tidy
     COMMAND ${RUN_CLANG_TIDY_EXE} -quiet -p ${PROJECT_BINARY_DIR}
             -clang-tidy-binary ${CLANG_TIDY_EXE}
+            -warnings-as-errors=*
             "${PROJECT_SOURCE_DIR}/(src|tests)/.*\\.cc$"
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "clang-tidy: analyzing sources"

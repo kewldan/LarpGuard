@@ -2,6 +2,7 @@
 
 #include <netdb.h>
 #include <sys/socket.h>
+#include <unistd.h>  // IWYU pragma: keep (socklen_t on Linux)
 
 #include <array>
 #include <asio/ip/address.hpp>

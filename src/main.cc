@@ -1,5 +1,9 @@
 #include <openssl/rand.h>
-#include <sys/signal.h>
+// SIGPIPE/SIGHUP are POSIX, not part of <csignal>: include-cleaner wants
+// <signal.h> on Linux and <sys/signal.h> on macOS.
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <signal.h>      // IWYU pragma: keep
+#include <sys/signal.h>  // IWYU pragma: keep
 
 #include <asio/io_context.hpp>
 #include <asio/signal_set.hpp>
