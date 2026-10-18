@@ -6,7 +6,7 @@ Self-hosted шлюз для фильтрации ботов, скреперов 
 
 Архитектура, ADR и план этапов: [docs/architecture.md](docs/architecture.md).
 
-## Статус: M5 готов, M6 в работе
+## Статус: M6 готов
 
 Шлюз встаёт перед Traefik и терминирует TLS для хостов с сертификатом в
 `acme.json`; остальное пропускает как есть. Терминированный трафик
@@ -52,6 +52,8 @@ User-Agent со стеком клиента (TLS, HTTP/2, TCP); в режиме 
 - Модель-сигнал: градиентный бустинг на деревьях, обучаемый
   `tools/train_model.py` на событиях из ClickHouse (слабые метки: honeypot,
   известная автоматизация, решённый челлендж) и вычисляемый в шлюзе.
+- HTTP/3 на входе (ngtcp2 + nghttp3): те же вердикты, что по TCP, JA4 для
+  QUIC и отпечаток transport parameters, Retry против поддельных адресов.
 - Fail-open: heartbeat воркеров, systemd watchdog и `bot-shield-watchdog`,
   который при отказе шлюза направляет трафик прямо в Traefik.
 - События `conn` и `req` (со статусом, длительностью и вердиктом) в NATS без полных IP
@@ -124,4 +126,5 @@ build/src/bot-shield --config deploy/bot-shield.yaml --check-config
 - `clickhouse/schema.sql` — таблицы событий и агрегатов.
 
 HTTP/3 в Traefik должен оставаться выключенным, иначе QUIC пойдёт в обход
-шлюза.
+шлюза. HTTP/3 принимает сам шлюз (`http3.enabled` в `bot-shield.yaml`, UDP на
+порту HTTPS).

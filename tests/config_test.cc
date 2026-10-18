@@ -202,6 +202,27 @@ fingerprints:
       ParseConfig("policy: {hosts: {\"bad host\": shadow}}\n", &bad, &error));
 }
 
+TEST(ConfigTest, ParsesHttp3) {
+  Config config;
+  std::string error;
+  EXPECT_FALSE(config.http3_enabled);
+  ASSERT_TRUE(ParseConfig(
+      "http3: {enabled: true, idle_timeout: 20s, retry: false, "
+      "max_connections: 500, alt_svc_max_age: 1h, advertise_port: 8443}\n",
+      &config, &error))
+      << error;
+  EXPECT_TRUE(config.http3_enabled);
+  EXPECT_EQ(config.http3_idle_timeout, std::chrono::seconds(20));
+  EXPECT_FALSE(config.http3_retry);
+  EXPECT_EQ(config.http3_max_connections, 500U);
+  EXPECT_EQ(config.http3_alt_svc_max_age, std::chrono::hours(1));
+  EXPECT_EQ(config.http3_advertise_port, 8443);
+  Config bad;
+  EXPECT_FALSE(ParseConfig("http3: {idle_timeout: 1h}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("http3: {advertise_port: 70000}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("http3: {quic: true}\n", &bad, &error));
+}
+
 TEST(ConfigTest, ParsesChallenge) {
   Config config;
   std::string error;

@@ -390,6 +390,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "behavior",
                   "honeypot",
                   "tarpit",
+                  "http3",
                   "decoy",
                   "model",
                   "fingerprints",
@@ -567,6 +568,37 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
           return false;
         }
       }
+    }
+  }
+  if (const YAML::Node http3 = root["http3"]) {
+    if (!CheckKeys(http3, "http3",
+                   {"enabled", "idle_timeout", "retry", "max_connections",
+                    "alt_svc_max_age", "advertise_port"},
+                   error) ||
+        !ReadDuration(http3, "http3", "idle_timeout",
+                      &config->http3_idle_timeout, error) ||
+        !ReadDuration(http3, "http3", "alt_svc_max_age",
+                      &config->http3_alt_svc_max_age, error)) {
+      return false;
+    }
+    if (http3["enabled"]) config->http3_enabled = http3["enabled"].as<bool>();
+    if (http3["retry"]) config->http3_retry = http3["retry"].as<bool>();
+    if (http3["max_connections"]) {
+      config->http3_max_connections =
+          http3["max_connections"].as<std::size_t>();
+    }
+    if (http3["advertise_port"]) {
+      const int port = http3["advertise_port"].as<int>();
+      if (port < 0 || port > 65535) {
+        *error = "http3.advertise_port: expected 0..65535";
+        return false;
+      }
+      config->http3_advertise_port = static_cast<uint16_t>(port);
+    }
+    if (config->http3_idle_timeout < std::chrono::seconds(1) ||
+        config->http3_idle_timeout > std::chrono::minutes(10)) {
+      *error = "http3.idle_timeout: expected 1s..10m";
+      return false;
     }
   }
   if (const YAML::Node tarpit = root["tarpit"]) {

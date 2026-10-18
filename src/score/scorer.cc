@@ -82,12 +82,13 @@ Verdict Scorer::Score(const ScoringInput& input) const {
   if (const BrowserProfile* profile = library_->ProfileForEngine(ua.engine)) {
     const bool tls = !input.ja4.empty();
     const std::string_view ciphers = Ja4CipherHash(input.ja4);
-    if (tls && !profile->ja4_ciphers.empty() &&
+    if (tls && !input.quic && !profile->ja4_ciphers.empty() &&
         !Contains(profile->ja4_ciphers, ciphers)) {
       signal("ua_tls_mismatch");
     }
     if (tls && !input.offered_h2) signal("browser_without_h2");
-    if (!input.pseudo_order.empty() && !profile->h2_pseudo_orders.empty() &&
+    if (!input.quic && !input.pseudo_order.empty() &&
+        !profile->h2_pseudo_orders.empty() &&
         !Contains(profile->h2_pseudo_orders, input.pseudo_order)) {
       signal("ua_h2_mismatch");
     }

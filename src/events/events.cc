@@ -157,6 +157,7 @@ std::string ConnectionEventJson(const ConnectionRecord& record,
   SetIfNotEmpty(json, "alpn", record.alpn);
   SetIfNotEmpty(json, "ja4", record.ja4);
   SetIfNotEmpty(json, "ja4_r", record.ja4_raw);
+  SetIfNotEmpty(json, "quic_fp", record.quic_fp);
   SetIfNotEmpty(json, "tcp_fp", record.tcp_fingerprint);
   SetIfNotEmpty(json, "ja4t", record.ja4t);
   SetIfNotEmpty(json, "h2_fp", record.h2_fingerprint);

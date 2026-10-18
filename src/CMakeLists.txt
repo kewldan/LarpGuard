@@ -44,6 +44,7 @@ add_library(bot_shield_core STATIC
   proxy/h2_upstream.cc
   proxy/http_message.cc
   proxy/upstream_pool.cc
+  quic/h3_server.cc
   ratelimit/gcra.cc
   ratelimit/limits.cc
   ratelimit/store.cc
@@ -68,6 +69,9 @@ target_link_libraries(bot_shield_core
     nlohmann_json::nlohmann_json
     llhttp::llhttp
     nghttp2
+    ngtcp2_crypto_boringssl_static
+    ngtcp2_static
+    nghttp3_static
     ssl
     crypto
     Threads::Threads

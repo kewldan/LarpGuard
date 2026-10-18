@@ -54,10 +54,10 @@ class Classifier {
 
   RouteDecision Classify(ParseStatus status, const ClientHello& hello,
                          const CertSnapshot& certificates) const;
-
- private:
+  // In passthrough_hosts (exact or "*.parent"); also used by HTTP/3.
   bool IsPassthroughHost(std::string_view host) const;
 
+ private:
   std::vector<std::string> passthrough_hosts_;
   FallbackRoute non_tls_;
   FallbackRoute no_sni_;

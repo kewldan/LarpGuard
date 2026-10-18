@@ -1,9 +1,12 @@
 #ifndef BOT_SHIELD_SERVER_CONNECTION_H_
 #define BOT_SHIELD_SERVER_CONNECTION_H_
 
+#include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/ip/tcp.hpp>
+#include <asio/ip/udp.hpp>
 #include <asio/ssl/context.hpp>
+#include <memory>
 #include <string>
 
 #include "admin/attack.h"
@@ -26,6 +29,7 @@
 #include "score/rules.h"
 #include "score/scorer.h"
 #include "tls/cert_store.h"
+#include "tls/client_hello.h"
 
 namespace bot_shield {
 
@@ -86,6 +90,21 @@ asio::awaitable<void> HandleHttpConnection(asio::ip::tcp::socket socket,
                                            const GatewayContext& context);
 
 std::string FormatEndpoint(const asio::ip::tcp::endpoint& endpoint);
+
+// Verdicts and events of one QUIC (HTTP/3) connection: the same observer
+// as for TCP, behind an interface for src/quic.
+class QuicObserver {
+ public:
+  virtual ~QuicObserver() = default;
+  // Hooks for the HTTP/3 session; valid while the observer lives.
+  virtual ProxyHooks Hooks() = 0;
+};
+
+// `transport_params` is the QUIC transport parameter fingerprint.
+std::unique_ptr<QuicObserver> MakeQuicObserver(
+    const GatewayContext& context, const asio::ip::udp::endpoint& peer,
+    const asio::ip::udp::endpoint& local, const ClientHello& hello,
+    std::string transport_params, const asio::any_io_executor& executor);
 
 }  // namespace bot_shield
 

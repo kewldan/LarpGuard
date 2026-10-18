@@ -504,6 +504,8 @@ crawlers:
 honeypot:
   paths: ["/.env", "/trap/*"]
   ttl: 1s
+http3:
+  enabled: true
 model:
   file: {model_path}
   threshold: 0.99
@@ -1009,6 +1011,61 @@ log_level: debug
         expect(not any("DATA" in f for f in frames), frames)
         expect("grpc-status: 12" in result.stderr, result.stderr[-2000:])
 
+    def http3():
+        if "HTTP3" not in subprocess.run(["curl", "-V"], capture_output=True,
+                                         text=True).stdout:
+            print("  (skipped: curl without HTTP/3)")
+            return
+        out = os.path.join(workdir, "h3-body")
+
+        def h3(path, host="a.test", extra=()):
+            result = subprocess.run(
+                ["curl", "-sS", "--http3-only", "--resolve",
+                 f"{host}:{https_port}:127.0.0.1", "--cacert", ca_a,
+                 "-o", out, "-w", "%{http_code} %{http_version}", *extra,
+                 f"https://{host}:{https_port}{path}"],
+                capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                raise AssertionError(f"curl h3 failed: {result.stderr}")
+            status, version = result.stdout.split()
+            return int(status), version
+
+        status, version = h3("/h3/get?x=1")
+        expect(status == 200 and version == "3", (status, version))
+        body = json.loads(open(out).read())
+        expect(body["proto"] == "h2", body)  # Upstream leg: the h2 pool.
+        expect("x-bot-score" in body["headers"], body)
+        expect(body["headers"]["x-forwarded-for"] == "127.0.0.1", body)
+        # Upload and big download.
+        upload = os.path.join(workdir, "h3-upload")
+        with open(upload, "wb") as f:
+            f.write(os.urandom(2 * 1024 * 1024))
+        status, _ = h3("/h3/upload", extra=("--data-binary", f"@{upload}"))
+        expect(status == 200 and json.loads(open(out).read())["body_len"]
+               == 2 * 1024 * 1024, open(out).read()[:200])
+        status, _ = h3("/big?bytes=5000000")
+        expect(status == 200 and os.path.getsize(out) == 5000000,
+               os.path.getsize(out))
+        # Verdicts: enforce host blocks over HTTP/3 too.
+        status, _ = h3("/admin/x", host="www.a.test", extra=("-k",))
+        expect(status == 403, status)
+        # The connection event carries the QUIC fingerprints.
+        event = nats.find("e2e.events.conn",
+                          lambda e: e.get("listener") == "quic")
+        expect(event["ja4"].startswith("q13"), event)
+        expect(event.get("quic_fp"), event)
+        # TCP responses advertise HTTP/3.
+        _, headers, _ = h1_get(https_port, "a.test", ca_a, "/alt")
+        expect(headers.get("alt-svc") == f'h3=":{https_port}"; ma=86400',
+               headers)
+        # No certificate for the name: QUIC refused, the client must use TCP.
+        result = subprocess.run(
+            ["curl", "-sS", "--http3-only", "-k", "--max-time", "5",
+             "--resolve", f"b.test:{https_port}:127.0.0.1",
+             f"https://b.test:{https_port}/"],
+            capture_output=True, text=True, timeout=30)
+        expect(result.returncode != 0, result.stdout)
+
     def wildcard_certificate():
         status, _, body = h1_get(https_port, "x.w.test", ca_w, "/")
         expect(status == 200, status)
@@ -1302,6 +1359,7 @@ log_level: debug
         ("ClientHello without SNI rejected", no_sni_rejected),
         ("h2: rapid reset ends in GOAWAY", h2_rapid_reset),
         ("h2: gRPC trailers-only answer stays one frame", grpc_trailers_only),
+        ("h3: GET, upload, download, verdicts, Alt-Svc, fallback", http3),
         ("wildcard certificate", wildcard_certificate),
         ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),

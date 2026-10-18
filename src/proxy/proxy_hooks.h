@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <string>
 
 #include "proxy/exchange.h"
 
@@ -33,6 +34,10 @@ struct ProxySettings {
   std::chrono::milliseconds request_headers_timeout{10000};
   // Then HTTP/1.1 answers with "Connection: close" and HTTP/2 sends GOAWAY.
   std::size_t max_requests_per_connection = 1000;
+  // Alt-Svc sent with every response (HTTP/3 advertisement); empty: none.
+  // Alt-Svc from Traefik is always dropped: it would point clients past the
+  // gateway (ADR-011).
+  std::string alt_svc;
   // Request body buffered per exchange before the client is throttled.
   std::size_t max_buffered_body = std::size_t{1} << 20;
 };

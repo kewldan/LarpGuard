@@ -47,6 +47,8 @@ HeaderList FilterRequestHeaders(const HeaderList& headers);
 
 // Drops headers that are illegal in HTTP/2 responses.
 HeaderList FilterResponseHeaders(const HeaderList& headers);
+// Replaces any Alt-Svc in `headers` with `alt_svc` (none when empty).
+void SetAltSvc(std::string_view alt_svc, HeaderList* headers);
 
 // Appends X-Forwarded-For/-Proto/-Host/-Port and X-Real-IP for Traefik
 // (which trusts them from the gateway's address only).

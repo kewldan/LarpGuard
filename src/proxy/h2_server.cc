@@ -250,6 +250,7 @@ void H2ServerConnection::OnResponseProgress(int32_t id) {
     for (auto& header : FilterResponseHeaders(exchange.response.headers)) {
       headers.push_back(std::move(header));
     }
+    SetAltSvc(settings_.alt_svc, &headers);
     const std::vector<nghttp2_nv> nva = MakeNva(headers);
     const bool no_body = exchange.response_ended &&
                          exchange.response_body.empty() &&

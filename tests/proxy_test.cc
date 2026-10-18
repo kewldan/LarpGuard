@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "proxy/exchange.h"
@@ -12,6 +13,17 @@
 
 namespace bot_shield {
 namespace {
+
+TEST(HttpMessageTest, ReplacesAltSvc) {
+  // Traefik's Alt-Svc would send clients past the gateway (ADR-011).
+  HeaderList headers = {{"content-type", "text/html"},
+                        {"alt-svc", R"(h3=":8443"; ma=60)"}};
+  SetAltSvc("", &headers);
+  EXPECT_EQ(headers, (HeaderList{{"content-type", "text/html"}}));
+  SetAltSvc(R"(h3=":443"; ma=86400)", &headers);
+  EXPECT_EQ(headers.back(), (std::pair<std::string, std::string>{
+                                "alt-svc", R"(h3=":443"; ma=86400)"}));
+}
 
 TEST(HttpMessageTest, FiltersHopByHopAndSpoofableHeaders) {
   const HeaderList input = {

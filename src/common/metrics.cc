@@ -37,6 +37,8 @@ std::string Metrics::RenderPrometheus() const {
                connections_https.Get());
   AppendSample(&out, "bot_shield_connections_total", R"(listener="http")",
                connections_http.Get());
+  AppendSample(&out, "bot_shield_connections_total", R"(listener="quic")",
+               connections_quic.Get());
 
   AppendHeader(&out, "bot_shield_connections_active", "gauge",
                "Client connections currently open.");
@@ -166,6 +168,27 @@ std::string Metrics::RenderPrometheus() const {
   AppendHeader(&out, "bot_shield_model_flags_total", "counter",
                "Requests the model scored above model.threshold.");
   AppendSample(&out, "bot_shield_model_flags_total", "", model_flags.Get());
+
+  AppendHeader(&out, "bot_shield_quic_datagrams_total", "counter",
+               "UDP datagrams received by the HTTP/3 listener.");
+  AppendSample(&out, "bot_shield_quic_datagrams_total", "",
+               quic_datagrams.Get());
+  AppendHeader(&out, "bot_shield_quic_handshakes_total", "counter",
+               "QUIC handshakes completed.");
+  AppendSample(&out, "bot_shield_quic_handshakes_total", "",
+               quic_handshakes.Get());
+  AppendHeader(&out, "bot_shield_quic_events_total", "counter",
+               "QUIC Retry packets sent, connections refused (no certificate,"
+               " passthrough host, limits, bad token), send errors.");
+  AppendSample(&out, "bot_shield_quic_events_total", R"(event="retry")",
+               quic_retries.Get());
+  AppendSample(&out, "bot_shield_quic_events_total", R"(event="rejected")",
+               quic_rejected.Get());
+  AppendSample(&out, "bot_shield_quic_events_total", R"(event="send_error")",
+               quic_send_errors.Get());
+  AppendHeader(&out, "bot_shield_quic_connections", "gauge",
+               "Open QUIC connections.");
+  AppendSample(&out, "bot_shield_quic_connections", "", quic_connections.Get());
 
   AppendHeader(&out, "bot_shield_blocks_total", "counter",
                "Requests blocked, and blocks shadow mode held back.");

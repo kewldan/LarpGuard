@@ -186,6 +186,18 @@ decoy:
   html_file: ""
   json_file: ""
 
+# HTTP/3: QUIC on the HTTPS port (UDP), same verdicts as TCP; advertised to
+# clients with Alt-Svc. Traefik's HTTP/3 must stay off. Hosts without a
+# certificate here (or passthrough hosts) refuse QUIC, so clients use TCP.
+http3:
+  enabled: false
+  idle_timeout: 30s
+  # Validate client addresses with a Retry before keeping state (one RTT).
+  retry: true
+  max_connections: 10000   # Per worker.
+  alt_svc_max_age: 24h
+  advertise_port: 0        # Port in Alt-Svc; 0 = the HTTPS listen port.
+
 # Model signal (docs/architecture.md 6.1): gradient-boosted trees trained
 # by tools/train_model.py from req events. Above threshold a request gets
 # signal "model" (weight in the library). log_features puts the feature

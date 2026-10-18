@@ -101,6 +101,12 @@ HeaderList FilterResponseHeaders(const HeaderList& headers) {
   return out;
 }
 
+void SetAltSvc(std::string_view alt_svc, HeaderList* headers) {
+  std::erase_if(*headers,
+                [](const auto& header) { return header.first == "alt-svc"; });
+  if (!alt_svc.empty()) headers->emplace_back("alt-svc", alt_svc);
+}
+
 void AddForwardingHeaders(const ClientInfo& client, std::string_view authority,
                           HeaderList* headers) {
   asio::ip::address address = client.address;

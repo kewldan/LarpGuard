@@ -100,6 +100,15 @@ struct Config {
   // Connections per IP that have not finished their first request's headers
   // (ClientHello, handshake, headers): bounds slowloris-style clients.
   std::size_t pending_connections_per_ip = 128;
+  // HTTP/3 ("http3" section): QUIC on the HTTPS port (UDP), advertised with
+  // Alt-Svc. Traefik's own HTTP/3 must stay off (ADR-011).
+  bool http3_enabled = false;
+  std::chrono::milliseconds http3_idle_timeout{30000};
+  bool http3_retry = true;
+  std::size_t http3_max_connections = 10000;  // Per worker.
+  std::chrono::milliseconds http3_alt_svc_max_age{std::chrono::hours(24)};
+  // Port in Alt-Svc; 0: the HTTPS listen port.
+  uint16_t http3_advertise_port = 0;
   // Known crawlers ("crawlers" section): verify search crawlers by reverse
   // DNS, and what to do with AI crawlers (unset: score them like anyone).
   bool crawlers_verify = true;

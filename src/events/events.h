@@ -38,8 +38,11 @@ struct ConnectionRecord {
   std::string tcp_fingerprint;
   std::string ja4t;
   std::string h2_fingerprint;
-  // The ClientHello offered ALPN "h2".
+  // The ClientHello offered ALPN "h2" (or "h3" over QUIC).
   bool offered_h2 = false;
+  // QUIC (HTTP/3) connection; transport parameter ids in ClientHello order.
+  bool quic = false;
+  std::string quic_fp;
   // Initial TTL of the SYN (64, 128, ...); 0 when not captured.
   int tcp_initial_ttl = 0;
   uint64_t bytes_in = 0;

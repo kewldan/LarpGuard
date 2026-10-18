@@ -13,8 +13,12 @@ namespace bot_shield {
 // What is known about one request for scoring.
 struct ScoringInput {
   const HttpRequest* request = nullptr;
-  std::string_view ja4;             // Empty without TLS.
-  bool offered_h2 = false;          // The ClientHello offered ALPN "h2".
+  std::string_view ja4;     // Empty without TLS.
+  bool offered_h2 = false;  // The ClientHello offered ALPN "h2".
+  // QUIC: the TLS stack differs from the same browser over TCP (only TLS
+  // 1.3 ciphers), and no HTTP/2 profile applies; those checks are skipped
+  // until the library has verified QUIC profiles.
+  bool quic = false;
   std::string_view h2_fingerprint;  // Empty on HTTP/1.x.
   std::string_view pseudo_order;    // "m,a,s,p"; empty on HTTP/1.x.
   std::string_view header_fp;       // Own header-order fingerprint.

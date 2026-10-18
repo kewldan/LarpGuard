@@ -58,6 +58,39 @@ FetchContent_Declare(nghttp2
 
 FetchContent_MakeAvailable(boringssl asio nlohmann_json yaml-cpp llhttp nghttp2)
 
+# QUIC (ngtcp2 with its BoringSSL crypto backend) and HTTP/3 (nghttp3) for
+# the HTTP/3 listener. Declared after BoringSSL, whose include directory and
+# targets they build against.
+set(ENABLE_STATIC_LIB ON CACHE BOOL "" FORCE)
+set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_BORINGSSL ON CACHE BOOL "" FORCE)
+set(BORINGSSL_INCLUDE_DIR "${boringssl_SOURCE_DIR}/include" CACHE PATH "" FORCE)
+set(BORINGSSL_LIBRARIES "ssl;crypto" CACHE STRING "" FORCE)
+# ngtcp2 checks for BoringSSL by linking a test program at configure time,
+# before the fetched BoringSSL is built; it is known to be BoringSSL.
+set(HAVE_BORINGSSL TRUE CACHE INTERNAL "")
+FetchContent_Declare(ngtcp2
+  URL https://github.com/ngtcp2/ngtcp2/releases/download/v1.25.0/ngtcp2-1.25.0.tar.xz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/drop_check_target.cmake
+  EXCLUDE_FROM_ALL
+  SYSTEM)
+FetchContent_Declare(nghttp3
+  URL https://github.com/ngtcp2/nghttp3/releases/download/v1.18.0/nghttp3-1.18.0.tar.xz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/drop_check_target.cmake
+  EXCLUDE_FROM_ALL
+  SYSTEM)
+FetchContent_MakeAvailable(ngtcp2 nghttp3)
+target_include_directories(nghttp3_static SYSTEM INTERFACE
+  $<BUILD_INTERFACE:${nghttp3_SOURCE_DIR}/lib/includes>
+  $<BUILD_INTERFACE:${nghttp3_BINARY_DIR}/lib/includes>)
+target_include_directories(ngtcp2_crypto_boringssl_static SYSTEM INTERFACE
+  $<BUILD_INTERFACE:${ngtcp2_SOURCE_DIR}/crypto/includes>)
+target_link_libraries(ngtcp2_crypto_boringssl_static INTERFACE
+  ngtcp2_static ssl crypto)
+
 add_library(asio INTERFACE)
 target_include_directories(asio SYSTEM INTERFACE ${asio_SOURCE_DIR}/asio/include)
 target_compile_definitions(asio INTERFACE ASIO_STANDALONE ASIO_NO_DEPRECATED)

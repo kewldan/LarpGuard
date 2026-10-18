@@ -95,13 +95,12 @@ std::shared_ptr<H1ServerConnection> H1ServerConnection::Create(
 
 H1ServerConnection::H1ServerConnection(std::unique_ptr<Transport> transport,
                                        UpstreamPool* pool, ClientInfo client,
-                                       ProxyHooks hooks,
-                                       const ProxySettings& settings)
+                                       ProxyHooks hooks, ProxySettings settings)
     : transport_(std::move(transport)),
       pool_(pool),
       client_(std::move(client)),
       hooks_(std::move(hooks)),
-      settings_(settings),
+      settings_(std::move(settings)),
       reader_wake_(transport_->executor()),
       response_wake_(transport_->executor()) {
   llhttp_settings_init(&parser_settings_);
@@ -362,6 +361,7 @@ asio::awaitable<void> H1ServerConnection::WriteResponse(
   const int status = exchange->response.status;
   const bool has_body = ResponseHasBody(method, status);
   HeaderList headers = FilterResponseHeaders(exchange->response.headers);
+  SetAltSvc(settings_.alt_svc, &headers);
   const bool has_length = !FindHeader(headers, "content-length").empty();
   bool chunked = false;
   if (has_body && !has_length) {

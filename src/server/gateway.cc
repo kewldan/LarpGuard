@@ -230,6 +230,16 @@ Worker::Worker(int index, GatewayContext shared, const Config& config)
       config.request_headers_timeout;
   context_.proxy_settings.max_requests_per_connection =
       config.max_requests_per_connection;
+  if (config.http3_enabled) {
+    const uint16_t port = config.http3_advertise_port != 0
+                              ? config.http3_advertise_port
+                              : config.listen_https.port;
+    context_.proxy_settings.alt_svc =
+        std::format(R"(h3=":{}"; ma={})", port,
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        config.http3_alt_svc_max_age)
+                        .count());
+  }
 }
 
 bool Worker::Listen(const tcp::endpoint& https,
@@ -242,6 +252,20 @@ bool Worker::Listen(const tcp::endpoint& https,
   }
   StartAccepting(https_acceptor.get(), /*https=*/true);
   acceptors_.push_back(std::move(https_acceptor));
+
+  const Config& config = *context_.config;
+  if (config.http3_enabled) {
+    QuicSettings settings;
+    settings.idle_timeout = config.http3_idle_timeout;
+    settings.retry = config.http3_retry;
+    settings.max_connections = config.http3_max_connections;
+    quic_ = std::make_unique<QuicServer>(io_context_, context_, settings);
+    if (!quic_->Listen(asio::ip::udp::endpoint(https.address(), https.port()),
+                       reuse_port, error)) {
+      return false;
+    }
+    quic_->Start();
+  }
 
   if (http) {
     auto http_acceptor = std::make_unique<tcp::acceptor>(io_context_);
@@ -310,6 +334,8 @@ void Worker::StopAccepting() {
   asio::post(io_context_, [this] {
     draining_ = true;
     heartbeat_timer_.cancel();
+    // QUIC has no graceful drain here: connections close, clients retry.
+    if (quic_) quic_->Stop();
     for (auto& acceptor : acceptors_) {
       std::error_code ec;
       acceptor->close(ec);

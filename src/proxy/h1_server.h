@@ -43,7 +43,7 @@ class H1ServerConnection
  private:
   H1ServerConnection(std::unique_ptr<Transport> transport, UpstreamPool* pool,
                      ClientInfo client, ProxyHooks hooks,
-                     const ProxySettings& settings);
+                     ProxySettings settings);
 
   // Feeds buffered bytes to llhttp; false on a parse error.
   bool Execute();

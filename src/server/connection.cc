@@ -96,10 +96,15 @@ struct ConnectionInfo {
   tcp::endpoint local;
 };
 
-ConnectionInfo MakeConnectionInfo(const tcp::socket& socket) {
+// Connection ids for logs and events, shared by TCP and QUIC.
+uint64_t NextConnectionId() {
   static std::atomic<uint64_t> next_id{1};
+  return next_id.fetch_add(1, std::memory_order_relaxed);
+}
+
+ConnectionInfo MakeConnectionInfo(const tcp::socket& socket) {
   ConnectionInfo info;
-  info.id = next_id.fetch_add(1, std::memory_order_relaxed);
+  info.id = NextConnectionId();
   std::error_code ec;
   info.peer = socket.remote_endpoint(ec);
   info.local = socket.local_endpoint(ec);
@@ -215,6 +220,18 @@ class ConnectionObserver {
     record_.ja4_raw = Ja4Raw(hello);
   }
 
+  void OnQuicClientHello(const ClientHello& hello, std::string transport) {
+    record_.server_name = hello.server_name;
+    record_.tls_version = TlsVersionCode(hello);
+    if (!hello.alpn.empty()) record_.alpn_offered = hello.alpn.front();
+    record_.offered_h2 = hello.HasAlpn("h3");
+    record_.alpn = "h3";
+    record_.quic = true;
+    record_.quic_fp = std::move(transport);
+    record_.ja4 = Ja4(hello, 'q');
+    record_.ja4_raw = Ja4Raw(hello, 'q');
+  }
+
   void OnRoute(std::string_view route, std::string_view reason) {
     record_.route = route;
     record_.reason = reason;
@@ -304,6 +321,7 @@ class ConnectionObserver {
     input.request = &request;
     input.ja4 = record_.ja4;
     input.offered_h2 = record_.offered_h2;
+    input.quic = record_.quic;
     input.h2_fingerprint = exchange.h2_fingerprint;
     input.pseudo_order = pseudo;
     input.header_fp = header_fp;
@@ -1068,6 +1086,58 @@ asio::awaitable<void> RunTerminate(tcp::socket socket,
 }
 
 }  // namespace
+
+namespace {
+
+class QuicObserverImpl : public QuicObserver {
+ public:
+  QuicObserverImpl(const GatewayContext& context, const ConnectionInfo& info,
+                   const ClientHello& hello, std::string transport,
+                   const asio::any_io_executor& executor)
+      : observer_(context, info, "quic") {
+    GlobalMetrics().connections_quic.Inc();
+    observer_.set_executor(executor);
+    observer_.OnQuicClientHello(hello, std::move(transport));
+    observer_.OnRoute("terminate", "certificate");
+    log::Debug("conn={} quic peer={} sni={}", info.id,
+               FormatEndpoint(info.peer), hello.server_name);
+  }
+
+  ProxyHooks Hooks() override {
+    ProxyHooks hooks;
+    hooks.on_request = [this](Exchange& exchange) {
+      observer_.OnProxyRequest(exchange);
+    };
+    hooks.on_done = [this](const Exchange& exchange) {
+      observer_.OnProxyDone(exchange);
+    };
+    hooks.on_client_bytes = [this](std::span<const uint8_t> data) {
+      observer_.OnClientData(data);
+    };
+    hooks.on_bytes_to_client = [this](std::size_t size) {
+      observer_.OnBytesToClient(size);
+    };
+    return hooks;
+  }
+
+ private:
+  ActiveConnection active_;
+  ConnectionObserver observer_;
+};
+
+}  // namespace
+
+std::unique_ptr<QuicObserver> MakeQuicObserver(
+    const GatewayContext& context, const asio::ip::udp::endpoint& peer,
+    const asio::ip::udp::endpoint& local, const ClientHello& hello,
+    std::string transport_params, const asio::any_io_executor& executor) {
+  ConnectionInfo info;
+  info.id = NextConnectionId();
+  info.peer = tcp::endpoint(peer.address(), peer.port());
+  info.local = tcp::endpoint(local.address(), local.port());
+  return std::make_unique<QuicObserverImpl>(
+      context, info, hello, std::move(transport_params), executor);
+}
 
 std::string FormatEndpoint(const tcp::endpoint& endpoint) {
   if (endpoint.address().is_v6()) {

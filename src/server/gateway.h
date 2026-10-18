@@ -24,6 +24,7 @@
 #include "fp/library.h"
 #include "net/classifier.h"
 #include "proxy/upstream_pool.h"
+#include "quic/h3_server.h"
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
 #include "score/policy.h"
@@ -73,6 +74,8 @@ class Worker {
   std::vector<std::unique_ptr<asio::ip::tcp::acceptor>> acceptors_;
   std::unique_ptr<asio::local::stream_protocol::acceptor> admin_acceptor_;
   std::unique_ptr<UpstreamPool> pool_;
+  // HTTP/3 listener (http3.enabled).
+  std::unique_ptr<QuicServer> quic_;
   // Heartbeat timer; cancelled when draining so the loop can finish.
   asio::steady_timer heartbeat_timer_;
   bool draining_ = false;

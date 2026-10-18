@@ -28,6 +28,7 @@ struct Metrics {
 
   Counter connections_https;
   Counter connections_http;
+  Counter connections_quic;
   Gauge connections_active;
   Counter rejected_connection_limit;
   Counter rejected_not_tls;
@@ -71,6 +72,12 @@ struct Metrics {
   Counter tarpit_overflow;
   Counter decoys;
   Counter model_flags;
+  Counter quic_datagrams;
+  Counter quic_handshakes;
+  Counter quic_retries;
+  Counter quic_rejected;
+  Counter quic_send_errors;
+  Gauge quic_connections;
   Counter requests_blocked;
   Counter requests_would_block;
   Counter rules_matched;

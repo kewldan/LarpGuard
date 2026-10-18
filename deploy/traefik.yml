@@ -34,7 +34,8 @@ entryPoints:
     forwardedHeaders:
       trustedIPs:
         - "127.0.0.1/32"
-    # Keep HTTP/3 off: QUIC would bypass bot-shield (ADR-011).
+    # Keep HTTP/3 off: QUIC would bypass bot-shield; bot-shield serves HTTP/3
+    # itself (http3.enabled in bot-shield.yaml, ADR-011).
     # http3: {}
 
 # TLS options against SNI/Host mismatches (see traefik-tls.yml). Keep any

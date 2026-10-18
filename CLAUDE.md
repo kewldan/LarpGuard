@@ -15,7 +15,9 @@ admin API (`src/admin/`). M4 готов: JS-челлендж + PoW и токен
 (`src/challenge/`), проверка краулеров по rDNS и политика AI-краулеров
 (`src/crawler/`). M5 готов: fail-open (`src/watchdog/`),
 поведение и honeypot (`src/behavior/`), tarpit/decoy (`src/action/`),
-кластеры в ClickHouse (`tools/cluster_candidates.py`). Следующий этап — M6.
+кластеры в ClickHouse (`tools/cluster_candidates.py`). M6 готов: модель-сигнал
+(`src/model/`, `tools/train_model.py`), gRPC через пул, HTTP/3 (`src/quic/`).
+UI отложен.
 
 ## Команды
 
@@ -76,6 +78,12 @@ ninja-build git python3 openssl`, исходники монтировать read
   `h2_upstream` + `upstream_pool` (к Traefik), `exchange` связывает стороны.
   Вердикты по запросу — в `ConnectionObserver::OnProxyRequest`
   (`exchange.RespondLocally()` или правка `exchange.request.headers`).
+- `src/quic/` — HTTP/3: `QuicServer` на воркер (UDP, ngtcp2 + nghttp3),
+  запросы — те же `Exchange` в HTTP/2-пул, вердикты через
+  `MakeQuicObserver`. Колбэки ngtcp2/nghttp3 нельзя вызывать повторно
+  изнутри них же; запись пакетов только через `Flush()`. Удаление
+  соединения отложено (`Remove` через `post`): оно может быть внутри своего
+  колбэка.
 - `src/score/` — скоринг (`Scorer`), правила (`rules.cc`: лексер, парсер,
   проверка типов, вычисление; новое поле — в `kFields` и `FieldValue`) и
   политика (`Policy`: shadow/enforce, `policy.hosts`). Сигналы и веса — в `deploy/fingerprints.yaml`; копия
