@@ -11,6 +11,7 @@
 
 #include "common/log.h"
 #include "score/policy.h"
+#include "score/rules.h"
 
 namespace bot_shield {
 
@@ -74,6 +75,8 @@ struct Config {
 
   // Verdicts and what to do with them ("mode" and "policy" sections).
   PolicySettings policy;
+  // Ordered rules on top of the score ("rules" section).
+  std::vector<RuleSpec> rules;
   // Fingerprint library file; empty means the built-in one.
   std::string fingerprint_library;
 

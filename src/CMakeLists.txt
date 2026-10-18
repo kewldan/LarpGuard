@@ -27,6 +27,7 @@ add_library(bot_shield_core STATIC
   proxy/http_message.cc
   proxy/upstream_pool.cc
   score/policy.cc
+  score/rules.cc
   score/scorer.cc
   server/connection.cc
   server/gateway.cc

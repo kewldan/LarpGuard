@@ -13,6 +13,7 @@
 #include "proxy/proxy_hooks.h"
 #include "proxy/upstream_pool.h"
 #include "score/policy.h"
+#include "score/rules.h"
 #include "score/scorer.h"
 #include "tls/cert_store.h"
 
@@ -34,6 +35,7 @@ struct GatewayContext {
   // Verdicts (shared, immutable).
   const Scorer* scorer = nullptr;
   const Policy* policy = nullptr;
+  const RuleSet* rules = nullptr;
   // Analytics events; null when disabled.
   EventSink* events = nullptr;
   const EventSettings* event_settings = nullptr;

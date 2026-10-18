@@ -78,6 +78,23 @@ policy:
   hosts: {}
   #  shop.example.com: enforce
 
+# Rules on top of the score, in order. First all "score" rules adjust the
+# score; then the first matching "allow"/"block" rule overrides the action of
+# the class (mode still decides whether it is carried out). Matches show up
+# in X-Bot-Reasons and events as rule:<name>. Language: docs/architecture.md
+# section 6.1.
+rules: []
+#  - name: monitoring
+#    when: 'cidr("10.0.0.0/8") and header("x-monitor") == "secret"'
+#    action: allow
+#  - name: admin-scrapers
+#    when: 'path ~ "/admin*" and class != "human"'
+#    action: block
+#  - name: mobile-app
+#    when: 'ua_tool == "okhttp" and host == "api.example.com"'
+#    action: score
+#    score: -40
+
 fingerprints:
   # Fingerprint library; "" = built in (same as deploy/fingerprints.yaml).
   library: ""

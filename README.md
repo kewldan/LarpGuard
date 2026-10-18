@@ -6,7 +6,7 @@ Self-hosted шлюз для фильтрации ботов, скреперов 
 
 Архитектура, ADR и план этапов: [docs/architecture.md](docs/architecture.md).
 
-## Статус: M2 в работе
+## Статус: M2 готов
 
 Шлюз встаёт перед Traefik и терминирует TLS для хостов с сертификатом в
 `acme.json`; остальное пропускает как есть. Терминированный трафик
@@ -26,7 +26,8 @@ User-Agent со стеком клиента (TLS, HTTP/2, TCP); в режиме 
 - Отпечатки: TCP SYN (Linux), JA4, HTTP/2 (Akamai), порядок заголовков;
   JA4T/JA4H опционально (`BOT_SHIELD_FOXIO`, см. `src/fp/foxio/LICENSE.md`).
 - Вердикты: библиотека отпечатков `deploy/fingerprints.yaml` (встроена),
-  скоринг с причинами, `mode: shadow|enforce` и `policy.hosts`.
+  скоринг с причинами, `mode: shadow|enforce` и `policy.hosts`, правила
+  `allow` / `block` / `score` на своём языке условий (раздел 6.1 архитектуры).
 - События `conn` и `req` (со статусом, длительностью и вердиктом) в NATS без полных IP
   и query-строк; схема ClickHouse — `deploy/clickhouse/`.
 

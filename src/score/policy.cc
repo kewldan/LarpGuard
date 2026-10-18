@@ -1,5 +1,6 @@
 #include "score/policy.h"
 
+#include <optional>
 #include <string_view>
 
 #include "common/host.h"
@@ -41,8 +42,8 @@ bool Policy::EnforcedFor(std::string_view host) const {
   return settings_.enforce;
 }
 
-PolicyDecision Policy::Decide(const Verdict& verdict,
-                              std::string_view host) const {
+PolicyDecision Policy::Decide(const Verdict& verdict, std::string_view host,
+                              std::optional<Action> override_action) const {
   PolicyDecision decision;
   switch (verdict.bot_class) {
     case BotClass::kHuman:
@@ -55,6 +56,7 @@ PolicyDecision Policy::Decide(const Verdict& verdict,
       decision.would_action = settings_.bot_action;
       break;
   }
+  if (override_action) decision.would_action = *override_action;
   decision.enforce = EnforcedFor(host);
   decision.action = decision.enforce ? decision.would_action : Action::kAllow;
   return decision;

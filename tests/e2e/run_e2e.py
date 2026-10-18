@@ -282,6 +282,13 @@ mode: shadow
 policy:
   hosts:
     www.a.test: enforce
+rules:
+  - name: monitoring
+    when: 'header("x-monitor") == "e2e-token"'
+    action: allow
+  - name: admin
+    when: 'path ~ "/admin*"'
+    action: block
 timeouts:
   client_hello: 1s
 events:
@@ -446,6 +453,26 @@ log_level: debug
             f"User-Agent: {chrome_ua}\r\n".encode())
         expect(status == 200, status)
         expect(json.loads(body)["headers"]["x-bot-class"] == "bot", body)
+
+    def rules_override_verdicts():
+        # Allow rule beats the class block on an enforce host.
+        status, _, body = h1_get(
+            https_port, "www.a.test", ca_a, "/monitored",
+            f"User-Agent: {chrome_ua}\r\nX-Monitor: e2e-token\r\n".encode())
+        expect(status == 200, (status, body))
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/monitored")
+        expect("rule:monitoring" in event["reasons"], event)
+        expect(event["class"] == "bot" and event["action"] == "allow", event)
+        # Block rule: only tagged in shadow mode, enforced on www.a.test.
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/admin/panel")
+        expect(status == 200, status)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/admin/panel")
+        expect(event["would_action"] == "block", event)
+        expect("rule:admin" in event["reasons"], event)
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
+        expect(status == 403, status)
 
     # --- Proxy over HTTP/2 (curl) -------------------------------------------
 
@@ -626,6 +653,7 @@ log_level: debug
         expect(values['bot_shield_blocks_total{mode="enforce"}'] >= 1, "blocks")
         expect(values['bot_shield_blocks_total{mode="shadow"}'] >= 1,
                "shadow blocks")
+        expect(values["bot_shield_rules_matched_total"] >= 3, "rule matches")
         expect(values['bot_shield_connections_rejected_total'
                       '{reason="client_hello_timeout"}'] >= 1, "timeout count")
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
@@ -644,6 +672,7 @@ log_level: debug
         ("verdict: shadow mode tags, never blocks", shadow_verdict_headers),
         ("verdict: enforce host blocks spoofed browser",
          enforce_blocks_spoofed_browser),
+        ("rules: allow and block override verdicts", rules_override_verdicts),
         ("wildcard certificate", wildcard_certificate),
         ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),

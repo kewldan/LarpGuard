@@ -116,6 +116,10 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_blocks_total", R"(mode="shadow")",
                requests_would_block.Get());
 
+  AppendHeader(&out, "bot_shield_rules_matched_total", "counter",
+               "Rule matches (score, allow and block rules).");
+  AppendSample(&out, "bot_shield_rules_matched_total", "", rules_matched.Get());
+
   AppendHeader(&out, "bot_shield_websocket_tunnels_total", "counter",
                "Upgraded (WebSocket) connections tunnelled to Traefik.");
   AppendSample(&out, "bot_shield_websocket_tunnels_total", "",

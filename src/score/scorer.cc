@@ -126,12 +126,14 @@ Verdict Scorer::Score(const ScoringInput& input) const {
   }
 
   verdict.score = std::clamp(total, 0, 100);
-  if (verdict.score >= bot_threshold_) {
-    verdict.bot_class = BotClass::kBot;
-  } else if (verdict.score >= suspicious_threshold_) {
-    verdict.bot_class = BotClass::kSuspicious;
-  }
+  verdict.bot_class = Classify(verdict.score);
   return verdict;
+}
+
+BotClass Scorer::Classify(int score) const {
+  if (score >= bot_threshold_) return BotClass::kBot;
+  if (score >= suspicious_threshold_) return BotClass::kSuspicious;
+  return BotClass::kHuman;
 }
 
 }  // namespace bot_shield

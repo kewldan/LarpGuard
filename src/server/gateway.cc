@@ -25,6 +25,7 @@
 #include "fp/library.h"
 #include "net/socket_options.h"
 #include "proxy/upstream_pool.h"
+#include "score/rules.h"
 #include "server/connection.h"
 #include "server/metrics_server.h"
 #include "tls/cert_store.h"
@@ -242,12 +243,14 @@ Gateway::~Gateway() {
 }
 
 bool Gateway::Start(std::string* error) {
+  if (!RuleSet::Compile(config_.rules, &rules_, error)) return false;
   GatewayContext shared;
   shared.config = &config_;
   shared.certificates = certificates_;
   shared.classifier = &classifier_;
   shared.scorer = &scorer_;
   shared.policy = &policy_;
+  shared.rules = &rules_;
   shared.events = events_;
   shared.event_settings = event_settings_;
   if (!ResolveEndpoint(config_.upstream_https, &shared.upstream_https, error) ||

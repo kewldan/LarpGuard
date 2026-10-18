@@ -20,6 +20,7 @@
 #include "common/host.h"
 #include "common/log.h"
 #include "score/policy.h"
+#include "score/rules.h"
 
 namespace bot_shield {
 namespace {
@@ -297,7 +298,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   if (!CheckKeys(root, "",
                  {"listen", "workers", "traefik", "passthrough_hosts",
                   "non_tls", "timeouts", "max_connections", "events", "mode",
-                  "policy", "fingerprints", "metrics", "log_level"},
+                  "policy", "rules", "fingerprints", "metrics", "log_level"},
                  error)) {
     return false;
   }
@@ -362,6 +363,32 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   }
   if (root["policy"] && !ParsePolicy(root["policy"], config, error)) {
     return false;
+  }
+  if (const YAML::Node rules = root["rules"]) {
+    if (!rules.IsSequence()) {
+      *error = "rules: expected a list";
+      return false;
+    }
+    config->rules.clear();
+    for (const auto& item : rules) {
+      if (!CheckKeys(item, "rules[]", {"name", "when", "action", "score"},
+                     error)) {
+        return false;
+      }
+      RuleSpec spec;
+      if (item["name"]) spec.name = item["name"].as<std::string>();
+      if (item["when"]) spec.when = item["when"].as<std::string>();
+      if (item["action"]) spec.action = item["action"].as<std::string>();
+      if (item["score"]) spec.score = item["score"].as<int>();
+      config->rules.push_back(std::move(spec));
+    }
+    // Compile now so --check-config reports bad rules.
+    RuleSet compiled;
+    std::string rule_error;
+    if (!RuleSet::Compile(config->rules, &compiled, &rule_error)) {
+      *error = "rules: " + rule_error;
+      return false;
+    }
   }
   if (const YAML::Node fingerprints = root["fingerprints"]) {
     if (!CheckKeys(fingerprints, "fingerprints", {"library"}, error)) {

@@ -171,6 +171,34 @@ fingerprints:
       ParseConfig("policy: {hosts: {\"bad host\": shadow}}\n", &bad, &error));
 }
 
+TEST(ConfigTest, ParsesAndValidatesRules) {
+  const char* yaml = R"(
+rules:
+  - name: admin
+    when: 'path ~ "/admin*" and class != "human"'
+    action: block
+  - name: partners
+    when: 'cidr("198.51.100.0/24")'
+    action: score
+    score: -30
+)";
+  Config config;
+  std::string error;
+  ASSERT_TRUE(ParseConfig(yaml, &config, &error)) << error;
+  ASSERT_EQ(config.rules.size(), 2u);
+  EXPECT_EQ(config.rules[1].score, -30);
+  EXPECT_FALSE(
+      ParseConfig("rules: [{name: x, when: 'hots == \"a\"', "
+                  "action: block}]\n",
+                  &config, &error));
+  EXPECT_NE(error.find("rule 'x'"), std::string::npos) << error;
+  EXPECT_FALSE(
+      ParseConfig("rules: [{name: x, when: 'true', action: block, "
+                  "extra: 1}]\n",
+                  &config, &error));
+  EXPECT_FALSE(ParseConfig("rules: {a: 1}\n", &config, &error));
+}
+
 TEST(ConfigTest, RejectsUnknownKeys) {
   Config config;
   std::string error;

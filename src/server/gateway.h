@@ -18,6 +18,7 @@
 #include "net/classifier.h"
 #include "proxy/upstream_pool.h"
 #include "score/policy.h"
+#include "score/rules.h"
 #include "score/scorer.h"
 #include "server/connection.h"
 #include "tls/cert_store.h"
@@ -88,6 +89,7 @@ class Gateway {
   Classifier classifier_;
   Scorer scorer_;
   Policy policy_;
+  RuleSet rules_;
   std::vector<std::unique_ptr<Worker>> workers_;
 };
 

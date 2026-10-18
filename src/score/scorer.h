@@ -40,6 +40,8 @@ class Scorer {
          int bot_threshold);
 
   Verdict Score(const ScoringInput& input) const;
+  // Class for a score (after rules adjusted it).
+  BotClass Classify(int score) const;
 
  private:
   const FingerprintLibrary* library_;

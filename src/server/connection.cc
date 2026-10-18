@@ -2,6 +2,7 @@
 
 #include <openssl/ssl.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/as_tuple.hpp>
 #include <asio/connect.hpp>
@@ -36,6 +37,7 @@
 #include "fp/http_request.h"
 #include "fp/ja4.h"
 #include "fp/tcp_syn.h"
+#include "fp/user_agent.h"
 #include "net/classifier.h"
 #include "net/prefixed_stream.h"
 #include "net/proxy_protocol.h"
@@ -48,6 +50,7 @@
 #include "proxy/proxy_hooks.h"
 #include "proxy/transport.h"
 #include "score/policy.h"
+#include "score/rules.h"
 #include "score/scorer.h"
 #include "tls/cert_store.h"
 #include "tls/client_hello.h"
@@ -204,9 +207,14 @@ class ConnectionObserver {
     input.pseudo_order = pseudo;
     input.header_fp = header_fp;
     input.tcp_initial_ttl = record_.tcp_initial_ttl;
-    const Verdict verdict = context_.scorer->Score(input);
+    Verdict verdict = context_.scorer->Score(input);
+    const std::string host = HostOnly(exchange.request.authority);
+    std::optional<Action> override_action;
+    if (context_.rules != nullptr && !context_.rules->empty()) {
+      override_action = ApplyRules(exchange, input, host, &verdict);
+    }
     const PolicyDecision decision =
-        context_.policy->Decide(verdict, HostOnly(exchange.request.authority));
+        context_.policy->Decide(verdict, host, override_action);
 
     exchange.score = verdict.score;
     exchange.bot_class = BotClassName(verdict.bot_class);
@@ -245,6 +253,52 @@ class ConnectionObserver {
     } else if (decision.would_action == Action::kBlock) {
       metrics.requests_would_block.Inc();
     }
+  }
+
+  // Score rules adjust the verdict, then the first allow/block rule may
+  // override the action. Matches are added to the reasons as "rule:<name>".
+  std::optional<Action> ApplyRules(const Exchange& exchange,
+                                   const ScoringInput& input,
+                                   std::string_view host,
+                                   Verdict* verdict) const {
+    const HttpRequest& request = exchange.observed;
+    const UserAgent ua = ParseUserAgent(request.Header("user-agent"));
+    const std::string_view path_and_query = exchange.request.path;
+    RuleContext rules;
+    rules.request = &request;
+    rules.ip = record_.peer;
+    rules.host = host;
+    rules.path = path_and_query.substr(0, path_and_query.find('?'));
+    rules.sni = record_.server_name;
+    rules.alpn = record_.alpn;
+    rules.ja4 = input.ja4;
+    rules.h2_fingerprint = input.h2_fingerprint;
+    rules.pseudo_order = input.pseudo_order;
+    rules.header_fp = input.header_fp;
+    rules.tcp_fingerprint = record_.tcp_fingerprint;
+    rules.ua_family = ua.family;
+    rules.ua_engine = ua.engine;
+    rules.ua_os = ua.os;
+    rules.ua_tool = ua.tool;
+    rules.score = verdict->score;
+    rules.bot_class = BotClassName(verdict->bot_class);
+    rules.reasons = &verdict->reasons;
+
+    std::vector<std::string> matched;
+    const int delta = context_.rules->ScoreDelta(rules, &matched);
+    if (delta != 0) {
+      verdict->score = std::clamp(verdict->score + delta, 0, 100);
+      verdict->bot_class = context_.scorer->Classify(verdict->score);
+      rules.score = verdict->score;
+      rules.bot_class = BotClassName(verdict->bot_class);
+    }
+    const std::optional<Action> action =
+        context_.rules->Decide(rules, &matched);
+    GlobalMetrics().rules_matched.Inc(matched.size());
+    for (const std::string& name : matched) {
+      verdict->reasons.push_back("rule:" + name);
+    }
+    return action;
   }
 
   void OnProxyDone(const Exchange& exchange) {

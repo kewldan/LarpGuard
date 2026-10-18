@@ -53,6 +53,7 @@ struct Metrics {
   Counter verdicts_bot;
   Counter requests_blocked;
   Counter requests_would_block;
+  Counter rules_matched;
   Counter alpn_mismatches;
   Counter idle_timeouts;
   Counter bytes_client_to_upstream;

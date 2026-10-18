@@ -1,6 +1,7 @@
 #ifndef BOT_SHIELD_SCORE_POLICY_H_
 #define BOT_SHIELD_SCORE_POLICY_H_
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,8 +41,11 @@ class Policy {
  public:
   explicit Policy(PolicySettings settings) : settings_(std::move(settings)) {}
 
-  // `host` is normalized (lowercase, no port).
-  PolicyDecision Decide(const Verdict& verdict, std::string_view host) const;
+  // `host` is normalized (lowercase, no port). `override_action` (from an
+  // allow/block rule) replaces the action of the verdict's class.
+  PolicyDecision Decide(
+      const Verdict& verdict, std::string_view host,
+      std::optional<Action> override_action = std::nullopt) const;
   bool EnforcedFor(std::string_view host) const;
   int block_status() const { return settings_.block_status; }
 
