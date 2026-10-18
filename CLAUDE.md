@@ -5,19 +5,12 @@ Self-hosted шлюз фильтрации ботов перед Traefik. Осн�
 заявляет. Архитектура, ADR и этапы: `docs/architecture.md` — читать перед
 крупными изменениями, решения там приняты и обоснованы.
 
-Готовы M0 (TLS-фронт с маршрутизацией по ClientHello, сертификаты из
-`acme.json`, TLS-туннель до Traefik с PROXY v2) и M1 (пассивные отпечатки
-TCP/JA4/HTTP2/заголовков, события в NATS → ClickHouse). Следующий этап — M2:
-HTTP-aware прокси (ADR-015), вердикты (библиотека отпечатков, скоринг,
-shadow/enforce, `X-Bot-*`) и правила на своём языке (ADR-008) сделаны.
-M3 готов: rate limiting (`src/ratelimit/`), docker-лейблы (`src/docker/`),
-admin API (`src/admin/`). M4 готов: JS-челлендж + PoW и токены
-(`src/challenge/`), проверка краулеров по rDNS и политика AI-краулеров
-(`src/crawler/`). M5 готов: fail-open (`src/watchdog/`),
-поведение и honeypot (`src/behavior/`), tarpit/decoy (`src/action/`),
-кластеры в ClickHouse (`tools/cluster_candidates.py`). M6 готов: модель-сигнал
-(`src/model/`, `tools/train_model.py`), gRPC через пул, HTTP/3 (`src/quic/`).
-UI отложен.
+Этапы M0–M6 готовы (раздел 14 `docs/architecture.md`): TLS-фронт с
+маршрутизацией по ClientHello, пассивные отпечатки и события в NATS →
+ClickHouse, HTTP-прокси с вердиктами и правилами, rate limiting, docker-лейблы
+и admin API, JS-челлендж и проверка краулеров, fail-open, поведение и
+honeypot, tarpit/decoy, модель-сигнал, gRPC, HTTP/3, горячая перезагрузка.
+UI отложен; оставшиеся хвосты — в Roadmap в `README.md`.
 
 ## Команды
 
@@ -58,8 +51,8 @@ ninja-build git python3 openssl`, исходники монтировать read
   `// IWYU pragma: keep`, иначе автоисправление на macOS их удалит.
 - `NOLINT` — только адресно (`NOLINTNEXTLINE(check)`) и с причиной в
   комментарии строкой выше.
-- Комментарии и сообщения в коде — на английском; документация
-  (`docs/`, `README.md`) — на русском.
+- Комментарии и сообщения в коде — на английском. `README.md` — на
+  английском (с эмодзи, как сейчас); `docs/` — на русском.
 - Зависимости фиксированы в `cmake/dependencies.cmake` (FetchContent,
   точные версии). Новые — так же, без системных пакетов.
 
