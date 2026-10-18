@@ -5,6 +5,7 @@ add_executable(bot_shield_tests
   classifier_test.cc
   client_hello_test.cc
   config_test.cc
+  crawler_test.cc
   docker_test.cc
   events_test.cc
   host_test.cc

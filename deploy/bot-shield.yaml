@@ -72,7 +72,8 @@ policy:
   # Score (0..100) from which a request is suspicious / a bot.
   thresholds: {suspicious: 30, bot: 70}
   # allow | challenge | block (challenge: JS page with proof of work).
-  actions: {suspicious: allow, bot: block}
+  # verified_bot: search crawlers confirmed by reverse DNS (see crawlers).
+  actions: {suspicious: allow, bot: block, verified_bot: allow}
   block_status: 403
   # Per-host mode overrides: exact names or "*.parent".
   hosts: {}
@@ -132,6 +133,16 @@ connection_limits:
 docker:
   socket: /var/run/docker.sock
   poll_interval: 5s
+
+# Known crawlers. A request whose User-Agent claims a search engine (Google,
+# Bing, Yandex, Apple, Baidu, ...) is checked by reverse and forward DNS in
+# the background: verified ones get class verified_bot, fakes the
+# fake_crawler signal. AI crawlers (GPTBot, ClaudeBot, CCBot, ...) are
+# recognized by User-Agent and get the "ai" action (default: scored like
+# anyone; allow | challenge | block). Rules and admin lists still win.
+crawlers:
+  verify: true
+  ai: default
 
 # JS challenge (action "challenge"): browsers get a page that checks a few
 # signals and solves a proof of work, then a __bs cookie (bound to the TLS

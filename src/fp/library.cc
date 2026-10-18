@@ -68,6 +68,7 @@ weights:
   automation_user_agent: 80
   headless_user_agent: 80
   unverified_crawler: 20
+  fake_crawler: 70
   ua_tls_mismatch: 45
   ua_h2_mismatch: 35
   browser_without_h2: 25

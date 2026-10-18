@@ -86,6 +86,9 @@ PolicyDecision Policy::Decide(const Verdict& verdict, HostMode mode,
     case BotClass::kBot:
       decision.would_action = settings_.bot_action;
       break;
+    case BotClass::kVerifiedBot:
+      decision.would_action = settings_.verified_bot_action;
+      break;
   }
   if (override_action) decision.would_action = *override_action;
   decision.enforce = mode == HostMode::kEnforce;

@@ -21,7 +21,9 @@ struct ScoringInput {
   int tcp_initial_ttl = 0;          // 0: unknown (no SYN capture).
 };
 
-enum class BotClass { kHuman, kSuspicious, kBot };
+// kVerifiedBot: a search crawler whose address was verified (never from a
+// score; see crawler/verifier.h).
+enum class BotClass { kHuman, kSuspicious, kBot, kVerifiedBot };
 
 std::string_view BotClassName(BotClass bot_class);
 
@@ -42,6 +44,10 @@ class Scorer {
   Verdict Score(const ScoringInput& input) const;
   // Class for a score (after rules adjusted it).
   BotClass Classify(int score) const;
+  // Weight of a signal in the library (0 if unknown).
+  int SignalWeight(std::string_view signal) const {
+    return library_->Weight(signal);
+  }
 
  private:
   const FingerprintLibrary* library_;

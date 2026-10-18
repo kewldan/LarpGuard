@@ -116,7 +116,7 @@ bool RateLimitSet::Compile(const std::vector<RateLimitSpec>& specs,
     }
     for (const std::string& bot_class : spec.classes) {
       if (bot_class != "human" && bot_class != "suspicious" &&
-          bot_class != "bot") {
+          bot_class != "bot" && bot_class != "verified_bot") {
         return fail(std::format("unknown class '{}'", bot_class));
       }
     }

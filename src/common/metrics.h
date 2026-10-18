@@ -51,6 +51,10 @@ struct Metrics {
   Counter verdicts_human;
   Counter verdicts_suspicious;
   Counter verdicts_bot;
+  Counter verdicts_verified_bot;
+  Counter crawlers_verified;
+  Counter crawlers_failed;
+  Counter crawler_lookups_dropped;
   Counter requests_blocked;
   Counter requests_would_block;
   Counter rules_matched;

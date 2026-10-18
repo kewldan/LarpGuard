@@ -36,6 +36,8 @@
 #include "common/network.h"
 #include "common/url.h"
 #include "config/config.h"
+#include "crawler/crawlers.h"
+#include "crawler/verifier.h"
 #include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
@@ -253,9 +255,40 @@ class ConnectionObserver {
     input.header_fp = header_fp;
     input.tcp_initial_ttl = record_.tcp_initial_ttl;
     Verdict verdict = context_.scorer->Score(input);
+    // Claimed crawlers: verified search engines skip scoring, fakes are
+    // penalized, AI crawlers get their configured action.
+    const KnownCrawler* crawler = FindCrawler(request.Header("user-agent"));
+    bool verified_crawler = false;
+    std::optional<Action> crawler_action;
+    if (crawler != nullptr) {
+      if (context_.crawler_verifier != nullptr && !crawler->domains.empty()) {
+        switch (context_.crawler_verifier->Check(*crawler, record_.peer, now)) {
+          case CrawlerStatus::kVerified:
+            verified_crawler = true;
+            verdict.score = 0;
+            verdict.bot_class = BotClass::kVerifiedBot;
+            verdict.reasons = {std::format("verified_crawler:{}", crawler->id)};
+            break;
+          case CrawlerStatus::kFailed:
+            verdict.score = std::min(
+                100,
+                verdict.score + context_.scorer->SignalWeight("fake_crawler"));
+            verdict.bot_class = context_.scorer->Classify(verdict.score);
+            verdict.reasons.push_back(
+                std::format("fake_crawler:{}", crawler->id));
+            break;
+          case CrawlerStatus::kPending:
+            break;
+        }
+      }
+      if (crawler->ai) {
+        verdict.reasons.push_back(std::format("ai_crawler:{}", crawler->id));
+        crawler_action = context_.ai_crawler_action;
+      }
+    }
     // A solved challenge earns credit (behavioural signals stay).
     const bool token_valid =
-        context_.challenger != nullptr &&
+        !verified_crawler && context_.challenger != nullptr &&
         context_.challenger->HasValidToken(request, binding, now);
     if (token_valid) {
       GlobalMetrics().tokens_valid.Inc();
@@ -267,7 +300,10 @@ class ConnectionObserver {
     std::optional<Action> override_action;
     if (context_.rules != nullptr && !context_.rules->empty()) {
       override_action = ApplyRules(exchange, input, host, &verdict);
+      // Score rules cannot turn a verified crawler into a scored client.
+      if (verified_crawler) verdict.bot_class = BotClass::kVerifiedBot;
     }
+    if (!override_action) override_action = crawler_action;
     // Operational lists (admin API) beat rules and the class.
     if (context_.lists != nullptr) {
       ListMatchInput list_input;
@@ -305,6 +341,9 @@ class ConnectionObserver {
         break;
       case BotClass::kBot:
         metrics.verdicts_bot.Inc();
+        break;
+      case BotClass::kVerifiedBot:
+        metrics.verdicts_verified_bot.Inc();
         break;
     }
 

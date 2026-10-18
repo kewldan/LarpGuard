@@ -45,6 +45,8 @@ std::string_view BotClassName(BotClass bot_class) {
       return "suspicious";
     case BotClass::kBot:
       return "bot";
+    case BotClass::kVerifiedBot:
+      return "verified_bot";
   }
   return "?";
 }

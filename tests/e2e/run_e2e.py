@@ -416,6 +416,8 @@ events:
 docker:
   socket: {docker.path}
   poll_interval: 200ms
+crawlers:
+  ai: block
 challenge:
   keys_file: {keys_path}
   token_ttl: 10m
@@ -660,6 +662,36 @@ log_level: debug
         event = nats.find("e2e.events.req",
                           lambda e: e.get("path_group") == "/guarded/shadow")
         expect(event["would_action"] == "challenge", event)
+
+    def crawlers():
+        gptbot = ("Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; "
+                  "compatible; GPTBot/1.2; +https://openai.com/gptbot)")
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/ai/enforced",
+                              f"User-Agent: {gptbot}\r\n".encode())
+        expect(status == 403, status)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/ai/enforced")
+        expect("ai_crawler:openai" in event["reasons"], event)
+        status, _, body = h1_get(https_port, "a.test", ca_a, "/ai/shadow",
+                                 f"User-Agent: {gptbot}\r\n".encode())
+        expect(status == 200, status)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/ai/shadow")
+        expect(event["would_action"] == "block", event)
+        # "Googlebot" from 127.0.0.1: unverified at first, then the reverse
+        # DNS check (localhost) fails and it is a fake.
+        googlebot = ("Mozilla/5.0 (compatible; Googlebot/2.1; "
+                     "+http://www.google.com/bot.html)")
+        reasons = []
+        for _ in range(60):
+            _, _, body = h1_get(https_port, "a.test", ca_a, "/crawler",
+                                f"User-Agent: {googlebot}\r\n".encode())
+            reasons = json.loads(body)["headers"]["x-bot-reasons"].split(",")
+            if "fake_crawler:google" in reasons:
+                break
+            expect("unverified_crawler" in reasons, reasons)
+            time.sleep(0.05)
+        expect("fake_crawler:google" in reasons, reasons)
 
     def rate_limits():
         statuses = [h1_get(https_port, "www.a.test", ca_a, "/limited")
@@ -976,6 +1008,8 @@ log_level: debug
         expect(values['bot_shield_challenges_total{result="would"}'] >= 1,
                "challenges would")
         expect(values["bot_shield_tokens_valid_total"] >= 2, "tokens valid")
+        expect(values['bot_shield_crawler_checks_total{result="failed"}'] >= 1,
+               "crawler checks")
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
         expect(values['bot_shield_events_total{result="published"}'] >= 50,
                "events published")
@@ -994,6 +1028,7 @@ log_level: debug
          enforce_blocks_spoofed_browser),
         ("rules: allow and block override verdicts", rules_override_verdicts),
         ("challenge: page, PoW in node, token, cookie stripped", js_challenge),
+        ("crawlers: AI policy, fake Googlebot by reverse DNS", crawlers),
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),

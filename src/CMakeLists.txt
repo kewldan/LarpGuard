@@ -11,6 +11,8 @@ add_library(bot_shield_core STATIC
   common/network.cc
   common/url.cc
   config/config.cc
+  crawler/crawlers.cc
+  crawler/verifier.cc
   docker/client.cc
   docker/labels.cc
   docker/watcher.cc

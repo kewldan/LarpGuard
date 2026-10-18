@@ -112,6 +112,17 @@ std::string Metrics::RenderPrometheus() const {
                verdicts_suspicious.Get());
   AppendSample(&out, "bot_shield_verdicts_total", R"(class="bot")",
                verdicts_bot.Get());
+  AppendSample(&out, "bot_shield_verdicts_total", R"(class="verified_bot")",
+               verdicts_verified_bot.Get());
+
+  AppendHeader(&out, "bot_shield_crawler_checks_total", "counter",
+               "Reverse DNS checks of crawler claims by result.");
+  AppendSample(&out, "bot_shield_crawler_checks_total", R"(result="verified")",
+               crawlers_verified.Get());
+  AppendSample(&out, "bot_shield_crawler_checks_total", R"(result="failed")",
+               crawlers_failed.Get());
+  AppendSample(&out, "bot_shield_crawler_checks_total", R"(result="dropped")",
+               crawler_lookups_dropped.Get());
 
   AppendHeader(&out, "bot_shield_blocks_total", "counter",
                "Requests blocked, and blocks shadow mode held back.");

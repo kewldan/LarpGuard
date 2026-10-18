@@ -32,6 +32,7 @@ struct PolicySettings {
   int bot_threshold = 70;
   Action suspicious_action = Action::kAllow;
   Action bot_action = Action::kBlock;
+  Action verified_bot_action = Action::kAllow;
   int block_status = 403;
   // Per-host mode overrides: exact names or "*.parent".
   std::vector<std::pair<std::string, HostMode>> host_modes;

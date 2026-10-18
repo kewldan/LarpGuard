@@ -253,14 +253,18 @@ bool ParsePolicy(const YAML::Node& node, Config* config, std::string* error) {
     }
   }
   if (const YAML::Node actions = node["actions"]) {
-    if (!CheckKeys(actions, "policy.actions", {"suspicious", "bot"}, error)) {
+    if (!CheckKeys(actions, "policy.actions",
+                   {"suspicious", "bot", "verified_bot"}, error)) {
       return false;
     }
     if ((actions["suspicious"] &&
          !ParseAction(actions["suspicious"].as<std::string>(),
                       &policy.suspicious_action)) ||
         (actions["bot"] &&
-         !ParseAction(actions["bot"].as<std::string>(), &policy.bot_action))) {
+         !ParseAction(actions["bot"].as<std::string>(), &policy.bot_action)) ||
+        (actions["verified_bot"] &&
+         !ParseAction(actions["verified_bot"].as<std::string>(),
+                      &policy.verified_bot_action))) {
       *error = "policy.actions: expected allow, challenge or block";
       return false;
     }
@@ -343,13 +347,28 @@ bool ParseRateLimits(const YAML::Node& node, Config* config,
 }
 
 bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
-  if (!CheckKeys(
-          root, "",
-          {"listen", "workers", "traefik", "passthrough_hosts", "non_tls",
-           "timeouts", "max_connections", "events", "mode", "policy", "rules",
-           "rate_limits", "connection_limits", "docker", "admin", "challenge",
-           "fingerprints", "metrics", "log_level"},
-          error)) {
+  if (!CheckKeys(root, "",
+                 {"listen",
+                  "workers",
+                  "traefik",
+                  "passthrough_hosts",
+                  "non_tls",
+                  "timeouts",
+                  "max_connections",
+                  "events",
+                  "mode",
+                  "policy",
+                  "rules",
+                  "rate_limits",
+                  "connection_limits",
+                  "docker",
+                  "admin",
+                  "challenge",
+                  "crawlers",
+                  "fingerprints",
+                  "metrics",
+                  "log_level"},
+                 error)) {
     return false;
   }
   if (root["listen"] && !ParseListen(root["listen"], config, error)) {
@@ -470,6 +489,26 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       config->new_connections_burst = limits["new_burst_per_ip"].as<int64_t>();
       if (config->new_connections_burst < 1) {
         *error = "connection_limits.new_burst_per_ip: expected >= 1";
+        return false;
+      }
+    }
+  }
+  if (const YAML::Node crawlers = root["crawlers"]) {
+    if (!CheckKeys(crawlers, "crawlers", {"verify", "ai"}, error)) {
+      return false;
+    }
+    if (crawlers["verify"]) {
+      config->crawlers_verify = crawlers["verify"].as<bool>();
+    }
+    if (crawlers["ai"]) {
+      const auto ai = crawlers["ai"].as<std::string>();
+      Action action = Action::kAllow;
+      if (ai == "default") {
+        config->crawlers_ai.reset();
+      } else if (ParseAction(ai, &action)) {
+        config->crawlers_ai = action;
+      } else {
+        *error = "crawlers.ai: expected default, allow, challenge or block";
         return false;
       }
     }

@@ -316,13 +316,32 @@ TTL уменьшается и часть картины искажается.
 
 ### 5.5. Хорошие боты
 
-- Поисковики: reverse DNS → forward DNS (Googlebot, Bingbot, YandexBot и др.),
-  результат кешируется по IP на 24 ч, плюс опубликованные IP-диапазоны.
-- Web Bot Auth (HTTP Message Signatures): проверка подписи по каталогу ключей
-  бота.
-- Свой мониторинг и партнёры: allowlist по IP/CIDR, mTLS или API-ключу.
-- Результат — класс `verified_bot` с отдельной политикой: можно разрешить
-  индексацию, но запретить AI-краулерам (раздел 9).
+- Поисковики (Google, Bing, Yandex, Apple, Baidu, Petal, Seznam, Naver,
+  Amazon): имя из User-Agent → reverse DNS адреса → имя должно быть в
+  опубликованных доменах краулера (`googlebot.com`, `search.msn.com`,
+  `yandex.ru` …, суффикс по границе метки) → forward DNS имени должен
+  вернуть тот же адрес. Проверка идёт в фоновых потоках через системный
+  резолвер; путь запроса только читает кеш (подтверждённые — 24 ч,
+  провалы — 1 ч, по паре «краулер, IP»), поэтому первый запрос с нового
+  адреса оценивается как обычный (`unverified_crawler`). Очередь и кеш
+  ограничены.
+- Подтверждённый краулер получает класс `verified_bot`, скор 0 и причину
+  `verified_crawler:<id>`; действие — `policy.actions.verified_bot` (allow по
+  умолчанию), лимиты можно задать по классу `verified_bot`. Токен челленджа и
+  правила `score` его класс не меняют, правила `allow`/`block` и списки —
+  меняют.
+- Провал проверки — сигнал `fake_crawler:<id>` (вес `fake_crawler`, 70):
+  подделка Googlebot сразу становится ботом.
+- AI-краулеры (GPTBot, ChatGPT-User, OAI-SearchBot, ClaudeBot, Claude-User,
+  CCBot, PerplexityBot, Bytespider, Amazonbot, cohere-ai,
+  Meta-ExternalAgent, Diffbot и др.) узнаются по User-Agent, получают
+  причину `ai_crawler:<id>` и действие из `crawlers.ai`
+  (`default` — оценивать как всех, `allow`, `challenge`, `block`). Правила и
+  списки главнее. Индексацию поисковиками можно оставить, а сбор данных для
+  моделей — запретить.
+- Позже: опубликованные IP-диапазоны (OpenAI, DuckDuckGo и др.), Web Bot Auth
+  (HTTP Message Signatures), mTLS для партнёров. Свой мониторинг — правилом
+  `allow` по CIDR или заголовку.
 
 ---
 
@@ -758,7 +777,7 @@ would_action`; с M3 — поля rate limit; ASN/страна — с IP-баз�
 | M1 ✅ | Пассивные отпечатки (TCP, JA4, H2, порядок заголовков; JA4T/JA4H опционально), события в NATS, ClickHouse-схема. `X-Bot-*` и shadow-решения перенесены в M2 (нужен HTTP-aware прокси, ADR-013). |
 | M2 ✅ | HTTP-aware прокси с пулом HTTP/2 (ADR-015), библиотека отпечатков, проверки согласованности, скоринг, shadow/enforce по хостам, `X-Bot-*`, блок, правила (ADR-008). |
 | M3 ✅ | Rate limiter (local) и лимиты соединений на IP, политики через docker-лейблы, admin API (статус, политика хоста, оперативные списки, журнал решений). synced/strict через Valkey — когда появятся несколько узлов. |
-| M4   | JS-челлендж + PoW, токены, хорошие боты (rDNS, Web Bot Auth).                                       |
+| M4 ✅ | JS-челлендж + PoW, токены, хорошие боты (rDNS) и политика AI-краулеров. Web Bot Auth и IP-диапазоны краулеров — позже. |
 | M5   | Поведенческие сигналы, honeypot, tarpit/decoy, офлайн-кластеризация, fail-open watchdog.            |
 | M6   | UI, ONNX-модель, upstream HTTP/2 (gRPC), HTTP/3 на входе.                                            |
 
@@ -896,6 +915,19 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
   вырезание cookie, JSON для XHR и провал при `webdriver`.
 
 Не сделано: canvas/WebGL/audio и сверка Worker vs окно (5.3), капча.
+
+### Статус M4 (часть 2: краулеры)
+
+- `crawler/crawlers` — таблица известных краулеров: токены User-Agent,
+  домены для reverse DNS, признак AI.
+- `crawler/verifier` — проверка reverse + forward DNS в фоновых потоках с
+  ограниченными очередью и кешем; резолвер подменяется в тестах.
+- Класс `verified_bot` (`policy.actions.verified_bot`, лимиты по классу,
+  правила `class == "verified_bot"`), сигнал `fake_crawler`, секция
+  `crawlers {verify, ai}`. Метрики `crawler_checks_total{result}`,
+  `verdicts_total{class="verified_bot"}`.
+
+Не сделано: IP-диапазоны краулеров, Web Bot Auth, лейбл `botshield.ai_crawlers`.
 
 ---
 

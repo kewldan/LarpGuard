@@ -11,6 +11,7 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -25,6 +26,7 @@
 #include "common/metrics.h"
 #include "common/version.h"
 #include "config/config.h"
+#include "crawler/verifier.h"
 #include "docker/labels.h"
 #include "docker/watcher.h"
 #include "events/events.h"
@@ -197,8 +199,15 @@ int Run(int argc, char** argv) {
   challenge.token_credit = config.challenge_token_credit;
   const bot_shield::Challenger challenger(std::move(challenge));
 
+  std::optional<bot_shield::CrawlerVerifier> crawler_verifier;
+  if (config.crawlers_verify) {
+    crawler_verifier.emplace(bot_shield::CrawlerVerifier::SystemResolver(),
+                             bot_shield::CrawlerVerifier::Settings());
+  }
+
   bot_shield::GatewayServices services;
   services.challenger = &challenger;
+  if (crawler_verifier) services.crawler_verifier = &*crawler_verifier;
   services.events = publisher.get();
   services.event_settings = &event_settings;
   services.library = &library;

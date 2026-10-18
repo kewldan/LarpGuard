@@ -86,6 +86,10 @@ struct Config {
   int64_t new_connections_per_ip = 0;
   std::chrono::milliseconds new_connections_period{1000};
   int64_t new_connections_burst = 1;
+  // Known crawlers ("crawlers" section): verify search crawlers by reverse
+  // DNS, and what to do with AI crawlers (unset: score them like anyone).
+  bool crawlers_verify = true;
+  std::optional<Action> crawlers_ai;
   // JS challenge ("challenge" section). Keys file: see TokenKeys::Load; empty
   // means a random key per start (tokens do not survive restarts).
   std::string challenge_keys_file;

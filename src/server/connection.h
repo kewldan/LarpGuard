@@ -10,6 +10,7 @@
 #include "admin/lists.h"
 #include "challenge/challenger.h"
 #include "config/config.h"
+#include "crawler/verifier.h"
 #include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
@@ -47,6 +48,10 @@ struct GatewayContext {
   RateLimitStore* rate_limit_store = nullptr;
   // Policies from docker labels; null when Docker is not used.
   const LabelStore* labels = nullptr;
+  // Reverse DNS checks of search crawlers; null when disabled.
+  CrawlerVerifier* crawler_verifier = nullptr;
+  // Action for AI crawlers (crawlers.ai); unset: scored like anyone.
+  std::optional<Action> ai_crawler_action;
   // JS challenge and clearance tokens; null when not configured.
   const Challenger* challenger = nullptr;
   // Operational allow/block lists and the recent-decision log (admin API).
