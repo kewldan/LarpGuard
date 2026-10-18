@@ -27,7 +27,8 @@ traefik:
   # Verify Traefik's certificate on the loopback hop.
   tls_verify: false
 
-# Hosts never terminated here (e.g. gRPC until the HTTP/2-aware proxy lands).
+# Hosts never terminated here: other protocols over TLS. gRPC works through
+# the gateway.
 # Exact names or "*.parent".
 passthrough_hosts: []
 #  - grpc.example.com

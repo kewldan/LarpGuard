@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -43,7 +44,9 @@ bool ProbeHealth(const Endpoint& endpoint, std::chrono::milliseconds timeout,
       "GET /health HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
       endpoint.host);
   std::string response;
-  std::error_code result = asio::error::timed_out;
+  // Set by the last handler that runs; unset means the check timed out
+  // (`response` then holds the read buffer, not an answer).
+  std::optional<std::error_code> result;
 
   resolver.async_resolve(
       endpoint.host, std::to_string(endpoint.port),
@@ -80,8 +83,12 @@ bool ProbeHealth(const Endpoint& endpoint, std::chrono::milliseconds timeout,
             });
       });
   io_context.run_for(timeout);
-  if (result && result != asio::error::eof && response.empty()) {
-    *detail = result.message();
+  if (!result) {
+    *detail = std::format("no answer within {} ms", timeout.count());
+    return false;
+  }
+  if (*result) {
+    *detail = result->message();
     return false;
   }
   const std::string_view status_line =

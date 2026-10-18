@@ -188,8 +188,7 @@ int H2UpstreamConnection::OnFrameRecv(nghttp2_session* /*session*/,
           stream->response = ProxyResponse{};
           break;
         }
-        exchange.SetResponse(std::move(stream->response));
-        if (end_stream) exchange.EndResponse();
+        exchange.SetResponse(std::move(stream->response), end_stream);
       } else {
         exchange.EndResponse(std::move(stream->trailers));
       }

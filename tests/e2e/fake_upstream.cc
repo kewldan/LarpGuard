@@ -4,6 +4,7 @@
 // answers every request with a JSON description of it; special paths:
 //   /big?bytes=N     N bytes of body
 //   /trailers        response with a "grpc-status: 0" trailer
+//   /trailers-only   gRPC trailers-only: one HEADERS frame with END_STREAM
 //   /status/NNN      that status code
 // ALPN http/1.1 or none -> a WebSocket-style upgrade (101 + echo) or "line
 // mode": one line in, one key=value line out (used by passthrough checks).
@@ -167,6 +168,23 @@ void Respond(nghttp2_session* session, H2Session* state, int32_t stream_id) {
   const std::string path = request.headers[":path"];
   int status = 200;
   std::string content_type = "application/json";
+  if (path == "/trailers-only") {
+    std::vector<std::pair<std::string, std::string>> headers = {
+        {":status", "200"},
+        {"content-type", "application/grpc"},
+        {"grpc-status", "12"},
+        {"grpc-message", "unimplemented"}};
+    std::vector<nghttp2_nv> nva;
+    nva.reserve(headers.size());
+    for (auto& [name, value] : headers) {
+      nva.push_back({reinterpret_cast<uint8_t*>(name.data()),
+                     reinterpret_cast<uint8_t*>(value.data()), name.size(),
+                     value.size(), NGHTTP2_NV_FLAG_NONE});
+    }
+    nghttp2_submit_response2(session, stream_id, nva.data(), nva.size(),
+                             nullptr);
+    return;
+  }
   if (path.starts_with("/big?bytes=")) {
     request.response.assign(static_cast<std::size_t>(ParseInt(path.substr(11))),
                             'x');

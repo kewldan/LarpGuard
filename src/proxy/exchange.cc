@@ -118,10 +118,11 @@ std::size_t Exchange::ReadRequestBody(std::span<uint8_t> out) {
   return n;
 }
 
-void Exchange::SetResponse(ProxyResponse new_response) {
+void Exchange::SetResponse(ProxyResponse new_response, bool ended) {
   if (local) return;
   response = std::move(new_response);
   response_started = true;
+  response_ended = ended;
   if (wake_client) wake_client();
 }
 

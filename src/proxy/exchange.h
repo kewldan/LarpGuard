@@ -62,7 +62,10 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
 
   // --- Called by the upstream side -----------------------------------------
   std::size_t ReadRequestBody(std::span<uint8_t> out);
-  void SetResponse(ProxyResponse response);
+  // `ended`: the response has no body or trailers (HEADERS with
+  // END_STREAM, e.g. a gRPC trailers-only response); the client side then
+  // ends its stream with the headers too.
+  void SetResponse(ProxyResponse response, bool ended = false);
   void PushResponseBody(std::span<const uint8_t> data);
   void EndResponse(HeaderList trailers = {});
   // The upstream stream or connection failed. Before the response started the

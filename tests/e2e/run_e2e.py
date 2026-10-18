@@ -991,6 +991,24 @@ log_level: debug
 
     # --- Routing, passthrough, certificates ---------------------------------
 
+    def grpc_trailers_only():
+        # gRPC "trailers-only" answers (an error status without a body) must
+        # stay one HEADERS frame with END_STREAM; split into HEADERS + empty
+        # DATA, gRPC clients report "closed the stream without trailers".
+        result = subprocess.run(
+            ["curl", "-sS", "--http2", "-v", "--trace-config", "http/2",
+             "--resolve", f"a.test:{https_port}:127.0.0.1", "--cacert", ca_a,
+             "-H", "content-type: application/grpc", "-H", "te: trailers",
+             "--data-binary", "x", "-o", os.devnull,
+             f"https://a.test:{https_port}/trailers-only"],
+            capture_output=True, text=True, timeout=30)
+        frames = [line for line in result.stderr.splitlines()
+                  if "<- FRAME[" in line and "[1]" in line]
+        expect(frames and "HEADERS" in frames[0] and "eos=1" in frames[0],
+               frames or result.stderr[-2000:])
+        expect(not any("DATA" in f for f in frames), frames)
+        expect("grpc-status: 12" in result.stderr, result.stderr[-2000:])
+
     def wildcard_certificate():
         status, _, body = h1_get(https_port, "x.w.test", ca_w, "/")
         expect(status == 200, status)
@@ -1283,6 +1301,7 @@ log_level: debug
         ("/__bs/* endpoints: own per-IP limit", challenge_endpoint_limit),
         ("ClientHello without SNI rejected", no_sni_rejected),
         ("h2: rapid reset ends in GOAWAY", h2_rapid_reset),
+        ("h2: gRPC trailers-only answer stays one frame", grpc_trailers_only),
         ("wildcard certificate", wildcard_certificate),
         ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),

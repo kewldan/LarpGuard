@@ -127,6 +127,7 @@ TEST(ProbeHealthTest, TimesOut) {
   std::string detail;
   const auto started = std::chrono::steady_clock::now();
   EXPECT_FALSE(ProbeHealth(endpoint, std::chrono::milliseconds(200), &detail));
+  EXPECT_EQ(detail, "no answer within 200 ms");
   EXPECT_LT(std::chrono::steady_clock::now() - started,
             std::chrono::seconds(2));
 }
