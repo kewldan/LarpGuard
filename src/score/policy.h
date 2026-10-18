@@ -11,8 +11,9 @@
 
 namespace bot_shield {
 
-// What happens to a request. Challenge and throttle arrive with M3/M4.
-enum class Action { kAllow, kBlock };
+// What happens to a request. kChallenge shows the JS challenge to browser
+// navigations (other requests get a 403 that points to it).
+enum class Action { kAllow, kChallenge, kBlock };
 
 std::string_view ActionName(Action action);
 bool ParseAction(std::string_view text, Action* action);

@@ -55,6 +55,11 @@ struct Metrics {
   Counter requests_would_block;
   Counter rules_matched;
   Counter rate_limited;
+  Counter challenges_issued;
+  Counter challenges_would;
+  Counter challenges_passed;
+  Counter challenges_failed;
+  Counter tokens_valid;
   Counter docker_polls_failed;
   Gauge label_hosts;
   Counter rate_limited_shadow;

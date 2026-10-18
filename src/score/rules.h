@@ -70,7 +70,7 @@ class Condition {
 struct RuleSpec {
   std::string name;
   std::string when;
-  std::string action;  // "allow", "block" or "score".
+  std::string action;  // "allow", "challenge", "block" or "score".
   int score = 0;       // For "score".
 };
 
@@ -94,7 +94,7 @@ class RuleSet {
  private:
   struct Rule {
     std::string name;
-    enum class Kind { kAllow, kBlock, kScore } kind = Kind::kScore;
+    enum class Kind { kAllow, kChallenge, kBlock, kScore } kind = Kind::kScore;
     int score = 0;
     std::shared_ptr<const Condition> condition;
   };

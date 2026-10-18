@@ -71,7 +71,7 @@ mode: shadow
 policy:
   # Score (0..100) from which a request is suspicious / a bot.
   thresholds: {suspicious: 30, bot: 70}
-  # allow | block (challenge and throttle come with later stages).
+  # allow | challenge | block (challenge: JS page with proof of work).
   actions: {suspicious: allow, bot: block}
   block_status: 403
   # Per-host mode overrides: exact names or "*.parent".
@@ -90,6 +90,9 @@ rules: []
 #  - name: admin-scrapers
 #    when: 'path ~ "/admin*" and class != "human"'
 #    action: block
+#  - name: checkout
+#    when: 'path ~ "/checkout*" and class != "human"'
+#    action: challenge
 #  - name: mobile-app
 #    when: 'ua_tool == "okhttp" and host == "api.example.com"'
 #    action: score
@@ -129,6 +132,19 @@ connection_limits:
 docker:
   socket: /var/run/docker.sock
   poll_interval: 5s
+
+# JS challenge (action "challenge"): browsers get a page that checks a few
+# signals and solves a proof of work, then a __bs cookie (bound to the TLS
+# fingerprint and /24) that takes token_credit off the score. Paths under
+# /__bs/ are reserved on every host; the cookie never reaches Traefik.
+challenge:
+  # {"active": "k1", "keys": {"k1": "<base64, >= 32 bytes>"}}; list old keys
+  # next to a new active one to rotate. "" = random key per start.
+  keys_file: ""
+  token_ttl: 12h
+  # Leading zero bits of SHA-256 (~1M hashes/s per core in a browser).
+  difficulty: {suspicious: 16, bot: 19}
+  token_credit: 40
 
 # Admin API (JSON over a unix socket, mode 0600; no TCP port):
 #   curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status

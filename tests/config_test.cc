@@ -164,11 +164,38 @@ fingerprints:
   EXPECT_FALSE(ParseConfig("mode: strict\n", &bad, &error));
   EXPECT_FALSE(ParseConfig("policy: {thresholds: {suspicious: 80, bot: 40}}\n",
                            &bad, &error));
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       ParseConfig("policy: {actions: {bot: challenge}}\n", &bad, &error));
+  EXPECT_FALSE(
+      ParseConfig("policy: {actions: {bot: captcha}}\n", &bad, &error));
   EXPECT_FALSE(ParseConfig("policy: {block_status: 200}\n", &bad, &error));
   EXPECT_FALSE(
       ParseConfig("policy: {hosts: {\"bad host\": shadow}}\n", &bad, &error));
+}
+
+TEST(ConfigTest, ParsesChallenge) {
+  Config config;
+  std::string error;
+  ASSERT_TRUE(ParseConfig(R"(
+challenge:
+  keys_file: /etc/bot-shield/keys.json
+  token_ttl: 1h
+  difficulty: {suspicious: 12, bot: 20}
+  token_credit: 30
+)",
+                          &config, &error))
+      << error;
+  EXPECT_EQ(config.challenge_keys_file, "/etc/bot-shield/keys.json");
+  EXPECT_EQ(config.challenge_token_ttl, std::chrono::hours(1));
+  EXPECT_EQ(config.challenge_suspicious_difficulty, 12);
+  EXPECT_EQ(config.challenge_bot_difficulty, 20);
+  EXPECT_EQ(config.challenge_token_credit, 30);
+
+  Config bad;
+  EXPECT_FALSE(
+      ParseConfig("challenge: {difficulty: {bot: 40}}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("challenge: {token_credit: -1}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("challenge: {captcha: true}\n", &bad, &error));
 }
 
 TEST(ConfigTest, ParsesAndValidatesRules) {

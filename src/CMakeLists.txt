@@ -1,4 +1,6 @@
 add_library(bot_shield_core STATIC
+  challenge/challenger.cc
+  challenge/token.cc
   admin/decision_log.cc
   admin/lists.cc
   admin/server.cc
@@ -7,6 +9,7 @@ add_library(bot_shield_core STATIC
   common/log.cc
   common/metrics.cc
   common/network.cc
+  common/url.cc
   config/config.cc
   docker/client.cc
   docker/labels.cc

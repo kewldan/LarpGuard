@@ -11,8 +11,9 @@ TCP/JA4/HTTP2/заголовков, события в NATS → ClickHouse). Сл
 HTTP-aware прокси (ADR-015), вердикты (библиотека отпечатков, скоринг,
 shadow/enforce, `X-Bot-*`) и правила на своём языке (ADR-008) сделаны.
 M3 готов: rate limiting (`src/ratelimit/`), docker-лейблы (`src/docker/`),
-admin API (`src/admin/`). Следующий этап — M4: JS-челлендж + PoW, токены,
-проверка хороших ботов.
+admin API (`src/admin/`). M4 в работе: JS-челлендж + PoW и токены
+(`src/challenge/`) сделаны, дальше — проверка хороших ботов (rDNS) и
+политика AI-краулеров.
 
 ## Команды
 

@@ -81,6 +81,7 @@ struct GatewayServices {
   const LabelStore* labels = nullptr;  // Null: Docker off.
   ListStore* lists = nullptr;
   DecisionLog* decisions = nullptr;
+  const Challenger* challenger = nullptr;
 };
 
 class Gateway {

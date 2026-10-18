@@ -86,6 +86,13 @@ struct Config {
   int64_t new_connections_per_ip = 0;
   std::chrono::milliseconds new_connections_period{1000};
   int64_t new_connections_burst = 1;
+  // JS challenge ("challenge" section). Keys file: see TokenKeys::Load; empty
+  // means a random key per start (tokens do not survive restarts).
+  std::string challenge_keys_file;
+  std::chrono::milliseconds challenge_token_ttl{std::chrono::hours(12)};
+  int challenge_suspicious_difficulty = 16;
+  int challenge_bot_difficulty = 19;
+  int challenge_token_credit = 40;
   // Admin API on a unix socket (mode 0600); empty disables.
   std::string admin_socket;
   // Operational lists survive restarts in this JSON file; empty: memory.

@@ -136,6 +136,21 @@ std::string Metrics::RenderPrometheus() const {
                "Hosts configured by docker labels.");
   AppendSample(&out, "bot_shield_label_hosts", "", label_hosts.Get());
 
+  AppendHeader(&out, "bot_shield_challenges_total", "counter",
+               "JS challenges by outcome (would: held back by shadow mode).");
+  AppendSample(&out, "bot_shield_challenges_total", R"(result="issued")",
+               challenges_issued.Get());
+  AppendSample(&out, "bot_shield_challenges_total", R"(result="would")",
+               challenges_would.Get());
+  AppendSample(&out, "bot_shield_challenges_total", R"(result="passed")",
+               challenges_passed.Get());
+  AppendSample(&out, "bot_shield_challenges_total", R"(result="failed")",
+               challenges_failed.Get());
+
+  AppendHeader(&out, "bot_shield_tokens_valid_total", "counter",
+               "Requests carrying a valid clearance token.");
+  AppendSample(&out, "bot_shield_tokens_valid_total", "", tokens_valid.Get());
+
   AppendHeader(&out, "bot_shield_rules_matched_total", "counter",
                "Rule matches (score, allow and block rules).");
   AppendSample(&out, "bot_shield_rules_matched_total", "", rules_matched.Get());

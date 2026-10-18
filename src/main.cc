@@ -18,6 +18,8 @@
 
 #include "admin/decision_log.h"
 #include "admin/lists.h"
+#include "challenge/challenger.h"
+#include "challenge/token.h"
 #include "common/hash.h"
 #include "common/log.h"
 #include "common/metrics.h"
@@ -177,7 +179,26 @@ int Run(int argc, char** argv) {
   }
   bot_shield::DecisionLog decisions(config.admin_decisions);
 
+  bot_shield::ChallengeSettings challenge;
+  if (config.challenge_keys_file.empty()) {
+    challenge.keys = bot_shield::TokenKeys::Random();
+    bot_shield::log::Warn(
+        "challenge: no keys_file, using a random key (clearance tokens are "
+        "lost on restart)");
+  } else if (!bot_shield::TokenKeys::Load(config.challenge_keys_file,
+                                          &challenge.keys, &error)) {
+    Error("challenge: {}", error);
+    return 1;
+  }
+  challenge.token_ttl = std::chrono::duration_cast<std::chrono::seconds>(
+      config.challenge_token_ttl);
+  challenge.suspicious_difficulty = config.challenge_suspicious_difficulty;
+  challenge.bot_difficulty = config.challenge_bot_difficulty;
+  challenge.token_credit = config.challenge_token_credit;
+  const bot_shield::Challenger challenger(std::move(challenge));
+
   bot_shield::GatewayServices services;
+  services.challenger = &challenger;
   services.events = publisher.get();
   services.event_settings = &event_settings;
   services.library = &library;

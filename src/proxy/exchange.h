@@ -48,8 +48,9 @@ class Exchange {
   void CancelFromClient();
   // Answers without Traefik (errors, block pages, 429s); `extra_headers`
   // are added to the generated response.
-  void RespondLocally(int status, std::string_view body,
-                      const HeaderList& extra_headers = {});
+  void RespondLocally(
+      int status, std::string_view body, const HeaderList& extra_headers = {},
+      std::string_view content_type = "text/plain; charset=utf-8");
 
   // --- Called by the upstream side -----------------------------------------
   std::size_t ReadRequestBody(std::span<uint8_t> out);

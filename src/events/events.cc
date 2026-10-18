@@ -204,6 +204,10 @@ std::string RequestEventJson(const ConnectionRecord& record,
       json["reasons"] = outcome->reasons;
       json["action"] = outcome->action;
       json["would_action"] = outcome->would_action;
+    } else if (!outcome->reasons.empty()) {
+      // Gateway endpoints (/__bs/*): no verdict, only what happened.
+      json["reasons"] = outcome->reasons;
+      json["action"] = outcome->action;
     }
     if (!outcome->rate_limit.empty()) json["rate_limit"] = outcome->rate_limit;
     if (!outcome->request_id.empty()) json["request_id"] = outcome->request_id;

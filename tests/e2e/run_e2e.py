@@ -294,6 +294,29 @@ class Checks:
             print(f"FAIL {name}: {e!r}")
 
 
+def solve_challenge(page, webdriver=False):
+    """Runs the challenge page's script in node; returns the verify URL."""
+    script = page[page.index("<script>") + 8:page.index("</script>")]
+    harness = """
+const vm = require("vm");
+let target = null;
+const sandbox = {
+  navigator: {webdriver: %s, languages: ["en-US", "en"],
+              hardwareConcurrency: 8, platform: "MacIntel",
+              userAgentData: {brands: [{brand: "Chromium"}]}},
+  screen: {width: 1512}, location: {replace: (u) => { target = u; }},
+  TextEncoder, btoa, Date, Intl,
+};
+sandbox.window = sandbox;
+vm.runInNewContext(require("fs").readFileSync(0, "utf8"), sandbox);
+process.stdout.write(target);
+""" % ("true" if webdriver else "false")
+    result = subprocess.run(["node", "-e", harness], input=script,
+                            capture_output=True, text=True, timeout=60,
+                            check=True)
+    return result.stdout
+
+
 def expect(condition, message):
     if not condition:
         raise AssertionError(message)
@@ -344,6 +367,10 @@ def main():
                                 f"bs-admin-{os.getpid()}.sock")
     lists_file = os.path.join(workdir, "lists.json")
     config_path = os.path.join(workdir, "bot-shield.yaml")
+    keys_path = os.path.join(workdir, "keys.json")
+    with open(keys_path, "w") as f:
+        json.dump({"active": "k1", "keys": {
+            "k1": base64.b64encode(os.urandom(32)).decode()}}, f)
     with open(config_path, "w") as f:
         f.write(f"""
 listen:
@@ -368,6 +395,9 @@ rules:
   - name: admin
     when: 'path ~ "/admin*"'
     action: block
+  - name: guarded
+    when: 'path ~ "/guarded*"'
+    action: challenge
 rate_limits:
   - name: limited-path
     paths: ["/limited*"]
@@ -386,6 +416,10 @@ events:
 docker:
   socket: {docker.path}
   poll_interval: 200ms
+challenge:
+  keys_file: {keys_path}
+  token_ttl: 10m
+  difficulty: {{suspicious: 8, bot: 10}}
 admin:
   socket: {admin_socket}
   state_file: {lists_file}
@@ -568,6 +602,64 @@ log_level: debug
         expect("rule:admin" in event["reasons"], event)
         status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
         expect(status == 403, status)
+
+    def js_challenge():
+        html = b"Accept: text/html\r\n"
+        status, headers, body = h1_get(https_port, "www.a.test", ca_a,
+                                       "/guarded/page?x=1", html)
+        expect(status == 403 and headers["content-type"].startswith(
+            "text/html"), (status, headers))
+        expect(headers.get("cache-control") == "no-store", headers)
+        verify = solve_challenge(body.decode())
+        expect(verify.startswith("/__bs/verify?n="), verify)
+        status, headers, _ = h1_get(https_port, "www.a.test", ca_a, verify)
+        expect(status == 302, status)
+        expect(headers["location"] == "/guarded/page?x=1", headers)
+        cookie = headers["set-cookie"].split(";")[0]
+        expect(cookie.startswith("__bs=v1."), cookie)
+        # With the token: through to the upstream, without our cookie.
+        status, _, body = h1_get(
+            https_port, "www.a.test", ca_a, "/guarded/page?x=1",
+            html + f"Cookie: app=1; {cookie}\r\n".encode())
+        expect(status == 200, (status, body))
+        seen = json.loads(body)["headers"]
+        expect(seen.get("cookie") == "app=1", seen)
+        expect("token_valid" in seen["x-bot-reasons"], seen)
+        status, _, body = h1_get(https_port, "www.a.test", ca_a,
+                                 "/guarded/only", f"Cookie: {cookie}\r\n"
+                                 .encode())
+        expect(status == 200 and "cookie" not in json.loads(body)["headers"],
+               body)
+        # A forged token does not count.
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/guarded/page",
+                              html + f"Cookie: {cookie}0\r\n".encode())
+        expect(status == 403, status)
+        # Non-navigation requests get JSON with the challenge URL.
+        status, headers, body = h1_get(https_port, "www.a.test", ca_a,
+                                       "/guarded/api",
+                                       b"Accept: application/json\r\n")
+        expect(status == 403 and headers["content-type"] == "application/json",
+               (status, headers))
+        expect(json.loads(body) == {
+            "error": "challenge_required",
+            "challenge": "/__bs/challenge?r=%2Fguarded%2Fapi"}, body)
+        # The challenge page by URL, and a failing (webdriver) solution.
+        status, _, body = h1_get(https_port, "www.a.test", ca_a,
+                                 "/__bs/challenge?r=%2Fguarded%2Fapi")
+        expect(status == 200, status)
+        verify = solve_challenge(body.decode(), webdriver=True)
+        status, headers, _ = h1_get(https_port, "www.a.test", ca_a, verify)
+        expect(status == 403 and "set-cookie" not in headers, status)
+        event = nats.find("e2e.events.req", lambda e: "challenge:failed:"
+                          "webdriver" in e.get("reasons", []))
+        expect(event["local"] is True, event)
+        # Shadow host: only recorded.
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/guarded/shadow",
+                              html)
+        expect(status == 200, status)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/guarded/shadow")
+        expect(event["would_action"] == "challenge", event)
 
     def rate_limits():
         statuses = [h1_get(https_port, "www.a.test", ca_a, "/limited")
@@ -877,6 +969,13 @@ log_level: debug
                "rate limited in shadow")
         expect(values['bot_shield_connections_rejected_total'
                       '{reason="client_hello_timeout"}'] >= 1, "timeout count")
+        expect(values['bot_shield_challenges_total{result="passed"}'] == 1,
+               "challenges passed")
+        expect(values['bot_shield_challenges_total{result="failed"}'] == 1,
+               "challenges failed")
+        expect(values['bot_shield_challenges_total{result="would"}'] >= 1,
+               "challenges would")
+        expect(values["bot_shield_tokens_valid_total"] >= 2, "tokens valid")
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
         expect(values['bot_shield_events_total{result="published"}'] >= 50,
                "events published")
@@ -894,6 +993,7 @@ log_level: debug
         ("verdict: enforce host blocks spoofed browser",
          enforce_blocks_spoofed_browser),
         ("rules: allow and block override verdicts", rules_override_verdicts),
+        ("challenge: page, PoW in node, token, cookie stripped", js_challenge),
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),

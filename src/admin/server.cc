@@ -20,7 +20,6 @@
 #include <cstdio>
 #include <format>
 #include <functional>
-#include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -35,6 +34,7 @@
 #include "common/host.h"
 #include "common/log.h"
 #include "common/metrics.h"
+#include "common/url.h"
 #include "common/version.h"
 #include "docker/labels.h"
 #include "net/watchdog.h"
@@ -52,53 +52,6 @@ constexpr auto kRequestTimeout = std::chrono::seconds(10);
 
 AdminResponse Error(int status, std::string_view message) {
   return {status, {{"error", message}}};
-}
-
-int HexValue(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
-}
-
-std::string PercentDecode(std::string_view text) {
-  std::string out;
-  for (std::size_t i = 0; i < text.size(); ++i) {
-    if (text[i] == '+') {
-      out.push_back(' ');
-    } else if (text[i] == '%' && i + 2 < text.size() &&
-               HexValue(text[i + 1]) >= 0 && HexValue(text[i + 2]) >= 0) {
-      out.push_back(static_cast<char>(HexValue(text[i + 1]) * 16 +
-                                      HexValue(text[i + 2])));
-      i += 2;
-    } else {
-      out.push_back(text[i]);
-    }
-  }
-  return out;
-}
-
-std::map<std::string, std::string, std::less<>> ParseQuery(
-    std::string_view query) {
-  std::map<std::string, std::string, std::less<>> params;
-  while (!query.empty()) {
-    const std::size_t amp = query.find('&');
-    const std::string_view pair = query.substr(0, amp);
-    const std::size_t equals = pair.find('=');
-    params[PercentDecode(pair.substr(0, equals))] =
-        equals == std::string_view::npos
-            ? ""
-            : PercentDecode(pair.substr(equals + 1));
-    if (amp == std::string_view::npos) break;
-    query.remove_prefix(amp + 1);
-  }
-  return params;
-}
-
-std::string Param(const std::map<std::string, std::string, std::less<>>& params,
-                  std::string_view name) {
-  const auto it = params.find(name);
-  return it == params.end() ? std::string() : it->second;
 }
 
 AdminResponse Status(const AdminContext& context, int64_t now_seconds) {
@@ -199,17 +152,15 @@ AdminResponse Lists(std::string_view method, std::string_view rest,
   return Error(405, "method not allowed");
 }
 
-AdminResponse Decisions(
-    std::string_view rest,
-    const std::map<std::string, std::string, std::less<>>& params,
-    const AdminContext& context) {
+AdminResponse Decisions(std::string_view rest, const QueryParams& params,
+                        const AdminContext& context) {
   if (!rest.empty()) {
     const auto record = context.decisions->Find(rest.substr(1));
     if (!record) return Error(404, "unknown request id (log is bounded)");
     return {200, DecisionToJson(*record)};
   }
   std::size_t limit = 50;
-  if (const std::string text = Param(params, "limit"); !text.empty()) {
+  if (const std::string text = QueryParam(params, "limit"); !text.empty()) {
     const auto [ptr, ec] =
         std::from_chars(text.data(), text.data() + text.size(), limit);
     if (ec != std::errc() || limit == 0 || limit > 1000) {
@@ -217,9 +168,9 @@ AdminResponse Decisions(
     }
   }
   nlohmann::json records = nlohmann::json::array();
-  for (const DecisionRecord& record :
-       context.decisions->Recent(limit, NormalizeHost(Param(params, "host")),
-                                 Param(params, "class"))) {
+  for (const DecisionRecord& record : context.decisions->Recent(
+           limit, NormalizeHost(QueryParam(params, "host")),
+           QueryParam(params, "class"))) {
     records.push_back(DecisionToJson(record));
   }
   return {200, {{"decisions", records}}};
@@ -306,7 +257,7 @@ AdminResponse HandleAdminRequest(std::string_view method,
   }
   if (path == "/policy") {
     if (method != "GET") return Error(405, "method not allowed");
-    return HostPolicy(context, Param(params, "host"));
+    return HostPolicy(context, QueryParam(params, "host"));
   }
   if (path == "/lists" || path.starts_with("/lists/")) {
     return Lists(method, path.substr(6), body, context, now_seconds);

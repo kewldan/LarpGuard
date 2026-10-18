@@ -337,6 +337,7 @@ bool Gateway::Start(std::string* error) {
   shared.labels = services_.labels;
   shared.lists = services_.lists;
   shared.decisions = services_.decisions;
+  shared.challenger = services_.challenger;
   shared.rate_limits = &rate_limits_;
   shared.rate_limit_store = &rate_limit_store_;
   shared.connection_counter = &connection_counter_;

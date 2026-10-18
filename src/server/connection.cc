@@ -28,10 +28,13 @@
 #include <vector>
 
 #include "admin/lists.h"
+#include "challenge/challenger.h"
+#include "challenge/token.h"
 #include "common/host.h"
 #include "common/log.h"
 #include "common/metrics.h"
 #include "common/network.h"
+#include "common/url.h"
 #include "config/config.h"
 #include "docker/labels.h"
 #include "events/event_sink.h"
@@ -209,6 +212,22 @@ class ConnectionObserver {
                                       record_.id, ++request_sequence_);
     exchange.request.headers.emplace_back("x-bot-request-id",
                                           exchange.request_id);
+    const int64_t now = UnixMillis() / 1000;
+    const ClientBinding binding =
+        ClientBinding::For(record_.ja4, IpPrefix(record_.peer));
+    if (context_.challenger != nullptr) {
+      // The clearance cookie is ours; the application never sees it.
+      for (auto& [name, value] : exchange.request.headers) {
+        if (name == "cookie") value = Challenger::StripCookie(value);
+      }
+      std::erase_if(exchange.request.headers, [](const auto& header) {
+        return header.first == "cookie" && header.second.empty();
+      });
+      if (exchange.request.path.starts_with(Challenger::kPathPrefix)) {
+        HandleChallengeEndpoint(exchange, binding, now);
+        return;
+      }
+    }
     if (context_.scorer == nullptr || context_.policy == nullptr) return;
     const std::string host = HostOnly(exchange.request.authority);
     const std::shared_ptr<const LabelPolicies> labels =
@@ -234,6 +253,17 @@ class ConnectionObserver {
     input.header_fp = header_fp;
     input.tcp_initial_ttl = record_.tcp_initial_ttl;
     Verdict verdict = context_.scorer->Score(input);
+    // A solved challenge earns credit (behavioural signals stay).
+    const bool token_valid =
+        context_.challenger != nullptr &&
+        context_.challenger->HasValidToken(request, binding, now);
+    if (token_valid) {
+      GlobalMetrics().tokens_valid.Inc();
+      verdict.score =
+          std::max(0, verdict.score - context_.challenger->token_credit());
+      verdict.bot_class = context_.scorer->Classify(verdict.score);
+      verdict.reasons.emplace_back("token_valid");
+    }
     std::optional<Action> override_action;
     if (context_.rules != nullptr && !context_.rules->empty()) {
       override_action = ApplyRules(exchange, input, host, &verdict);
@@ -251,8 +281,13 @@ class ConnectionObserver {
         verdict.reasons.push_back(std::format("list:{}", match->id));
       }
     }
-    const PolicyDecision decision =
+    PolicyDecision decision =
         context_.policy->Decide(verdict, mode, override_action);
+    // Never challenge a client that already holds a valid token.
+    if (token_valid && decision.would_action == Action::kChallenge) {
+      decision.would_action = Action::kAllow;
+      decision.action = Action::kAllow;
+    }
 
     exchange.score = verdict.score;
     exchange.bot_class = BotClassName(verdict.bot_class);
@@ -293,10 +328,80 @@ class ConnectionObserver {
     if (decision.would_action == Action::kBlock) {
       metrics.requests_would_block.Inc();
     }
+    if (decision.action == Action::kChallenge &&
+        context_.challenger != nullptr) {
+      metrics.challenges_issued.Inc();
+      if (IsNavigation(request)) {
+        exchange.RespondLocally(
+            403,
+            context_.challenger->Page(
+                binding, context_.challenger->DifficultyFor(verdict.bot_class),
+                exchange.request.path, now),
+            {{"cache-control", "no-store"}}, "text/html; charset=utf-8");
+      } else {
+        const nlohmann::json body = {
+            {"error", "challenge_required"},
+            {"challenge",
+             std::format("{}challenge?r={}", Challenger::kPathPrefix,
+                         PercentEncode(exchange.request.path))}};
+        exchange.RespondLocally(403, body.dump() + "\n", {},
+                                "application/json");
+      }
+      return;
+    }
+    if (decision.would_action == Action::kChallenge) {
+      metrics.challenges_would.Inc();
+    }
     // An allow rule (monitoring, partners) also bypasses rate limits.
     if (override_action != Action::kAllow) {
       CheckRateLimits(exchange, verdict, host, decision, labels.get());
     }
+  }
+
+  // /__bs/challenge?r=<path> (page) and /__bs/verify (solution).
+  void HandleChallengeEndpoint(Exchange& exchange, const ClientBinding& binding,
+                               int64_t now) const {
+    const std::string_view target = exchange.request.path;
+    const std::size_t question = target.find('?');
+    const std::string_view path = target.substr(0, question);
+    const std::string_view query = question == std::string_view::npos
+                                       ? std::string_view()
+                                       : target.substr(question + 1);
+    exchange.mode = "challenge";
+    Metrics& metrics = GlobalMetrics();
+    if (path == "/__bs/verify") {
+      const Challenger::Result result =
+          context_.challenger->Verify(query, binding, now);
+      if (result.passed) {
+        metrics.challenges_passed.Inc();
+        exchange.reasons = {"challenge:passed"};
+        exchange.action = "allow";
+        exchange.RespondLocally(302, "",
+                                {{"location", result.return_path},
+                                 {"set-cookie", result.set_cookie},
+                                 {"cache-control", "no-store"}});
+      } else {
+        metrics.challenges_failed.Inc();
+        exchange.reasons = {"challenge:failed:" + result.reason};
+        exchange.action = "block";
+        exchange.RespondLocally(403, ChallengeFailedPage(),
+                                {{"cache-control", "no-store"}},
+                                "text/html; charset=utf-8");
+      }
+      return;
+    }
+    if (path == "/__bs/challenge") {
+      const std::string return_path = QueryParam(ParseQuery(query), "r");
+      exchange.RespondLocally(
+          200,
+          context_.challenger->Page(
+              binding,
+              context_.challenger->DifficultyFor(BotClass::kSuspicious),
+              return_path, now),
+          {{"cache-control", "no-store"}}, "text/html; charset=utf-8");
+      return;
+    }
+    exchange.RespondLocally(404, "not found\n");
   }
 
   // Counts the request against the matching rate limits. Over a limit:

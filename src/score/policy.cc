@@ -12,6 +12,8 @@ std::string_view ActionName(Action action) {
   switch (action) {
     case Action::kAllow:
       return "allow";
+    case Action::kChallenge:
+      return "challenge";
     case Action::kBlock:
       return "block";
   }
@@ -23,6 +25,8 @@ bool ParseAction(std::string_view text, Action* action) {
     *action = Action::kAllow;
   } else if (text == "block") {
     *action = Action::kBlock;
+  } else if (text == "challenge") {
+    *action = Action::kChallenge;
   } else {
     return false;
   }

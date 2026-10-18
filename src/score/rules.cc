@@ -695,6 +695,8 @@ bool RuleSet::Compile(const std::vector<RuleSpec>& specs, RuleSet* rules,
       rule.kind = Rule::Kind::kAllow;
     } else if (spec.action == "block") {
       rule.kind = Rule::Kind::kBlock;
+    } else if (spec.action == "challenge") {
+      rule.kind = Rule::Kind::kChallenge;
     } else if (spec.action == "score") {
       rule.kind = Rule::Kind::kScore;
       if (spec.score == 0) {
@@ -704,8 +706,9 @@ bool RuleSet::Compile(const std::vector<RuleSpec>& specs, RuleSet* rules,
       }
       rule.score = spec.score;
     } else {
-      *error = std::format("rule '{}': action must be allow, block or score",
-                           spec.name);
+      *error = std::format(
+          "rule '{}': action must be allow, challenge, block or score",
+          spec.name);
       return false;
     }
     std::string condition_error;
@@ -739,7 +742,14 @@ std::optional<Action> RuleSet::Decide(const RuleContext& context,
     if (rule.kind == Rule::Kind::kScore) continue;
     if (rule.condition->Evaluate(context)) {
       matched->push_back(rule.name);
-      return rule.kind == Rule::Kind::kAllow ? Action::kAllow : Action::kBlock;
+      switch (rule.kind) {
+        case Rule::Kind::kAllow:
+          return Action::kAllow;
+        case Rule::Kind::kChallenge:
+          return Action::kChallenge;
+        default:
+          return Action::kBlock;
+      }
     }
   }
   return std::nullopt;

@@ -261,7 +261,7 @@ bool ParsePolicy(const YAML::Node& node, Config* config, std::string* error) {
                       &policy.suspicious_action)) ||
         (actions["bot"] &&
          !ParseAction(actions["bot"].as<std::string>(), &policy.bot_action))) {
-      *error = "policy.actions: expected allow or block";
+      *error = "policy.actions: expected allow, challenge or block";
       return false;
     }
   }
@@ -343,12 +343,13 @@ bool ParseRateLimits(const YAML::Node& node, Config* config,
 }
 
 bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
-  if (!CheckKeys(root, "",
-                 {"listen", "workers", "traefik", "passthrough_hosts",
-                  "non_tls", "timeouts", "max_connections", "events", "mode",
-                  "policy", "rules", "rate_limits", "connection_limits",
-                  "docker", "admin", "fingerprints", "metrics", "log_level"},
-                 error)) {
+  if (!CheckKeys(
+          root, "",
+          {"listen", "workers", "traefik", "passthrough_hosts", "non_tls",
+           "timeouts", "max_connections", "events", "mode", "policy", "rules",
+           "rate_limits", "connection_limits", "docker", "admin", "challenge",
+           "fingerprints", "metrics", "log_level"},
+          error)) {
     return false;
   }
   if (root["listen"] && !ParseListen(root["listen"], config, error)) {
@@ -469,6 +470,46 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       config->new_connections_burst = limits["new_burst_per_ip"].as<int64_t>();
       if (config->new_connections_burst < 1) {
         *error = "connection_limits.new_burst_per_ip: expected >= 1";
+        return false;
+      }
+    }
+  }
+  if (const YAML::Node challenge = root["challenge"]) {
+    if (!CheckKeys(challenge, "challenge",
+                   {"keys_file", "token_ttl", "difficulty", "token_credit"},
+                   error) ||
+        !ReadDuration(challenge, "challenge", "token_ttl",
+                      &config->challenge_token_ttl, error)) {
+      return false;
+    }
+    if (challenge["keys_file"] && !challenge["keys_file"].IsNull()) {
+      config->challenge_keys_file = challenge["keys_file"].as<std::string>();
+    }
+    if (const YAML::Node difficulty = challenge["difficulty"]) {
+      if (!CheckKeys(difficulty, "challenge.difficulty", {"suspicious", "bot"},
+                     error)) {
+        return false;
+      }
+      if (difficulty["suspicious"]) {
+        config->challenge_suspicious_difficulty =
+            difficulty["suspicious"].as<int>();
+      }
+      if (difficulty["bot"]) {
+        config->challenge_bot_difficulty = difficulty["bot"].as<int>();
+      }
+      for (const int bits : {config->challenge_suspicious_difficulty,
+                             config->challenge_bot_difficulty}) {
+        if (bits < 0 || bits > 26) {
+          *error = "challenge.difficulty: expected 0..26 bits";
+          return false;
+        }
+      }
+    }
+    if (challenge["token_credit"]) {
+      config->challenge_token_credit = challenge["token_credit"].as<int>();
+      if (config->challenge_token_credit < 0 ||
+          config->challenge_token_credit > 100) {
+        *error = "challenge.token_credit: expected 0..100";
         return false;
       }
     }

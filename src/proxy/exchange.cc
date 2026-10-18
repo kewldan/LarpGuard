@@ -68,9 +68,11 @@ void Exchange::CancelFromClient() {
 }
 
 void Exchange::RespondLocally(int status, std::string_view body,
-                              const HeaderList& extra_headers) {
+                              const HeaderList& extra_headers,
+                              std::string_view content_type) {
   local = true;
   response = LocalResponse(status, body.size());
+  response.headers[0].second = content_type;  // LocalResponse: content-type.
   response.headers.insert(response.headers.end(), extra_headers.begin(),
                           extra_headers.end());
   response_started = true;
