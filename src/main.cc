@@ -22,6 +22,7 @@
 #include "config/config.h"
 #include "events/events.h"
 #include "events/nats_publisher.h"
+#include "fp/library.h"
 #include "server/gateway.h"
 #include "tls/acme_watcher.h"
 #include "tls/cert_store.h"
@@ -138,8 +139,22 @@ int Run(int argc, char** argv) {
          config.events_subject_prefix);
   }
 
+  bot_shield::FingerprintLibrary library =
+      bot_shield::FingerprintLibrary::BuiltIn();
+  if (!config.fingerprint_library.empty() &&
+      !bot_shield::FingerprintLibrary::Load(config.fingerprint_library,
+                                            &library, &error)) {
+    Error("fingerprints: {}", error);
+    return 1;
+  }
+  Info(
+      "fingerprints: library {} ({} browser profiles, {} automation), "
+      "mode {}",
+      library.version(), library.profile_count(), library.automation().size(),
+      config.policy.enforce ? "enforce" : "shadow");
+
   bot_shield::Gateway gateway(config, &certificates, publisher.get(),
-                              &event_settings);
+                              &event_settings, &library);
   if (!gateway.Start(&error)) {
     Error("startup: {}", error);
     return 1;

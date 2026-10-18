@@ -11,10 +11,13 @@ add_executable(bot_shield_tests
   prefixed_stream_test.cc
   proxy_protocol_test.cc
   proxy_test.cc
+  scoring_test.cc
   tcp_syn_test.cc
   test_util.cc
 )
 target_compile_options(bot_shield_tests PRIVATE -Wall -Wextra)
+target_compile_definitions(bot_shield_tests PRIVATE
+  BOT_SHIELD_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(bot_shield_tests PRIVATE
   bot_shield_core
   nlohmann_json::nlohmann_json

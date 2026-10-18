@@ -278,6 +278,10 @@ traefik:
   upstream_http: 127.0.0.1:{plain_port}
   pool_size: 2
 passthrough_hosts: [grpc.a.test]
+mode: shadow
+policy:
+  hosts:
+    www.a.test: enforce
 timeouts:
   client_hello: 1s
 events:
@@ -314,7 +318,7 @@ log_level: debug
         status, headers, body = h1_get(
             https_port, "a.test", ca_a, "/items/42?x=1",
             b"X-Forwarded-For: 6.6.6.6\r\nX-Real-IP: 6.6.6.6\r\n"
-            b"X-Bot-Score: 0\r\nUser-Agent: e2e-agent\r\n")
+            b"X-Bot-Score: 42\r\nUser-Agent: e2e-agent\r\n")
         expect(status == 200, status)
         seen = json.loads(body)
         expect(seen["proto"] == "h2", seen)  # Upstream leg is HTTP/2.
@@ -326,7 +330,9 @@ log_level: debug
         expect(h["x-real-ip"] == "127.0.0.1", h)
         expect(h["x-forwarded-proto"] == "https", h)
         expect(h["x-forwarded-host"] == "a.test", h)
-        expect("x-bot-score" not in h, h)
+        # The client's X-Bot-Score is replaced by the gateway's verdict.
+        expect(h["x-bot-score"] != "42", h)
+        expect(h["x-bot-mode"] == "shadow", h)
         expect(h["user-agent"] == "e2e-agent", h)
         expect("host" not in h and "connection" not in h, h)
         expect(seen["sni"] == "a.test", seen)
@@ -406,6 +412,40 @@ log_level: debug
         for t in threads:
             t.join()
         expect(not errors, errors[:3])
+
+    # --- Verdicts ------------------------------------------------------------
+
+    chrome_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                 "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+    def shadow_verdict_headers():
+        out = os.path.join(workdir, "out")
+        status, _ = curl(https_port, "a.test", ca_a, "/verdict", out)
+        expect(status == 200, status)  # Shadow mode: never blocked.
+        h = json.load(open(out))["headers"]
+        expect(h["x-bot-class"] == "bot", h)
+        expect(int(h["x-bot-score"]) >= 70, h)
+        expect("automation_user_agent" in h["x-bot-reasons"], h)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/verdict")
+        expect(event["class"] == "bot" and event["action"] == "allow", event)
+        expect(event["would_action"] == "block", event)
+
+    def enforce_blocks_spoofed_browser():
+        status, _, body = h1_get(
+            https_port, "www.a.test", ca_a, "/enforced",
+            f"User-Agent: {chrome_ua}\r\nAccept-Language: en\r\n".encode())
+        expect(status == 403, (status, body))
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/enforced")
+        expect(event["action"] == "block" and event["local"] is True, event)
+        expect("ua_tls_mismatch" in event["reasons"], event)
+        # Same client on a shadow host passes, tagged.
+        status, _, body = h1_get(
+            https_port, "a.test", ca_a, "/tagged",
+            f"User-Agent: {chrome_ua}\r\n".encode())
+        expect(status == 200, status)
+        expect(json.loads(body)["headers"]["x-bot-class"] == "bot", body)
 
     # --- Proxy over HTTP/2 (curl) -------------------------------------------
 
@@ -582,6 +622,10 @@ log_level: debug
         # Pool reuse: a handful of HTTP/2 connections for ~80 requests.
         expect(1 <= opened <= 12, f"upstream connections {opened}")
         expect(values["bot_shield_websocket_tunnels_total"] >= 1, "websocket")
+        expect(values['bot_shield_verdicts_total{class="bot"}'] >= 2, "bots")
+        expect(values['bot_shield_blocks_total{mode="enforce"}'] >= 1, "blocks")
+        expect(values['bot_shield_blocks_total{mode="shadow"}'] >= 1,
+               "shadow blocks")
         expect(values['bot_shield_connections_rejected_total'
                       '{reason="client_hello_timeout"}'] >= 1, "timeout count")
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
@@ -597,6 +641,9 @@ log_level: debug
         ("h1: WebSocket tunnel", websocket_tunnel),
         ("h1: 50 concurrent requests", concurrent_requests),
         ("h2: GET, 8 MB download, 3 MB upload, trailers", h2_requests),
+        ("verdict: shadow mode tags, never blocks", shadow_verdict_headers),
+        ("verdict: enforce host blocks spoofed browser",
+         enforce_blocks_spoofed_browser),
         ("wildcard certificate", wildcard_certificate),
         ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),

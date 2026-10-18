@@ -114,7 +114,12 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     status             UInt16,
     duration_ms        UInt32,
     response_bytes     UInt64,
-    local              Bool
+    local              Bool,
+    score              Int16,
+    class              String,
+    reasons            Array(String),
+    action             String,
+    would_action       String
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -160,8 +165,15 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     status             UInt16,
     duration_ms        UInt32,
     response_bytes     UInt64,
-    -- Answered by the gateway itself (502, later block/challenge pages).
-    local              Bool
+    -- Answered by the gateway itself (502, block pages, ...).
+    local              Bool,
+    -- Verdict: score 0..100 (0 also when not scored), class, signals, what
+    -- was done and what enforce mode would have done.
+    score              Int16,
+    class              LowCardinality(String),
+    reasons            Array(LowCardinality(String)),
+    action             LowCardinality(String),
+    would_action       LowCardinality(String)
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)
@@ -207,6 +219,14 @@ SELECT
     uniqState(path_group) AS paths
 FROM bot_shield.req
 GROUP BY hour, host, ja4, h2_fp, header_fp, tcp_fp;
+
+-- Example: what shadow mode would block, by signal, last 24 hours.
+--
+-- SELECT arrayJoin(reasons) AS reason, count() AS requests,
+--        uniqExact(ip_hash) AS clients
+-- FROM bot_shield.req
+-- WHERE ts >= now() - INTERVAL 1 DAY AND would_action = 'block'
+-- GROUP BY reason ORDER BY requests DESC;
 
 -- Example: fingerprint clusters of the last 24 hours, busiest first.
 --

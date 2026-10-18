@@ -25,7 +25,7 @@ endif()
 # cannot match across the frame) as -Wmismatched-new-delete: a known false
 # positive.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  add_compile_options(-Wno-mismatched-new-delete)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-mismatched-new-delete>)
 endif()
 
 include(cmake/dependencies.cmake)

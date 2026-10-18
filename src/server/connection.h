@@ -12,6 +12,8 @@
 #include "net/classifier.h"
 #include "proxy/proxy_hooks.h"
 #include "proxy/upstream_pool.h"
+#include "score/policy.h"
+#include "score/scorer.h"
 #include "tls/cert_store.h"
 
 namespace bot_shield {
@@ -29,6 +31,9 @@ struct GatewayContext {
   // Per-worker HTTP/2 connection pool to Traefik.
   UpstreamPool* pool = nullptr;
   ProxySettings proxy_settings;
+  // Verdicts (shared, immutable).
+  const Scorer* scorer = nullptr;
+  const Policy* policy = nullptr;
   // Analytics events; null when disabled.
   EventSink* events = nullptr;
   const EventSettings* event_settings = nullptr;

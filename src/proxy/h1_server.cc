@@ -464,6 +464,9 @@ asio::awaitable<void> H1ServerConnection::Tunnel() {
   }
   HeaderList forwarding;
   AddForwardingHeaders(client_, authority, &forwarding);
+  // Headers the owner added in on_request (X-Bot-* verdicts).
+  forwarding.insert(forwarding.end(), exchange->request.headers.begin(),
+                    exchange->request.headers.end());
   for (const auto& [name, value] : forwarding) {
     std::format_to(std::back_inserter(head), "{}: {}\r\n", name, value);
   }

@@ -48,6 +48,11 @@ struct Metrics {
   Counter proxied_requests;
   Counter local_responses;
   Counter websocket_tunnels;
+  Counter verdicts_human;
+  Counter verdicts_suspicious;
+  Counter verdicts_bot;
+  Counter requests_blocked;
+  Counter requests_would_block;
   Counter alpn_mismatches;
   Counter idle_timeouts;
   Counter bytes_client_to_upstream;

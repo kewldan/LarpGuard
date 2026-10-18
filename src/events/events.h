@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "fp/http_request.h"
 
@@ -37,6 +38,10 @@ struct ConnectionRecord {
   std::string tcp_fingerprint;
   std::string ja4t;
   std::string h2_fingerprint;
+  // The ClientHello offered ALPN "h2".
+  bool offered_h2 = false;
+  // Initial TTL of the SYN (64, 128, ...); 0 when not captured.
+  int tcp_initial_ttl = 0;
   uint64_t bytes_in = 0;
   uint64_t bytes_out = 0;
   int requests = 0;
@@ -66,6 +71,12 @@ struct RequestOutcome {
   uint64_t response_bytes = 0;
   // Answered by the gateway itself.
   bool local = false;
+  // Verdict (score < 0: not scored).
+  int score = -1;
+  std::string bot_class;
+  std::vector<std::string> reasons;
+  std::string action;
+  std::string would_action;
 };
 
 std::string RequestEventJson(const ConnectionRecord& record,

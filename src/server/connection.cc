@@ -25,12 +25,14 @@
 #include <utility>
 #include <vector>
 
+#include "common/host.h"
 #include "common/log.h"
 #include "common/metrics.h"
 #include "config/config.h"
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "fp/h1_tap.h"
+#include "fp/http_fingerprint.h"
 #include "fp/http_request.h"
 #include "fp/ja4.h"
 #include "fp/tcp_syn.h"
@@ -45,6 +47,8 @@
 #include "proxy/http_message.h"
 #include "proxy/proxy_hooks.h"
 #include "proxy/transport.h"
+#include "score/policy.h"
+#include "score/scorer.h"
 #include "tls/cert_store.h"
 #include "tls/client_hello.h"
 
@@ -92,6 +96,14 @@ class ActiveConnection {
   ActiveConnection& operator=(const ActiveConnection&) = delete;
 };
 
+// Host part of an authority, normalized ("Shop.Test:443" -> "shop.test").
+std::string HostOnly(std::string_view authority) {
+  if (authority.starts_with('[')) {
+    return NormalizeHost(authority.substr(0, authority.find(']') + 1));
+  }
+  return NormalizeHost(authority.substr(0, authority.find(':')));
+}
+
 // Per-connection observation: fingerprints, byte counters and the passive HTTP
 // taps. Emits a "conn" event when the handler finishes and a "req" event for
 // every request the taps see. Never touches the proxied bytes.
@@ -127,6 +139,7 @@ class ConnectionObserver {
     TcpSyn syn;
     if (!ParseTcpSyn(packet, &syn)) return;
     record_.tcp_fingerprint = TcpFingerprint(syn);
+    record_.tcp_initial_ttl = InitialTtl(syn.ttl);
 #if BOT_SHIELD_FOXIO
     record_.ja4t = foxio::Ja4t(syn);
 #endif
@@ -136,6 +149,7 @@ class ConnectionObserver {
     record_.server_name = hello.server_name;
     record_.tls_version = TlsVersionCode(hello);
     if (!hello.alpn.empty()) record_.alpn_offered = hello.alpn.front();
+    record_.offered_h2 = hello.HasAlpn("h2");
     record_.ja4 = Ja4(hello);
     record_.ja4_raw = Ja4Raw(hello);
   }
@@ -171,8 +185,67 @@ class ConnectionObserver {
     GlobalMetrics().bytes_upstream_to_client.Inc(size);
   }
 
-  // Request headers parsed by the proxy; the place for verdicts (M2 scoring).
-  void OnProxyRequest(Exchange& /*exchange*/) {}
+  // Request headers are parsed: score them, tell Traefik the verdict in
+  // X-Bot-* headers and, when enforcing, answer a block ourselves.
+  void OnProxyRequest(Exchange& exchange) const {
+    if (context_.scorer == nullptr || context_.policy == nullptr) return;
+    const HttpRequest& request = exchange.observed;
+    std::string pseudo;
+    for (const std::string& name : request.pseudo_header_order) {
+      if (!pseudo.empty()) pseudo.push_back(',');
+      pseudo.push_back(name.size() > 1 ? name[1] : '?');
+    }
+    const std::string header_fp = HeaderOrderFingerprint(request);
+    ScoringInput input;
+    input.request = &request;
+    input.ja4 = record_.ja4;
+    input.offered_h2 = record_.offered_h2;
+    input.h2_fingerprint = exchange.h2_fingerprint;
+    input.pseudo_order = pseudo;
+    input.header_fp = header_fp;
+    input.tcp_initial_ttl = record_.tcp_initial_ttl;
+    const Verdict verdict = context_.scorer->Score(input);
+    const PolicyDecision decision =
+        context_.policy->Decide(verdict, HostOnly(exchange.request.authority));
+
+    exchange.score = verdict.score;
+    exchange.bot_class = BotClassName(verdict.bot_class);
+    exchange.reasons = verdict.reasons;
+    exchange.action = ActionName(decision.action);
+    exchange.would_action = ActionName(decision.would_action);
+
+    Metrics& metrics = GlobalMetrics();
+    switch (verdict.bot_class) {
+      case BotClass::kHuman:
+        metrics.verdicts_human.Inc();
+        break;
+      case BotClass::kSuspicious:
+        metrics.verdicts_suspicious.Inc();
+        break;
+      case BotClass::kBot:
+        metrics.verdicts_bot.Inc();
+        break;
+    }
+
+    std::string reasons;
+    for (const std::string& reason : verdict.reasons) {
+      if (!reasons.empty()) reasons.push_back(',');
+      reasons += reason;
+    }
+    HeaderList& headers = exchange.request.headers;
+    headers.emplace_back("x-bot-score", std::to_string(verdict.score));
+    headers.emplace_back("x-bot-class", exchange.bot_class);
+    headers.emplace_back("x-bot-reasons", reasons.empty() ? "-" : reasons);
+    headers.emplace_back("x-bot-mode", decision.enforce ? "enforce" : "shadow");
+
+    if (decision.action == Action::kBlock) {
+      metrics.requests_blocked.Inc();
+      exchange.RespondLocally(context_.policy->block_status(),
+                              "request blocked\n");
+    } else if (decision.would_action == Action::kBlock) {
+      metrics.requests_would_block.Inc();
+    }
+  }
 
   void OnProxyDone(const Exchange& exchange) {
     ++record_.requests;
@@ -188,6 +261,11 @@ class ConnectionObserver {
     outcome.duration_ms = SteadyMillis() - exchange.started_ms;
     outcome.response_bytes = exchange.response_bytes;
     outcome.local = exchange.local;
+    outcome.score = exchange.score;
+    outcome.bot_class = exchange.bot_class;
+    outcome.reasons = exchange.reasons;
+    outcome.action = exchange.action;
+    outcome.would_action = exchange.would_action;
     try {
       context_.events->Publish(
           "req",

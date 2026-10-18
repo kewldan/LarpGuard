@@ -14,8 +14,11 @@
 #include "config/config.h"
 #include "events/event_sink.h"
 #include "events/events.h"
+#include "fp/library.h"
 #include "net/classifier.h"
 #include "proxy/upstream_pool.h"
+#include "score/policy.h"
+#include "score/scorer.h"
 #include "server/connection.h"
 #include "tls/cert_store.h"
 
@@ -63,7 +66,8 @@ class Gateway {
  public:
   // `events` may be null (events disabled); both must outlive the gateway.
   Gateway(const Config& config, const CertStore* certificates,
-          EventSink* events, const EventSettings* event_settings);
+          EventSink* events, const EventSettings* event_settings,
+          const FingerprintLibrary* library);
   ~Gateway();
 
   Gateway(const Gateway&) = delete;
@@ -82,6 +86,8 @@ class Gateway {
   EventSink* events_;
   const EventSettings* event_settings_;
   Classifier classifier_;
+  Scorer scorer_;
+  Policy policy_;
   std::vector<std::unique_ptr<Worker>> workers_;
 };
 

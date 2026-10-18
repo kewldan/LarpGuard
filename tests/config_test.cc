@@ -4,9 +4,11 @@
 
 #include <chrono>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/log.h"
+#include "score/policy.h"
 
 namespace bot_shield {
 namespace {
@@ -130,6 +132,43 @@ events:
   EXPECT_FALSE(
       ParseConfig("events: {subject_prefix: \"a.*\"}\n", &disabled, &error));
   EXPECT_FALSE(ParseConfig("events: {max_queue: 0}\n", &disabled, &error));
+}
+
+TEST(ConfigTest, ParsesPolicy) {
+  const char* yaml = R"(
+mode: enforce
+policy:
+  thresholds: {suspicious: 40, bot: 80}
+  actions: {suspicious: block, bot: block}
+  block_status: 429
+  hosts:
+    Shop.Test: shadow
+    "*.api.test": enforce
+fingerprints:
+  library: /etc/bot-shield/fingerprints.yaml
+)";
+  Config config;
+  std::string error;
+  ASSERT_TRUE(ParseConfig(yaml, &config, &error)) << error;
+  EXPECT_TRUE(config.policy.enforce);
+  EXPECT_EQ(config.policy.suspicious_threshold, 40);
+  EXPECT_EQ(config.policy.bot_threshold, 80);
+  EXPECT_EQ(config.policy.suspicious_action, Action::kBlock);
+  EXPECT_EQ(config.policy.block_status, 429);
+  ASSERT_EQ(config.policy.host_modes.size(), 2u);
+  EXPECT_EQ(config.policy.host_modes[0],
+            (std::pair<std::string, bool>{"shop.test", false}));
+  EXPECT_EQ(config.fingerprint_library, "/etc/bot-shield/fingerprints.yaml");
+
+  Config bad;
+  EXPECT_FALSE(ParseConfig("mode: strict\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("policy: {thresholds: {suspicious: 80, bot: 40}}\n",
+                           &bad, &error));
+  EXPECT_FALSE(
+      ParseConfig("policy: {actions: {bot: challenge}}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("policy: {block_status: 200}\n", &bad, &error));
+  EXPECT_FALSE(
+      ParseConfig("policy: {hosts: {\"bad host\": shadow}}\n", &bad, &error));
 }
 
 TEST(ConfigTest, RejectsUnknownKeys) {

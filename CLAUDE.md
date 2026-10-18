@@ -8,8 +8,8 @@ Self-hosted шлюз фильтрации ботов перед Traefik. Осн�
 Готовы M0 (TLS-фронт с маршрутизацией по ClientHello, сертификаты из
 `acme.json`, TLS-туннель до Traefik с PROXY v2) и M1 (пассивные отпечатки
 TCP/JA4/HTTP2/заголовков, события в NATS → ClickHouse). Следующий этап — M2:
-HTTP-aware прокси (сделан, ADR-015), дальше библиотека отпечатков, скоринг,
-shadow mode, `X-Bot-*`.
+HTTP-aware прокси (ADR-015) и вердикты (библиотека отпечатков, скоринг,
+shadow/enforce, `X-Bot-*`) сделаны; открыт выбор языка правил (ADR-008).
 
 ## Команды
 
@@ -69,6 +69,11 @@ ninja-build git python3 openssl`, исходники монтировать read
   `h2_upstream` + `upstream_pool` (к Traefik), `exchange` связывает стороны.
   Вердикты по запросу — в `ConnectionObserver::OnProxyRequest`
   (`exchange.RespondLocally()` или правка `exchange.request.headers`).
+- `src/score/` — скоринг (`Scorer`) и политика (`Policy`: shadow/enforce,
+  `policy.hosts`). Сигналы и веса — в `deploy/fingerprints.yaml`; копия
+  встроена в `src/fp/library.cc` и должна совпадать с файлом (тест
+  `LibraryTest.BuiltInMatchesDeployFile`). Значения отпечатков в библиотеку —
+  только проверяемые (пересчитанные или из спецификаций), не по памяти.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в

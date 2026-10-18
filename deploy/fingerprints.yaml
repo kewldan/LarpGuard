@@ -1,0 +1,57 @@
+# bot-shield fingerprint library.
+#
+# Built into the binary; point fingerprints.library at a copy of this file to
+# change it. Values come from published specifications and the browsers'
+# cipher suite lists (JA4 cipher hashes were recomputed from them). Extend
+# the library from the fp_hourly clusters in ClickHouse.
+version: 2026-10-18
+
+# Network stacks of real browsers, by the engine a User-Agent implies. A
+# client claiming an engine but showing another stack is the main signal.
+browsers:
+  - id: chromium
+    engines: [chromium]
+    # JA4 part b: Chrome's 15 cipher suites (t13d15..).
+    ja4_ciphers: [8daaf6152771]
+    h2_pseudo_orders: ["m,a,s,p"]
+    client_hints_since: 89
+    fetch_metadata_since: 76
+  - id: firefox
+    engines: [firefox]
+    ja4_ciphers: [5b57614c22b0]
+    h2_pseudo_orders: ["m,p,a,s"]
+    client_hints_since: 0
+    fetch_metadata_since: 90
+  - id: webkit
+    engines: [webkit]
+    ja4_ciphers: [a09f3c656075]
+    h2_pseudo_orders: ["m,s,p,a", "m,s,a,p"]
+    client_hints_since: 0
+    # Safari sends Sec-Fetch-* since 16.4; iOS browsers report their own
+    # version numbers, which are all above 16 by now.
+    fetch_metadata_since: 17
+
+# Known automation, matched on top of the checks above. Every non-empty field
+# must match; ja4, h2_fingerprint and header_fp accept '*' wildcards,
+# user_agent is a case-insensitive substring.
+automation: []
+#  - id: example-scraper
+#    weight: 60
+#    ja4: "t13d1812h1_*"
+#    h2_fingerprint: ""
+#    header_fp: ""
+#    user_agent: ""
+
+# Score added by each signal (the total is capped at 100).
+weights:
+  empty_user_agent: 60
+  automation_user_agent: 80
+  headless_user_agent: 80
+  unverified_crawler: 20
+  ua_tls_mismatch: 45
+  ua_h2_mismatch: 35
+  browser_without_h2: 25
+  missing_client_hints: 25
+  missing_fetch_metadata: 25
+  missing_accept_language: 15
+  os_tcp_mismatch: 20

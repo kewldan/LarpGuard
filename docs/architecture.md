@@ -649,7 +649,7 @@ would_action`; с M3 — поля rate limit; ASN/страна — с IP-баз�
 |------|------------------------------------------------------------------------------------------------------|
 | M0 ✅ | Каркас: CMake, event loop, listener, L4-классификатор, passthrough, `acme.json` loader, TLS-терминация с TLS-туннелем в Traefik (ADR-013), PROXY v2, метрики, graceful shutdown. Шлюз прозрачен. |
 | M1 ✅ | Пассивные отпечатки (TCP, JA4, H2, порядок заголовков; JA4T/JA4H опционально), события в NATS, ClickHouse-схема. `X-Bot-*` и shadow-решения перенесены в M2 (нужен HTTP-aware прокси, ADR-013). |
-| M2 ⏳ | ✅ HTTP-aware прокси с пулом HTTP/2 вместо туннеля (ADR-015). Дальше: библиотека отпечатков, проверки согласованности, скоринг, правила CEL, shadow mode, `X-Bot-*`, действия block/tag/throttle. |
+| M2 ⏳ | ✅ HTTP-aware прокси с пулом HTTP/2 (ADR-015). ✅ Библиотека отпечатков, проверки согласованности, скоринг, shadow/enforce по хостам, `X-Bot-*`, блок. Осталось: язык правил (ADR-008, см. открытые вопросы). |
 | M3   | Rate limiter (local → synced/strict), docker-лейблы, `admin/api`.                                    |
 | M4   | JS-челлендж + PoW, токены, хорошие боты (rDNS, Web Bot Auth).                                       |
 | M5   | Поведенческие сигналы, honeypot, tarpit/decoy, офлайн-кластеризация, fail-open watchdog.            |
@@ -738,6 +738,38 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
 Ограничения: HTTP/2 extended CONNECT (WebSocket поверх HTTP/2) не
 объявляется — браузеры открывают для WebSocket отдельное HTTP/1.1-соединение;
 серверный push не поддерживается (Traefik его не использует).
+
+
+### Статус M2 (часть 2: вердикты)
+
+Сделано:
+
+- `fp/user_agent` — что заявляет User-Agent: семейство, движок
+  (`chromium` / `firefox` / `webkit`; любой браузер на iOS — `webkit`),
+  версия, ОС, инструменты (curl, python-requests, Go и т. д.), headless,
+  заявленный краулер.
+- `fp/library` — библиотека отпечатков в YAML (`deploy/fingerprints.yaml`,
+  встроена в бинарник; юнит-тест следит, чтобы копии совпадали): профили
+  движков (хеш шифров JA4, порядок псевдозаголовков HTTP/2, с какой версии
+  Client Hints и Sec-Fetch-*), сигнатуры автоматизации с glob-шаблонами,
+  веса сигналов. Хеши шифров пересчитаны из списков cipher suites браузеров
+  и совпали с опубликованными (`8daaf6152771`, `5b57614c22b0`,
+  `a09f3c656075`).
+- `score/scorer` — сигналы: `empty_user_agent`, `automation_user_agent`,
+  `headless_user_agent`, `unverified_crawler`, `ua_tls_mismatch`,
+  `ua_h2_mismatch`, `browser_without_h2`, `missing_client_hints`,
+  `missing_fetch_metadata`, `missing_accept_language`, `os_tcp_mismatch`,
+  `known_automation:<id>`. Сумма весов, максимум 100; классы по порогам.
+- `score/policy` — `mode: shadow|enforce` глобально и `policy.hosts` для
+  отдельных хостов (раскатка по одному сайту, раздел 13); действия
+  `allow` / `block` по классам, код блокировки настраивается.
+- Каждый запрос получает в Traefik `X-Bot-Score`, `X-Bot-Class`,
+  `X-Bot-Reasons`, `X-Bot-Mode` (клиентские версии вырезаются). События
+  `req` несут `score, class, reasons, action, would_action`; метрики
+  `verdicts_total`, `blocks_total{mode}`.
+
+Не сделано: язык правил поверх скоринга (ADR-008), throttle и challenge
+(M3/M4), горячая перезагрузка библиотеки.
 
 ---
 
@@ -1011,6 +1043,12 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
 ---
 
 ## 16. Открытые вопросы
+
+- **Язык правил (ADR-008).** `cel-cpp` собирается только Bazel и тянет
+  Abseil, protobuf и ANTLR; встроить его в CMake-сборку дорого. Варианты:
+  собрать cel-cpp отдельно, взять другой встраиваемый язык (например, Lua с
+  ограничением шагов) или сделать свой минимальный язык условий над полями
+  запроса. Пока правила заменяют веса сигналов и `policy.hosts`.
 
 - Целевая нагрузка в цифрах (пиковый RPS, число хостов) — уточнить для
   нагрузочного теста M0.

@@ -11,7 +11,10 @@ Self-hosted шлюз для фильтрации ботов, скреперов 
 Шлюз встаёт перед Traefik и терминирует TLS для хостов с сертификатом в
 `acme.json`; остальное пропускает как есть. Терминированный трафик
 обрабатывается полноценным HTTP-прокси, снимаются отпечатки, события уходят
-в NATS → ClickHouse. Решений «бот / не бот» пока нет — следующий шаг M2.
+в NATS → ClickHouse. Каждый запрос получает оценку по согласованности
+User-Agent со стеком клиента (TLS, HTTP/2, TCP); в режиме shadow оценка
+только передаётся в Traefik заголовками `X-Bot-*`, в enforce — боты
+блокируются (режим включается по хостам).
 
 - Маршрутизация по ClientHello: terminate, passthrough (неизвестный SNI,
   `acme-tls/1`, `passthrough_hosts`) или reject; сертификаты из `acme.json`
@@ -22,7 +25,9 @@ Self-hosted шлюз для фильтрации ботов, скреперов 
   Traefik. Passthrough и порт 80 — с PROXY protocol v2.
 - Отпечатки: TCP SYN (Linux), JA4, HTTP/2 (Akamai), порядок заголовков;
   JA4T/JA4H опционально (`BOT_SHIELD_FOXIO`, см. `src/fp/foxio/LICENSE.md`).
-- События `conn` и `req` (со статусом и длительностью) в NATS без полных IP
+- Вердикты: библиотека отпечатков `deploy/fingerprints.yaml` (встроена),
+  скоринг с причинами, `mode: shadow|enforce` и `policy.hosts`.
+- События `conn` и `req` (со статусом, длительностью и вердиктом) в NATS без полных IP
   и query-строк; схема ClickHouse — `deploy/clickhouse/`.
 
 ## Сборка

@@ -198,6 +198,13 @@ std::string RequestEventJson(const ConnectionRecord& record,
     json["duration_ms"] = outcome->duration_ms;
     json["response_bytes"] = outcome->response_bytes;
     json["local"] = outcome->local;
+    if (outcome->score >= 0) {
+      json["score"] = outcome->score;
+      json["class"] = outcome->bot_class;
+      json["reasons"] = outcome->reasons;
+      json["action"] = outcome->action;
+      json["would_action"] = outcome->would_action;
+    }
   }
 #if BOT_SHIELD_FOXIO
   json["ja4h"] = foxio::Ja4h(request);

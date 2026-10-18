@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "fp/http_request.h"
 #include "proxy/http_message.h"
@@ -77,6 +78,12 @@ class Exchange {
   HttpRequest observed;
   // Akamai-format fingerprint of the client's HTTP/2 connection, if any.
   std::string h2_fingerprint;
+  // Verdict set by the connection owner (score < 0: not scored).
+  int score = -1;
+  std::string bot_class;
+  std::vector<std::string> reasons;
+  std::string action;
+  std::string would_action;
   int64_t started_ms = 0;
   uint64_t response_bytes = 0;
 

@@ -19,6 +19,7 @@
 
 #include "common/host.h"
 #include "common/log.h"
+#include "score/policy.h"
 
 namespace bot_shield {
 namespace {
@@ -213,12 +214,91 @@ bool ParseEvents(const YAML::Node& node, Config* config, std::string* error) {
   return true;
 }
 
+bool ParseMode(const YAML::Node& node, std::string_view where, bool* enforce,
+               std::string* error) {
+  const auto value = node.as<std::string>();
+  if (value == "shadow") {
+    *enforce = false;
+  } else if (value == "enforce") {
+    *enforce = true;
+  } else {
+    *error = std::format("{}: expected shadow or enforce", where);
+    return false;
+  }
+  return true;
+}
+
+bool ParsePolicy(const YAML::Node& node, Config* config, std::string* error) {
+  if (!CheckKeys(node, "policy",
+                 {"thresholds", "actions", "block_status", "hosts"}, error)) {
+    return false;
+  }
+  PolicySettings& policy = config->policy;
+  if (const YAML::Node thresholds = node["thresholds"]) {
+    if (!CheckKeys(thresholds, "policy.thresholds", {"suspicious", "bot"},
+                   error)) {
+      return false;
+    }
+    if (thresholds["suspicious"]) {
+      policy.suspicious_threshold = thresholds["suspicious"].as<int>();
+    }
+    if (thresholds["bot"]) policy.bot_threshold = thresholds["bot"].as<int>();
+    if (policy.suspicious_threshold < 1 || policy.bot_threshold > 100 ||
+        policy.suspicious_threshold > policy.bot_threshold) {
+      *error = "policy.thresholds: expected 1 <= suspicious <= bot <= 100";
+      return false;
+    }
+  }
+  if (const YAML::Node actions = node["actions"]) {
+    if (!CheckKeys(actions, "policy.actions", {"suspicious", "bot"}, error)) {
+      return false;
+    }
+    if ((actions["suspicious"] &&
+         !ParseAction(actions["suspicious"].as<std::string>(),
+                      &policy.suspicious_action)) ||
+        (actions["bot"] &&
+         !ParseAction(actions["bot"].as<std::string>(), &policy.bot_action))) {
+      *error = "policy.actions: expected allow or block";
+      return false;
+    }
+  }
+  if (node["block_status"]) {
+    policy.block_status = node["block_status"].as<int>();
+    if (policy.block_status < 400 || policy.block_status > 599) {
+      *error = "policy.block_status: expected 400..599";
+      return false;
+    }
+  }
+  if (const YAML::Node hosts = node["hosts"]) {
+    if (!hosts.IsMap()) {
+      *error = "policy.hosts: expected host: shadow|enforce";
+      return false;
+    }
+    policy.host_modes.clear();
+    for (const auto& item : hosts) {
+      const std::string host = NormalizeHost(item.first.as<std::string>());
+      const std::string_view name =
+          host.starts_with("*.") ? std::string_view(host).substr(2) : host;
+      if (!IsValidHostName(name)) {
+        *error = std::format("policy.hosts: invalid host '{}'", host);
+        return false;
+      }
+      bool enforce = false;
+      if (!ParseMode(item.second, "policy.hosts", &enforce, error)) {
+        return false;
+      }
+      policy.host_modes.emplace_back(host, enforce);
+    }
+  }
+  return true;
+}
+
 bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
-  if (!CheckKeys(
-          root, "",
-          {"listen", "workers", "traefik", "passthrough_hosts", "non_tls",
-           "timeouts", "max_connections", "events", "metrics", "log_level"},
-          error)) {
+  if (!CheckKeys(root, "",
+                 {"listen", "workers", "traefik", "passthrough_hosts",
+                  "non_tls", "timeouts", "max_connections", "events", "mode",
+                  "policy", "fingerprints", "metrics", "log_level"},
+                 error)) {
     return false;
   }
   if (root["listen"] && !ParseListen(root["listen"], config, error)) {
@@ -275,6 +355,21 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   }
   if (root["events"] && !ParseEvents(root["events"], config, error)) {
     return false;
+  }
+  if (root["mode"] &&
+      !ParseMode(root["mode"], "mode", &config->policy.enforce, error)) {
+    return false;
+  }
+  if (root["policy"] && !ParsePolicy(root["policy"], config, error)) {
+    return false;
+  }
+  if (const YAML::Node fingerprints = root["fingerprints"]) {
+    if (!CheckKeys(fingerprints, "fingerprints", {"library"}, error)) {
+      return false;
+    }
+    if (fingerprints["library"]) {
+      config->fingerprint_library = fingerprints["library"].as<std::string>();
+    }
   }
   if (const YAML::Node metrics = root["metrics"]) {
     if (!CheckKeys(metrics, "metrics", {"listen"}, error) ||

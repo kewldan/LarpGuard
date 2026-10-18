@@ -64,6 +64,24 @@ events:
   # One event per HTTP request, read passively from decrypted traffic.
   requests: true
 
+# shadow: score every request, tell Traefik in X-Bot-* headers, never act.
+# enforce: also act (block). Start in shadow and enable per host below.
+mode: shadow
+
+policy:
+  # Score (0..100) from which a request is suspicious / a bot.
+  thresholds: {suspicious: 30, bot: 70}
+  # allow | block (challenge and throttle come with later stages).
+  actions: {suspicious: allow, bot: block}
+  block_status: 403
+  # Per-host mode overrides: exact names or "*.parent".
+  hosts: {}
+  #  shop.example.com: enforce
+
+fingerprints:
+  # Fingerprint library; "" = built in (same as deploy/fingerprints.yaml).
+  library: ""
+
 metrics:
   # Prometheus /metrics and /health. "" disables.
   listen: "127.0.0.1:9900"

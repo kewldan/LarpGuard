@@ -100,6 +100,22 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_proxied_requests_total", R"(source="local")",
                local_responses.Get());
 
+  AppendHeader(&out, "bot_shield_verdicts_total", "counter",
+               "Scored requests by class.");
+  AppendSample(&out, "bot_shield_verdicts_total", R"(class="human")",
+               verdicts_human.Get());
+  AppendSample(&out, "bot_shield_verdicts_total", R"(class="suspicious")",
+               verdicts_suspicious.Get());
+  AppendSample(&out, "bot_shield_verdicts_total", R"(class="bot")",
+               verdicts_bot.Get());
+
+  AppendHeader(&out, "bot_shield_blocks_total", "counter",
+               "Requests blocked, and blocks shadow mode held back.");
+  AppendSample(&out, "bot_shield_blocks_total", R"(mode="enforce")",
+               requests_blocked.Get());
+  AppendSample(&out, "bot_shield_blocks_total", R"(mode="shadow")",
+               requests_would_block.Get());
+
   AppendHeader(&out, "bot_shield_websocket_tunnels_total", "counter",
                "Upgraded (WebSocket) connections tunnelled to Traefik.");
   AppendSample(&out, "bot_shield_websocket_tunnels_total", "",

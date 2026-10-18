@@ -22,6 +22,7 @@
 #include "config/config.h"
 #include "events/event_sink.h"
 #include "events/events.h"
+#include "fp/library.h"
 #include "net/socket_options.h"
 #include "proxy/upstream_pool.h"
 #include "server/connection.h"
@@ -224,12 +225,16 @@ void Worker::Join() {
 }
 
 Gateway::Gateway(const Config& config, const CertStore* certificates,
-                 EventSink* events, const EventSettings* event_settings)
+                 EventSink* events, const EventSettings* event_settings,
+                 const FingerprintLibrary* library)
     : config_(config),
       certificates_(certificates),
       events_(events),
       event_settings_(event_settings),
-      classifier_(config.passthrough_hosts, config.non_tls) {}
+      classifier_(config.passthrough_hosts, config.non_tls),
+      scorer_(library, config.policy.suspicious_threshold,
+              config.policy.bot_threshold),
+      policy_(config.policy) {}
 
 Gateway::~Gateway() {
   Stop();
@@ -241,6 +246,8 @@ bool Gateway::Start(std::string* error) {
   shared.config = &config_;
   shared.certificates = certificates_;
   shared.classifier = &classifier_;
+  shared.scorer = &scorer_;
+  shared.policy = &policy_;
   shared.events = events_;
   shared.event_settings = event_settings_;
   if (!ResolveEndpoint(config_.upstream_https, &shared.upstream_https, error) ||

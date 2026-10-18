@@ -10,6 +10,8 @@ add_library(bot_shield_core STATIC
   fp/h2_fingerprint.cc
   fp/h2_tap.cc
   fp/http_fingerprint.cc
+  fp/library.cc
+  fp/user_agent.cc
   fp/http_request.cc
   fp/ja4.cc
   fp/tcp_syn.cc
@@ -24,6 +26,8 @@ add_library(bot_shield_core STATIC
   proxy/h2_upstream.cc
   proxy/http_message.cc
   proxy/upstream_pool.cc
+  score/policy.cc
+  score/scorer.cc
   server/connection.cc
   server/gateway.cc
   server/metrics_server.cc

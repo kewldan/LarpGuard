@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "common/log.h"
+#include "score/policy.h"
 
 namespace bot_shield {
 
@@ -70,6 +71,11 @@ struct Config {
   std::string events_ip_salt;
   // One event per HTTP request (passive taps on decrypted traffic).
   bool events_requests = true;
+
+  // Verdicts and what to do with them ("mode" and "policy" sections).
+  PolicySettings policy;
+  // Fingerprint library file; empty means the built-in one.
+  std::string fingerprint_library;
 
   std::optional<Endpoint> metrics_listen = Endpoint{"127.0.0.1", 9900};
   log::Level log_level = log::Level::kInfo;
