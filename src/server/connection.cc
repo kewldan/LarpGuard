@@ -27,7 +27,9 @@
 #include <utility>
 #include <vector>
 
+#include "action/actions.h"
 #include "admin/lists.h"
+#include "behavior/behavior.h"
 #include "challenge/challenger.h"
 #include "challenge/token.h"
 #include "common/host.h"
@@ -45,6 +47,7 @@
 #include "fp/http_fingerprint.h"
 #include "fp/http_request.h"
 #include "fp/ja4.h"
+#include "fp/library.h"
 #include "fp/tcp_syn.h"
 #include "fp/user_agent.h"
 #include "net/classifier.h"
@@ -181,6 +184,10 @@ class ConnectionObserver {
   }
 
   ConnectionObserver(const ConnectionObserver&) = delete;
+  // Executor of the connection (timers of tarpit answers).
+  void set_executor(asio::any_io_executor executor) {
+    executor_ = std::move(executor);
+  }
   ConnectionObserver& operator=(const ConnectionObserver&) = delete;
 
   ConnectionRecord& record() { return record_; }
@@ -331,6 +338,11 @@ class ConnectionObserver {
         crawler_action = context_.ai_crawler_action;
       }
     }
+    // Behaviour (5.4) and honeypot marks (6.3); verified crawlers crawl
+    // regularly by nature and skip both.
+    if (context_.behavior != nullptr && !verified_crawler) {
+      ApplyBehavior(exchange, host, binding, &verdict);
+    }
     // A solved challenge earns credit (behavioural signals stay).
     const bool token_valid =
         !verified_crawler && context_.challenger != nullptr &&
@@ -447,9 +459,89 @@ class ConnectionObserver {
     if (decision.would_action == Action::kChallenge) {
       metrics.challenges_would.Inc();
     }
+    if (decision.action == Action::kTarpit) {
+      const Config& config = *context_.config;
+      TarpitSettings tarpit;
+      tarpit.duration = config.tarpit_duration;
+      tarpit.interval = config.tarpit_interval;
+      tarpit.chunk = config.tarpit_chunk;
+      tarpit.max_active = config.tarpit_max_active;
+      if (executor_ &&
+          StartTarpit(executor_, exchange.shared_from_this(), tarpit)) {
+        metrics.tarpits.Inc();
+        return;
+      }
+      // Too many at once: a plain block costs nothing.
+      metrics.tarpit_overflow.Inc();
+      metrics.requests_blocked.Inc();
+      exchange.RespondLocally(context_.policy->block_status(),
+                              "request blocked\n");
+      return;
+    }
+    if (decision.action == Action::kDecoy) {
+      metrics.decoys.Inc();
+      exchange.watermark =
+          DecoyWatermark(context_.challenger != nullptr
+                             ? context_.challenger->watermark_secret()
+                             : std::string_view(record_.server_name),
+                         exchange.request_id);
+      const bool html = IsNavigation(request);
+      exchange.RespondLocally(
+          200,
+          RenderDecoy(
+              html ? context_.config->decoy_html : context_.config->decoy_json,
+              html, exchange.watermark),
+          {{"cache-control", "no-store"}},
+          html ? "text/html; charset=utf-8" : "application/json");
+      return;
+    }
     // An allow rule (monitoring, partners) also bypasses rate limits.
     if (override_action != Action::kAllow) {
       CheckRateLimits(exchange, verdict, host, decision, labels.get());
+    }
+  }
+
+  void ApplyBehavior(Exchange& exchange, std::string_view host,
+                     const ClientBinding& binding, Verdict* verdict) const {
+    const HttpRequest& request = exchange.observed;
+    const int64_t now_ms = SteadyMillis();
+    const std::string_view target = exchange.request.path;
+    const std::string_view path = target.substr(0, target.find('?'));
+    exchange.behavior_client =
+        std::format("{}|{}|{}", host, binding.ja4_hash, binding.ip_hash);
+    const std::vector<std::string> trap_keys = {
+        "ip|" + record_.peer.to_string(),
+        std::format("fp|{}|{}", binding.ja4_hash, binding.ip_hash)};
+    std::vector<std::string> signals;
+    const Config& config = *context_.config;
+    if (std::ranges::any_of(config.honeypot_paths, [path](const auto& glob) {
+          return GlobMatch(glob, path);
+        })) {
+      GlobalMetrics().honeypot_hits.Inc();
+      signals.emplace_back("honeypot");
+      context_.behavior->Trap(trap_keys, now_ms,
+                              now_ms + config.honeypot_ttl.count());
+    } else if (context_.behavior->Trapped(trap_keys, now_ms)) {
+      signals.emplace_back("honeypot_client");
+    }
+    context_.behavior->OnRequest(
+        exchange.behavior_client, host,
+        ClassifyRequest(request.method, path, request.Header("sec-fetch-mode"),
+                        request.Header("sec-fetch-dest"),
+                        request.Header("accept"),
+                        request.Header("x-requested-with")),
+        now_ms, &signals);
+    int added = 0;
+    for (std::string& signal : signals) {
+      const int weight = context_.scorer->SignalWeight(signal);
+      if (weight <= 0) continue;
+      verdict->score = std::min(100, verdict->score + weight);
+      verdict->reasons.push_back(std::move(signal));
+      ++added;
+    }
+    if (added > 0) {
+      GlobalMetrics().behavior_signals.Inc(added);
+      verdict->bot_class = context_.scorer->Classify(verdict->score);
     }
   }
 
@@ -629,6 +721,11 @@ class ConnectionObserver {
       record_.h2_fingerprint = exchange.h2_fingerprint;
     }
     if (context_.decisions != nullptr) RecordDecision(exchange);
+    if (context_.behavior != nullptr && !exchange.behavior_client.empty() &&
+        exchange.response_started) {
+      context_.behavior->OnStatus(exchange.behavior_client,
+                                  exchange.response.status, SteadyMillis());
+    }
     if (context_.events == nullptr || !context_.event_settings->requests) {
       return;
     }
@@ -644,6 +741,7 @@ class ConnectionObserver {
     outcome.would_action = exchange.would_action;
     outcome.rate_limit = exchange.rate_limit;
     outcome.request_id = exchange.request_id;
+    outcome.watermark = exchange.watermark;
     try {
       context_.events->Publish(
           "req",
@@ -697,6 +795,7 @@ class ConnectionObserver {
   ConnectionRecord record_;
   std::unique_ptr<H1Tap> h1_;
   PendingSlot* pending_slot_ = nullptr;
+  asio::any_io_executor executor_;
   int request_sequence_ = 0;
 };
 
@@ -961,6 +1060,7 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
     co_return;
   }
   ConnectionObserver observer(context, info, "https");
+  observer.set_executor(socket.get_executor());
   observer.set_pending_slot(&pending);
   if (const auto syn = ReadSavedSyn(socket.native_handle()); !syn.empty()) {
     metrics.syn_captured.Inc();

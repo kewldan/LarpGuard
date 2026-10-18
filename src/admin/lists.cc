@@ -116,7 +116,8 @@ bool ListStore::FromJson(const nlohmann::json& json, int64_t now,
     }
     out.value = out.network.ToString();
   }
-  if (!ParseAction(string_field("action"), &out.action)) {
+  if (!ParseAction(string_field("action"), &out.action) ||
+      (out.action != Action::kAllow && out.action != Action::kBlock)) {
     *error = "action must be allow or block";
     return false;
   }

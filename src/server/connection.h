@@ -9,6 +9,7 @@
 #include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
+#include "behavior/behavior.h"
 #include "challenge/challenger.h"
 #include "config/config.h"
 #include "crawler/verifier.h"
@@ -51,6 +52,8 @@ struct GatewayContext {
   const LabelStore* labels = nullptr;
   // Reverse DNS checks of search crawlers; null when disabled.
   CrawlerVerifier* crawler_verifier = nullptr;
+  // Behaviour signals and honeypot marks; null when disabled.
+  BehaviorStore* behavior = nullptr;
   // Action for AI crawlers (crawlers.ai); unset: scored like anyone.
   std::optional<Action> ai_crawler_action;
   // JS challenge and clearance tokens; null when not configured.

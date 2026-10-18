@@ -90,6 +90,7 @@ struct GatewayServices {
   DecisionLog* decisions = nullptr;
   const Challenger* challenger = nullptr;
   CrawlerVerifier* crawler_verifier = nullptr;
+  BehaviorStore* behavior = nullptr;
 };
 
 class Gateway {

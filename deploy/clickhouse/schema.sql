@@ -121,7 +121,8 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     action             String,
     would_action       String,
     rate_limit         String,
-    request_id         String
+    request_id         String,
+    watermark          String
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -179,12 +180,19 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     -- Rate limit that refused the request (action/would_action rate_limit).
     rate_limit         LowCardinality(String),
     -- Also sent to Traefik as X-Bot-Request-Id; see GET /decisions/<id>.
-    request_id         String
+    request_id         String,
+    -- Token in a decoy answer (action decoy): search leaked data for it.
+    watermark          String
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)
 ORDER BY (host, ts)
 TTL toDateTime(ts) + INTERVAL 14 DAY;
+
+-- Upgrades of existing installations (no-ops on new ones). The NATS queue
+-- table cannot be altered: for new queue columns drop bot_shield.req_mv and
+-- bot_shield.req_queue and run this file again.
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS watermark String;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS bot_shield.req_mv TO bot_shield.req AS
 SELECT fromUnixTimestamp64Milli(toInt64(ts_ms), 'UTC') AS ts, * EXCEPT ts_ms

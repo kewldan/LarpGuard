@@ -96,6 +96,9 @@ ninja-build git python3 openssl`, исходники монтировать read
 - `src/watchdog/` — `bot-shield-watchdog` (fail-open, ADR-012): опрос
   `/health` и команды nftables из `deploy/failopen/`. `src/common/systemd` —
   `sd_notify` без libsystemd.
+- `src/behavior/` — `BehaviorStore`: поведение клиентов в окне и метки
+  honeypot, общее для воркеров (шардированное, ограниченное). Новый сигнал —
+  в `OnRequest` + вес в `deploy/fingerprints.yaml` и `src/fp/library.cc`.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в

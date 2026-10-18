@@ -64,6 +64,12 @@ struct Metrics {
   Counter crawlers_verified;
   Counter crawlers_failed;
   Counter crawler_lookups_dropped;
+  Counter honeypot_hits;
+  Counter behavior_signals;
+  Gauge tarpits_active;
+  Counter tarpits;
+  Counter tarpit_overflow;
+  Counter decoys;
   Counter requests_blocked;
   Counter requests_would_block;
   Counter rules_matched;

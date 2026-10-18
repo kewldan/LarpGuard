@@ -36,6 +36,10 @@ class Challenger {
 
   int DifficultyFor(BotClass bot_class) const;
   int token_credit() const { return settings_.token_credit; }
+  // Secret for decoy watermarks (the active token key).
+  std::string_view watermark_secret() const {
+    return settings_.keys.Secret(settings_.keys.active_id());
+  }
 
   // HTML page that solves the challenge and comes back via /__bs/verify.
   std::string Page(const ClientBinding& binding, int difficulty,

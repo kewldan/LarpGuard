@@ -80,6 +80,8 @@ struct RequestOutcome {
   // Name of the rate limit that refused the request, if any.
   std::string rate_limit;
   std::string request_id;
+  // Decoy watermark (action decoy).
+  std::string watermark;
 };
 
 std::string RequestEventJson(const ConnectionRecord& record,

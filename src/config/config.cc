@@ -283,7 +283,8 @@ bool ParsePolicy(const YAML::Node& node, Config* config, std::string* error) {
         (actions["verified_bot"] &&
          !ParseAction(actions["verified_bot"].as<std::string>(),
                       &policy.verified_bot_action))) {
-      *error = "policy.actions: expected allow, challenge or block";
+      *error =
+          "policy.actions: expected allow, challenge, block, tarpit or decoy";
       return false;
     }
   }
@@ -386,6 +387,10 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "challenge",
                   "attack",
                   "crawlers",
+                  "behavior",
+                  "honeypot",
+                  "tarpit",
+                  "decoy",
                   "fingerprints",
                   "metrics",
                   "log_level"},
@@ -525,6 +530,89 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       }
     }
   }
+  if (const YAML::Node behavior = root["behavior"]) {
+    if (!CheckKeys(behavior, "behavior", {"enabled", "window", "max_clients"},
+                   error) ||
+        !ReadDuration(behavior, "behavior", "window", &config->behavior_window,
+                      error)) {
+      return false;
+    }
+    if (behavior["enabled"]) {
+      config->behavior_enabled = behavior["enabled"].as<bool>();
+    }
+    if (behavior["max_clients"]) {
+      config->behavior_max_clients = behavior["max_clients"].as<std::size_t>();
+    }
+    if (config->behavior_window < std::chrono::seconds(10)) {
+      *error = "behavior.window: expected at least 10s";
+      return false;
+    }
+  }
+  if (const YAML::Node honeypot = root["honeypot"]) {
+    if (!CheckKeys(honeypot, "honeypot", {"paths", "ttl"}, error) ||
+        !ReadDuration(honeypot, "honeypot", "ttl", &config->honeypot_ttl,
+                      error)) {
+      return false;
+    }
+    if (const YAML::Node paths = honeypot["paths"]) {
+      if (!paths.IsSequence()) {
+        *error = "honeypot.paths: expected a list";
+        return false;
+      }
+      config->honeypot_paths = ReadStrings(paths);
+      for (const std::string& path : config->honeypot_paths) {
+        if (!path.starts_with('/')) {
+          *error = std::format("honeypot.paths: '{}' must start with /", path);
+          return false;
+        }
+      }
+    }
+  }
+  if (const YAML::Node tarpit = root["tarpit"]) {
+    if (!CheckKeys(tarpit, "tarpit",
+                   {"duration", "interval", "chunk", "max_active"}, error) ||
+        !ReadDuration(tarpit, "tarpit", "duration", &config->tarpit_duration,
+                      error) ||
+        !ReadDuration(tarpit, "tarpit", "interval", &config->tarpit_interval,
+                      error)) {
+      return false;
+    }
+    if (tarpit["chunk"]) {
+      config->tarpit_chunk = tarpit["chunk"].as<std::size_t>();
+    }
+    if (tarpit["max_active"]) {
+      config->tarpit_max_active = tarpit["max_active"].as<std::size_t>();
+    }
+    if (config->tarpit_interval < std::chrono::milliseconds(10) ||
+        config->tarpit_duration < config->tarpit_interval ||
+        config->tarpit_duration > std::chrono::minutes(10) ||
+        config->tarpit_chunk == 0 || config->tarpit_chunk > 65536) {
+      *error =
+          "tarpit: expected 10ms <= interval <= duration <= 10m and "
+          "1 <= chunk <= 65536";
+      return false;
+    }
+  }
+  if (const YAML::Node decoy = root["decoy"]) {
+    if (!CheckKeys(decoy, "decoy", {"html_file", "json_file"}, error)) {
+      return false;
+    }
+    for (const auto& [key, out] :
+         {std::pair{"html_file", &config->decoy_html},
+          std::pair{"json_file", &config->decoy_json}}) {
+      if (!decoy[key] || decoy[key].IsNull()) continue;
+      const auto path = decoy[key].as<std::string>();
+      if (path.empty()) continue;  // Built-in template.
+      std::ifstream file(path);
+      if (!file) {
+        *error = std::format("decoy.{}: cannot open {}", key, path);
+        return false;
+      }
+      std::stringstream contents;
+      contents << file.rdbuf();
+      *out = contents.str();
+    }
+  }
   if (const YAML::Node crawlers = root["crawlers"]) {
     if (!CheckKeys(crawlers, "crawlers", {"verify", "ai"}, error)) {
       return false;
@@ -540,7 +628,9 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       } else if (ParseAction(ai, &action)) {
         config->crawlers_ai = action;
       } else {
-        *error = "crawlers.ai: expected default, allow, challenge or block";
+        *error =
+            "crawlers.ai: expected default, allow, challenge, block, tarpit or "
+            "decoy";
         return false;
       }
     }

@@ -83,7 +83,8 @@ mode: shadow
 policy:
   # Score (0..100) from which a request is suspicious / a bot.
   thresholds: {suspicious: 30, bot: 70}
-  # allow | challenge | block (challenge: JS page with proof of work).
+  # allow | challenge | block | tarpit | decoy (challenge: JS page with proof
+  # of work; tarpit: a very slow answer; decoy: watermarked fake data).
   # verified_bot: search crawlers confirmed by reverse DNS (see crawlers).
   actions: {suspicious: allow, bot: block, verified_bot: allow}
   block_status: 403
@@ -149,6 +150,40 @@ connection_limits:
 docker:
   socket: /var/run/docker.sock
   poll_interval: 5s
+
+# Behaviour over a window per client (TLS fingerprint + network + host),
+# shared by all workers: regular timing, many 404s, API calls without a
+# page, pages without their assets (only on hosts whose assets go through
+# the gateway), walking through IDs. Signals and weights are in the
+# fingerprint library (behavior_*); weight 0 turns one off.
+behavior:
+  enabled: true
+  window: 10m
+  max_clients: 500000
+
+# Honeypot paths (globs; only paths no site behind the gateway serves). A
+# request to one scores "honeypot" and marks its address and fingerprint +
+# network for ttl ("honeypot_client" on every host). Needs behavior.
+honeypot:
+  paths: ["/.env", "/.env.*", "/.git/*", "/.svn/*", "/.aws/*", "/.ssh/*",
+          "/.DS_Store", "/wp-config.php*", "/.htpasswd", "/server-status",
+          "/phpinfo.php"]
+  ttl: 1h
+
+# Action "tarpit": 200 with a body that trickles out chunk bytes every
+# interval for duration. Above max_active at once, blocked instead.
+tarpit:
+  duration: 30s
+  interval: 1s
+  chunk: 16
+  max_active: 1000
+
+# Action "decoy": 200 with fake data instead of the site, with a watermark
+# ({{watermark}}, also in the req event) to recognize the data later.
+# Empty: built-in catalog page (HTML for navigations, JSON otherwise).
+decoy:
+  html_file: ""
+  json_file: ""
 
 # Known crawlers. A request whose User-Agent claims a search engine (Google,
 # Bing, Yandex, Apple, Baidu, ...) is checked by reverse and forward DNS in

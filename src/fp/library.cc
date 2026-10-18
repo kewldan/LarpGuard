@@ -76,6 +76,16 @@ weights:
   missing_fetch_metadata: 25
   missing_accept_language: 15
   os_tcp_mismatch: 20
+  # Honeypot (docs/architecture.md 6.3): the trap request itself, and later
+  # requests from the same address or fingerprint+network.
+  honeypot: 100
+  honeypot_client: 70
+  # Behaviour over a window (5.4).
+  behavior_regular_timing: 30
+  behavior_not_found: 30
+  behavior_api_without_page: 20
+  behavior_no_assets: 25
+  behavior_sequential_ids: 35
 )yaml";
 
 std::vector<std::string> ReadList(const YAML::Node& node) {

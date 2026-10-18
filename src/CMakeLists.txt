@@ -1,4 +1,6 @@
 add_library(bot_shield_core STATIC
+  action/actions.cc
+  behavior/behavior.cc
   challenge/challenger.cc
   challenge/token.cc
   admin/attack.cc

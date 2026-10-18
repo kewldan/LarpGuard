@@ -143,6 +143,27 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_crawler_checks_total", R"(result="dropped")",
                crawler_lookups_dropped.Get());
 
+  AppendHeader(&out, "bot_shield_honeypot_hits_total", "counter",
+               "Requests to honeypot paths.");
+  AppendSample(&out, "bot_shield_honeypot_hits_total", "", honeypot_hits.Get());
+  AppendHeader(&out, "bot_shield_behavior_signals_total", "counter",
+               "Behaviour and honeypot-client signals added to verdicts.");
+  AppendSample(&out, "bot_shield_behavior_signals_total", "",
+               behavior_signals.Get());
+
+  AppendHeader(&out, "bot_shield_tarpits_active", "gauge",
+               "Tarpit answers trickling out now.");
+  AppendSample(&out, "bot_shield_tarpits_active", "", tarpits_active.Get());
+  AppendHeader(&out, "bot_shield_tarpits_total", "counter",
+               "Tarpit answers by result (overflow: blocked instead).");
+  AppendSample(&out, "bot_shield_tarpits_total", R"(result="started")",
+               tarpits.Get());
+  AppendSample(&out, "bot_shield_tarpits_total", R"(result="overflow")",
+               tarpit_overflow.Get());
+  AppendHeader(&out, "bot_shield_decoys_total", "counter",
+               "Decoy answers with watermarked fake data.");
+  AppendSample(&out, "bot_shield_decoys_total", "", decoys.Get());
+
   AppendHeader(&out, "bot_shield_blocks_total", "counter",
                "Requests blocked, and blocks shadow mode held back.");
   AppendSample(&out, "bot_shield_blocks_total", R"(mode="enforce")",

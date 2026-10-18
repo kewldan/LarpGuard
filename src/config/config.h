@@ -104,6 +104,26 @@ struct Config {
   // DNS, and what to do with AI crawlers (unset: score them like anyone).
   bool crawlers_verify = true;
   std::optional<Action> crawlers_ai;
+  // Behaviour signals ("behavior" section, docs/architecture.md 5.4).
+  bool behavior_enabled = true;
+  std::chrono::milliseconds behavior_window{std::chrono::minutes(10)};
+  std::size_t behavior_max_clients = 500'000;
+  // Honeypot paths (globs): a request marks its address and fingerprint
+  // for `honeypot_ttl` (needs behavior). Only paths no site here serves.
+  std::vector<std::string> honeypot_paths = {
+      "/.env",      "/.env.*",        "/.git/*",     "/.svn/*",
+      "/.aws/*",    "/.ssh/*",        "/.DS_Store",  "/wp-config.php*",
+      "/.htpasswd", "/server-status", "/phpinfo.php"};
+  std::chrono::milliseconds honeypot_ttl{std::chrono::hours(1)};
+  // Action "tarpit": `tarpit_chunk` bytes every `tarpit_interval` for
+  // `tarpit_duration`; above `tarpit_max_active` at once, block instead.
+  std::chrono::milliseconds tarpit_duration{std::chrono::seconds(30)};
+  std::chrono::milliseconds tarpit_interval{std::chrono::seconds(1)};
+  std::size_t tarpit_chunk = 16;
+  std::size_t tarpit_max_active = 1000;
+  // Action "decoy": templates with {{watermark}}; empty: built-in ones.
+  std::string decoy_html;
+  std::string decoy_json;
   // JS challenge ("challenge" section). Keys file: see TokenKeys::Load; empty
   // means a random key per start (tokens do not survive restarts).
   std::string challenge_keys_file;

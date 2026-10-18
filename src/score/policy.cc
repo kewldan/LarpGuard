@@ -16,6 +16,10 @@ std::string_view ActionName(Action action) {
       return "challenge";
     case Action::kBlock:
       return "block";
+    case Action::kTarpit:
+      return "tarpit";
+    case Action::kDecoy:
+      return "decoy";
   }
   return "?";
 }
@@ -27,6 +31,10 @@ bool ParseAction(std::string_view text, Action* action) {
     *action = Action::kBlock;
   } else if (text == "challenge") {
     *action = Action::kChallenge;
+  } else if (text == "tarpit") {
+    *action = Action::kTarpit;
+  } else if (text == "decoy") {
+    *action = Action::kDecoy;
   } else {
     return false;
   }

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -37,7 +38,7 @@ class BodyQueue {
 // are reported back as "consumed" once the other side has taken them; the
 // HTTP/2 sessions turn that into WINDOW_UPDATEs, so a slow side throttles a
 // fast one instead of growing buffers. Everything runs on one worker thread.
-class Exchange {
+class Exchange : public std::enable_shared_from_this<Exchange> {
  public:
   // --- Called by the client side -------------------------------------------
   void PushRequestBody(std::span<const uint8_t> data);
@@ -51,6 +52,13 @@ class Exchange {
   void RespondLocally(
       int status, std::string_view body, const HeaderList& extra_headers = {},
       std::string_view content_type = "text/plain; charset=utf-8");
+  // A gateway-made response whose body follows later (tarpit): the head
+  // goes out now, PushLocalBody adds bytes, EndLocalBody finishes.
+  void StartLocalStream(int status, std::size_t content_length,
+                        const HeaderList& extra_headers,
+                        std::string_view content_type);
+  void PushLocalBody(std::string_view data);
+  void EndLocalBody();
 
   // --- Called by the upstream side -----------------------------------------
   std::size_t ReadRequestBody(std::span<uint8_t> out);
@@ -91,6 +99,10 @@ class Exchange {
   std::string rate_limit;
   // "<instance>-<connection>-<sequence>"; also sent as X-Bot-Request-Id.
   std::string request_id;
+  // Behaviour store key of the client (empty: not tracked).
+  std::string behavior_client;
+  // Token embedded in a decoy answer, to recognize the data later.
+  std::string watermark;
   std::string mode;
   int64_t started_ms = 0;
   uint64_t response_bytes = 0;

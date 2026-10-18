@@ -1,5 +1,7 @@
 add_executable(bot_shield_tests
+  actions_test.cc
   admin_test.cc
+  behavior_test.cc
   cert_store_test.cc
   challenge_test.cc
   classifier_test.cc

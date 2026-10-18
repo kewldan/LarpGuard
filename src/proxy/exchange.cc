@@ -85,6 +85,33 @@ void Exchange::RespondLocally(int status, std::string_view body,
   if (wake_client) wake_client();
 }
 
+void Exchange::StartLocalStream(int status, std::size_t content_length,
+                                const HeaderList& extra_headers,
+                                std::string_view content_type) {
+  local = true;
+  response = LocalResponse(status, content_length);
+  response.headers[0].second = content_type;  // LocalResponse: content-type.
+  response.headers.insert(response.headers.end(), extra_headers.begin(),
+                          extra_headers.end());
+  response_started = true;
+  response_body = BodyQueue{};
+  response_ended = false;
+  upstream_failed = false;
+  if (cancel_upstream) cancel_upstream();
+  if (wake_client) wake_client();
+}
+
+void Exchange::PushLocalBody(std::string_view data) {
+  response_body.Push(
+      std::span(reinterpret_cast<const uint8_t*>(data.data()), data.size()));
+  if (wake_client) wake_client();
+}
+
+void Exchange::EndLocalBody() {
+  response_ended = true;
+  if (wake_client) wake_client();
+}
+
 std::size_t Exchange::ReadRequestBody(std::span<uint8_t> out) {
   const std::size_t n = request_body.Read(out);
   if (n > 0 && request_consumed) request_consumed(n);

@@ -211,6 +211,7 @@ std::string RequestEventJson(const ConnectionRecord& record,
     }
     if (!outcome->rate_limit.empty()) json["rate_limit"] = outcome->rate_limit;
     if (!outcome->request_id.empty()) json["request_id"] = outcome->request_id;
+    if (!outcome->watermark.empty()) json["watermark"] = outcome->watermark;
   }
 #if BOT_SHIELD_FOXIO
   json["ja4h"] = foxio::Ja4h(request);

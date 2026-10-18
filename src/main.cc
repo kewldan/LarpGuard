@@ -19,6 +19,7 @@
 
 #include "admin/decision_log.h"
 #include "admin/lists.h"
+#include "behavior/behavior.h"
 #include "challenge/challenger.h"
 #include "challenge/token.h"
 #include "common/hash.h"
@@ -209,6 +210,15 @@ int Run(int argc, char** argv) {
   bot_shield::GatewayServices services;
   services.challenger = &challenger;
   if (crawler_verifier) services.crawler_verifier = &*crawler_verifier;
+  std::optional<bot_shield::BehaviorStore> behavior;
+  if (config.behavior_enabled) {
+    bot_shield::BehaviorSettings settings;
+    settings.window = std::chrono::duration_cast<std::chrono::seconds>(
+        config.behavior_window);
+    settings.max_clients = config.behavior_max_clients;
+    behavior.emplace(settings);
+    services.behavior = &*behavior;
+  }
   services.events = publisher.get();
   services.event_settings = &event_settings;
   services.library = &library;

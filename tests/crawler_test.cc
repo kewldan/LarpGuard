@@ -188,7 +188,7 @@ TEST(CrawlerConfigTest, ParsesCrawlers) {
   ASSERT_TRUE(ParseConfig("crawlers: {ai: default}\n", &fresh, &error));
   EXPECT_FALSE(fresh.crawlers_ai.has_value());
   Config bad;
-  EXPECT_FALSE(ParseConfig("crawlers: {ai: tarpit}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("crawlers: {ai: captcha}\n", &bad, &error));
   EXPECT_FALSE(ParseConfig("crawlers: {rdns: true}\n", &bad, &error));
 }
 

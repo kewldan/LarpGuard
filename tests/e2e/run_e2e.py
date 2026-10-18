@@ -470,6 +470,12 @@ rules:
   - name: guarded
     when: 'path ~ "/guarded*"'
     action: challenge
+  - name: slow
+    when: 'path ~ "/tarpit*"'
+    action: tarpit
+  - name: fake
+    when: 'path ~ "/decoy*"'
+    action: decoy
 rate_limits:
   - name: limited-path
     paths: ["/limited*"]
@@ -490,6 +496,13 @@ docker:
   poll_interval: 200ms
 crawlers:
   ai: block
+honeypot:
+  paths: ["/.env", "/trap/*"]
+  ttl: 1s
+tarpit:
+  duration: 1s
+  interval: 200ms
+  chunk: 4
 challenge:
   keys_file: {keys_path}
   token_ttl: 10m
@@ -764,6 +777,66 @@ log_level: debug
             expect("unverified_crawler" in reasons, reasons)
             time.sleep(0.05)
         expect("fake_crawler:google" in reasons, reasons)
+
+    def honeypot_and_behavior():
+        # The trap itself, then the same client elsewhere (marked for 1s,
+        # so the checks after this one are not affected).
+        _, _, body = h1_get(https_port, "a.test", ca_a, "/trap/x")
+        reasons = json.loads(body)["headers"]["x-bot-reasons"].split(",")
+        expect("honeypot" in reasons, reasons)
+        _, _, body = h1_get(https_port, "a.test", ca_a, "/after-trap")
+        reasons = json.loads(body)["headers"]["x-bot-reasons"].split(",")
+        expect("honeypot_client" in reasons, reasons)
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/.env")
+        expect(status == 403, status)
+        time.sleep(1.2)
+        _, _, body = h1_get(https_port, "a.test", ca_a, "/after-ttl")
+        reasons = json.loads(body)["headers"]["x-bot-reasons"]
+        expect("honeypot" not in reasons, reasons)
+        # Walking through IDs one by one.
+        for item in range(1, 13):
+            _, _, body = h1_get(https_port, "a.test", ca_a, f"/items/{item}")
+        reasons = json.loads(body)["headers"]["x-bot-reasons"].split(",")
+        expect("behavior_sequential_ids" in reasons, reasons)
+        h1_get(https_port, "a.test", ca_a, "/reset/1")  # Another pattern.
+
+    def tarpit_and_decoy():
+        started = time.monotonic()
+        status, headers, body = h1_get(https_port, "www.a.test", ca_a,
+                                       "/tarpit/x")
+        elapsed = time.monotonic() - started
+        expect(status == 200 and body == b" " * 20, (status, body))
+        expect(0.8 <= elapsed < 3, f"tarpit took {elapsed:.2f}s")
+        # HTTP/2 as well.
+        out = os.path.join(workdir, "tarpit-h2")
+        started = time.monotonic()
+        status, version = curl(https_port, "www.a.test", ca_a, "/tarpit/h2",
+                               out)
+        expect(status == 200 and version == "2", (status, version))
+        expect(time.monotonic() - started >= 0.8, "h2 tarpit too fast")
+        # A client that leaves frees its slot.
+        with tls_socket(https_port, "www.a.test", ca_a, ["http/1.1"]) as tls:
+            tls.sendall(b"GET /tarpit/gone HTTP/1.1\r\nHost: www.a.test\r\n\r\n")
+            tls.recv(100)
+        # Shadow host: only recorded.
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/tarpit/shadow")
+        expect(status == 200, status)
+
+        status, headers, body = h1_get(https_port, "www.a.test", ca_a,
+                                       "/decoy/list",
+                                       b"Accept: text/html\r\n")
+        expect(status == 200 and headers["content-type"].startswith(
+            "text/html"), (status, headers))
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/decoy/list")
+        mark = event["watermark"]
+        expect(len(mark) == 12 and mark.encode() in body, (mark, body))
+        expect(event["action"] == "decoy" and event["local"] is True, event)
+        status, headers, body = h1_get(https_port, "www.a.test", ca_a,
+                                       "/decoy/api",
+                                       b"Accept: application/json\r\n")
+        expect(headers["content-type"] == "application/json", headers)
+        expect(len(json.loads(body)["items"]) == 2, body)
 
     def rate_limits():
         statuses = [h1_get(https_port, "www.a.test", ca_a, "/limited")
@@ -1153,6 +1226,12 @@ log_level: debug
         expect(values["bot_shield_tokens_valid_total"] >= 2, "tokens valid")
         expect(values['bot_shield_crawler_checks_total{result="failed"}'] >= 1,
                "crawler checks")
+        expect(values["bot_shield_honeypot_hits_total"] >= 2, "honeypot")
+        expect(values['bot_shield_tarpits_total{result="started"}'] == 3,
+               "tarpits")
+        expect(values["bot_shield_tarpits_active"] == 0, "tarpits active")
+        expect(values["bot_shield_decoys_total"] == 2, "decoys")
+        expect(values["bot_shield_behavior_signals_total"] >= 2, "behavior")
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
         expect(values['bot_shield_events_total{result="published"}'] >= 50,
                "events published")
@@ -1179,6 +1258,9 @@ log_level: debug
         ("rules: allow and block override verdicts", rules_override_verdicts),
         ("challenge: page, PoW in node, token, cookie stripped", js_challenge),
         ("crawlers: AI policy, fake Googlebot by reverse DNS", crawlers),
+        ("honeypot marks, sequential IDs", honeypot_and_behavior),
+        ("tarpit (h1, h2, client leaves) and decoy with watermark",
+         tarpit_and_decoy),
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),

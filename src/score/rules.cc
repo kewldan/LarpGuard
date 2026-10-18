@@ -691,14 +691,10 @@ bool RuleSet::Compile(const std::vector<RuleSpec>& specs, RuleSet* rules,
     }
     Rule rule;
     rule.name = spec.name;
-    if (spec.action == "allow") {
-      rule.kind = Rule::Kind::kAllow;
-    } else if (spec.action == "block") {
-      rule.kind = Rule::Kind::kBlock;
-    } else if (spec.action == "challenge") {
-      rule.kind = Rule::Kind::kChallenge;
+    Action action = Action::kAllow;
+    if (ParseAction(spec.action, &action)) {
+      rule.action = action;
     } else if (spec.action == "score") {
-      rule.kind = Rule::Kind::kScore;
       if (spec.score == 0) {
         *error = std::format("rule '{}': action score needs a non-zero score",
                              spec.name);
@@ -707,7 +703,8 @@ bool RuleSet::Compile(const std::vector<RuleSpec>& specs, RuleSet* rules,
       rule.score = spec.score;
     } else {
       *error = std::format(
-          "rule '{}': action must be allow, challenge, block or score",
+          "rule '{}': action must be allow, challenge, block, tarpit, decoy "
+          "or score",
           spec.name);
       return false;
     }
@@ -727,7 +724,7 @@ int RuleSet::ScoreDelta(const RuleContext& context,
                         std::vector<std::string>* matched) const {
   int delta = 0;
   for (const Rule& rule : rules_) {
-    if (rule.kind != Rule::Kind::kScore) continue;
+    if (rule.action) continue;
     if (rule.condition->Evaluate(context)) {
       delta += rule.score;
       matched->push_back(rule.name);
@@ -739,17 +736,10 @@ int RuleSet::ScoreDelta(const RuleContext& context,
 std::optional<Action> RuleSet::Decide(const RuleContext& context,
                                       std::vector<std::string>* matched) const {
   for (const Rule& rule : rules_) {
-    if (rule.kind == Rule::Kind::kScore) continue;
+    if (!rule.action) continue;
     if (rule.condition->Evaluate(context)) {
       matched->push_back(rule.name);
-      switch (rule.kind) {
-        case Rule::Kind::kAllow:
-          return Action::kAllow;
-        case Rule::Kind::kChallenge:
-          return Action::kChallenge;
-        default:
-          return Action::kBlock;
-      }
+      return rule.action;
     }
   }
   return std::nullopt;
