@@ -10,8 +10,9 @@ Self-hosted шлюз фильтрации ботов перед Traefik. Осн�
 TCP/JA4/HTTP2/заголовков, события в NATS → ClickHouse). Следующий этап — M2:
 HTTP-aware прокси (ADR-015), вердикты (библиотека отпечатков, скоринг,
 shadow/enforce, `X-Bot-*`) и правила на своём языке (ADR-008) сделаны.
-M3: rate limiting (`src/ratelimit/`) и docker-лейблы (`src/docker/`) сделаны,
-дальше admin API.
+M3 готов: rate limiting (`src/ratelimit/`), docker-лейблы (`src/docker/`),
+admin API (`src/admin/`). Следующий этап — M4: JS-челлендж + PoW, токены,
+проверка хороших ботов.
 
 ## Команды
 
@@ -84,6 +85,10 @@ ninja-build git python3 openssl`, исходники монтировать read
 - `src/docker/` — клиент Docker API по unix-сокету (`client`), разбор
   лейблов `botshield.*` в снапшот `LabelPolicies` (`labels`), опрос
   (`watcher`). Приоритет режима: `policy.hosts` в YAML → лейблы → `mode`.
+- `src/admin/` — admin API на unix-сокете (`server`), оперативные списки
+  (`lists`: главнее правил, allow побеждает block) и журнал решений
+  (`decision_log`). Новый эндпоинт — в `HandleAdminRequest` + тест в
+  `admin_test.cc`.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в

@@ -120,7 +120,8 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     reasons            Array(String),
     action             String,
     would_action       String,
-    rate_limit         String
+    rate_limit         String,
+    request_id         String
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -176,7 +177,9 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     action             LowCardinality(String),
     would_action       LowCardinality(String),
     -- Rate limit that refused the request (action/would_action rate_limit).
-    rate_limit         LowCardinality(String)
+    rate_limit         LowCardinality(String),
+    -- Also sent to Traefik as X-Bot-Request-Id; see GET /decisions/<id>.
+    request_id         String
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)

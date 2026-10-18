@@ -1,8 +1,12 @@
 add_library(bot_shield_core STATIC
+  admin/decision_log.cc
+  admin/lists.cc
+  admin/server.cc
   common/hash.cc
   common/host.cc
   common/log.cc
   common/metrics.cc
+  common/network.cc
   config/config.cc
   docker/client.cc
   docker/labels.cc
@@ -48,13 +52,13 @@ target_compile_options(bot_shield_core PRIVATE -Wall -Wextra)
 target_link_libraries(bot_shield_core
   PUBLIC
     asio
+    nlohmann_json::nlohmann_json
     llhttp::llhttp
     nghttp2
     ssl
     crypto
     Threads::Threads
   PRIVATE
-    nlohmann_json::nlohmann_json
     yaml-cpp::yaml-cpp
 )
 

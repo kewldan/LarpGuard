@@ -27,9 +27,11 @@
 #include <utility>
 #include <vector>
 
+#include "admin/lists.h"
 #include "common/host.h"
 #include "common/log.h"
 #include "common/metrics.h"
+#include "common/network.h"
 #include "config/config.h"
 #include "docker/labels.h"
 #include "events/event_sink.h"
@@ -199,7 +201,14 @@ class ConnectionObserver {
 
   // Request headers are parsed: score them, tell Traefik the verdict in
   // X-Bot-* headers and, when enforcing, answer a block ourselves.
-  void OnProxyRequest(Exchange& exchange) const {
+  void OnProxyRequest(Exchange& exchange) {
+    exchange.request_id = std::format("{}-{}-{}",
+                                      context_.event_settings != nullptr
+                                          ? context_.event_settings->instance
+                                          : "local",
+                                      record_.id, ++request_sequence_);
+    exchange.request.headers.emplace_back("x-bot-request-id",
+                                          exchange.request_id);
     if (context_.scorer == nullptr || context_.policy == nullptr) return;
     const std::string host = HostOnly(exchange.request.authority);
     const std::shared_ptr<const LabelPolicies> labels =
@@ -207,6 +216,7 @@ class ConnectionObserver {
     const HostMode mode = context_.policy->ModeFor(
         host, labels ? labels->ModeFor(host) : std::nullopt);
     // "off": plain proxying, no verdicts and no limits.
+    exchange.mode = HostModeName(mode);
     if (mode == HostMode::kOff) return;
     const HttpRequest& request = exchange.observed;
     std::string pseudo;
@@ -227,6 +237,19 @@ class ConnectionObserver {
     std::optional<Action> override_action;
     if (context_.rules != nullptr && !context_.rules->empty()) {
       override_action = ApplyRules(exchange, input, host, &verdict);
+    }
+    // Operational lists (admin API) beat rules and the class.
+    if (context_.lists != nullptr) {
+      ListMatchInput list_input;
+      list_input.ip = record_.peer;
+      list_input.ja4 = record_.ja4;
+      list_input.header_fp = header_fp;
+      list_input.host = host;
+      list_input.now = UnixMillis() / 1000;
+      if (const auto match = context_.lists->Match(list_input)) {
+        override_action = match->action;
+        verdict.reasons.push_back(std::format("list:{}", match->id));
+      }
     }
     const PolicyDecision decision =
         context_.policy->Decide(verdict, mode, override_action);
@@ -383,6 +406,7 @@ class ConnectionObserver {
     if (!exchange.h2_fingerprint.empty()) {
       record_.h2_fingerprint = exchange.h2_fingerprint;
     }
+    if (context_.decisions != nullptr) RecordDecision(exchange);
     if (context_.events == nullptr || !context_.event_settings->requests) {
       return;
     }
@@ -397,6 +421,7 @@ class ConnectionObserver {
     outcome.action = exchange.action;
     outcome.would_action = exchange.would_action;
     outcome.rate_limit = exchange.rate_limit;
+    outcome.request_id = exchange.request_id;
     try {
       context_.events->Publish(
           "req",
@@ -408,6 +433,32 @@ class ConnectionObserver {
   }
 
  private:
+  void RecordDecision(const Exchange& exchange) const {
+    const HttpRequest& request = exchange.observed;
+    DecisionRecord record;
+    record.request_id = exchange.request_id;
+    record.time_ms = UnixMillis();
+    record.host = HostOnly(exchange.request.authority);
+    record.method = request.method;
+    record.path_group = PathGroup(request.target);
+    record.ip = Unmapped(record_.peer).to_string();
+    record.user_agent = std::string(request.Header("user-agent"));
+    record.ja4 = record_.ja4;
+    record.h2_fingerprint = exchange.h2_fingerprint;
+    record.header_fp = HeaderOrderFingerprint(request);
+    record.mode = exchange.mode;
+    record.score = exchange.score;
+    record.bot_class = exchange.bot_class;
+    record.reasons = exchange.reasons;
+    record.action = exchange.action;
+    record.would_action = exchange.would_action;
+    record.rate_limit = exchange.rate_limit;
+    record.status = exchange.response_started ? exchange.response.status : 0;
+    record.local = exchange.local;
+    record.duration_ms = SteadyMillis() - exchange.started_ms;
+    context_.decisions->Add(std::move(record));
+  }
+
   void OnRequest(HttpRequest&& request) {
     ++record_.requests;
     GlobalMetrics().http_requests_observed.Inc();
@@ -423,6 +474,7 @@ class ConnectionObserver {
   const GatewayContext& context_;
   ConnectionRecord record_;
   std::unique_ptr<H1Tap> h1_;
+  int request_sequence_ = 0;
 };
 
 template <typename Socket>

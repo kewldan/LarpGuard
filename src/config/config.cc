@@ -347,7 +347,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                  {"listen", "workers", "traefik", "passthrough_hosts",
                   "non_tls", "timeouts", "max_connections", "events", "mode",
                   "policy", "rules", "rate_limits", "connection_limits",
-                  "docker", "fingerprints", "metrics", "log_level"},
+                  "docker", "admin", "fingerprints", "metrics", "log_level"},
                  error)) {
     return false;
   }
@@ -471,6 +471,29 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
         *error = "connection_limits.new_burst_per_ip: expected >= 1";
         return false;
       }
+    }
+  }
+  if (const YAML::Node admin = root["admin"]) {
+    if (!CheckKeys(admin, "admin", {"socket", "state_file", "decisions"},
+                   error)) {
+      return false;
+    }
+    if (admin["socket"]) {
+      config->admin_socket =
+          admin["socket"].IsNull() ? "" : admin["socket"].as<std::string>();
+    }
+    if (admin["state_file"]) {
+      config->admin_state_file = admin["state_file"].IsNull()
+                                     ? ""
+                                     : admin["state_file"].as<std::string>();
+    }
+    if (admin["decisions"]) {
+      const auto value = admin["decisions"].as<int64_t>();
+      if (value < 0 || value > 1'000'000) {
+        *error = "admin.decisions: expected 0..1000000";
+        return false;
+      }
+      config->admin_decisions = static_cast<std::size_t>(value);
     }
   }
   if (const YAML::Node docker = root["docker"]) {

@@ -88,6 +88,9 @@ class Exchange {
   std::string would_action;
   // Rate limit that refused the request, if any.
   std::string rate_limit;
+  // "<instance>-<connection>-<sequence>"; also sent as X-Bot-Request-Id.
+  std::string request_id;
+  std::string mode;
   int64_t started_ms = 0;
   uint64_t response_bytes = 0;
 

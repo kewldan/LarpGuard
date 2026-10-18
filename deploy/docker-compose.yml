@@ -25,6 +25,9 @@ services:
       - traefik-acme:/traefik:ro
       # botshield.* labels; read-only, like Traefik's docker provider.
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Admin socket (reach it from the host) and saved operational lists.
+      - /run/bot-shield:/run/bot-shield
+      - bot-shield-state:/var/lib/bot-shield
     depends_on: [traefik, nats]
 
   # Analytics pipeline (optional): bot-shield -> NATS -> ClickHouse.
@@ -50,5 +53,6 @@ services:
 
 volumes:
   traefik-acme:
+  bot-shield-state:
   nats-data:
   clickhouse-data:

@@ -673,8 +673,30 @@ would_action`; с M3 — поля rate limit; ASN/страна — с IP-баз�
   score, upstream), хендшейки в секунду, срабатывания лимитов, состояние
   `acme.json`, возраст снапшота конфигурации, потерянные события.
 - **Логи**: структурированный JSON, по умолчанию только не-`allow`.
-- **Трассировка решения**: `GET /decisions/{request_id}` в `admin/api`
-  показывает сигналы, веса, сработавшие правила и итог.
+- **Admin API** ✅ (`admin.socket`, unix-сокет с правами 0600, без TCP;
+  выключен по умолчанию), JSON:
+
+  | Запрос                         | Что делает                                                     |
+  |--------------------------------|----------------------------------------------------------------|
+  | `GET /status`                  | версия, uptime, режим, сертификаты, хосты из лейблов, соединения, ключи лимитов, NATS |
+  | `GET /policy?host=<host>`      | итоговый режим и его источник (`policy.hosts` / `labels` / `mode`), маршрут, лимиты хоста |
+  | `GET /lists`, `POST /lists`    | оперативные allow/block: `kind` (`ip` — адрес или CIDR, `ja4`, `header_fp` — glob), `action`, `host`, `ttl`, `comment` |
+  | `DELETE /lists/<id>`           | удалить запись                                                 |
+  | `GET /decisions?limit=&host=&class=` | последние решения (кольцевой буфер `admin.decisions`, в памяти) |
+  | `GET /decisions/<request_id>`  | одно решение: сигналы, правила, действие, статус, длительность |
+
+  Записи списков главнее правил и класса (allow побеждает block, allow
+  обходит лимиты), совпадение видно в причинах как `list:<id>`; с
+  `admin.state_file` списки переживают перезапуск. Каждый запрос получает
+  `request_id` (`<instance>-<соединение>-<номер>`), который уходит в Traefik
+  заголовком `X-Bot-Request-Id` и попадает в события — по нему приложение
+  ссылается на решение. Журнал решений хранит полный IP (он локальный и
+  нужен, чтобы действовать), события — нет.
+
+  ```bash
+  curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/policy?host=shop.example.com
+  curl --unix-socket /run/bot-shield/admin.sock -d '{"kind":"ip","value":"203.0.113.0/24","action":"block","ttl":"1h"}' http://bot-shield/lists
+  ```
 - **Деплой**: docker-compose рядом с Traefik (`network_mode: host`, монтируются
   `acme.json` read-only и `docker.sock` read-only).
 - **Безопасность шлюза**: процесс без root (`CAP_NET_BIND_SERVICE`), ключи
@@ -708,7 +730,7 @@ would_action`; с M3 — поля rate limit; ASN/страна — с IP-баз�
 | M0 ✅ | Каркас: CMake, event loop, listener, L4-классификатор, passthrough, `acme.json` loader, TLS-терминация с TLS-туннелем в Traefik (ADR-013), PROXY v2, метрики, graceful shutdown. Шлюз прозрачен. |
 | M1 ✅ | Пассивные отпечатки (TCP, JA4, H2, порядок заголовков; JA4T/JA4H опционально), события в NATS, ClickHouse-схема. `X-Bot-*` и shadow-решения перенесены в M2 (нужен HTTP-aware прокси, ADR-013). |
 | M2 ✅ | HTTP-aware прокси с пулом HTTP/2 (ADR-015), библиотека отпечатков, проверки согласованности, скоринг, shadow/enforce по хостам, `X-Bot-*`, блок, правила (ADR-008). |
-| M3 ⏳ | ✅ Rate limiter (local) и лимиты соединений на IP. ✅ Политики через docker-лейблы. Дальше: `admin/api`; synced/strict через Valkey — при нескольких узлах. |
+| M3 ✅ | Rate limiter (local) и лимиты соединений на IP, политики через docker-лейблы, admin API (статус, политика хоста, оперативные списки, журнал решений). synced/strict через Valkey — когда появятся несколько узлов. |
 | M4   | JS-челлендж + PoW, токены, хорошие боты (rDNS, Web Bot Auth).                                       |
 | M5   | Поведенческие сигналы, honeypot, tarpit/decoy, офлайн-кластеризация, fail-open watchdog.            |
 | M6   | UI, ONNX-модель, upstream HTTP/2 (gRPC), HTTP/3 на входе.                                            |

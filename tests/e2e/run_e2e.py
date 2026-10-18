@@ -178,6 +178,28 @@ def docker_container(name, labels):
             "Labels": labels, "State": "running"}
 
 
+class UnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, path):
+        super().__init__("bot-shield", timeout=5)
+        self.unix_path = path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(5)
+        self.sock.connect(self.unix_path)
+
+
+def admin_call(path, method, target, body=None):
+    connection = UnixHTTPConnection(path)
+    payload = json.dumps(body) if body is not None else None
+    connection.request(method, target, body=payload,
+                       headers={"Content-Type": "application/json"})
+    response = connection.getresponse()
+    data = json.loads(response.read() or b"null")
+    connection.close()
+    return response.status, data
+
+
 def parse_reply(reply):
     return dict(item.split("=", 1) for item in reply.strip().split(" "))
 
@@ -318,6 +340,9 @@ def main():
          docker_container("unrelated", {"traefik.enable": "true"})])
 
     https_port, http_port, metrics_port = free_port(), free_port(), free_port()
+    admin_socket = os.path.join(tempfile.gettempdir(),
+                                f"bs-admin-{os.getpid()}.sock")
+    lists_file = os.path.join(workdir, "lists.json")
     config_path = os.path.join(workdir, "bot-shield.yaml")
     with open(config_path, "w") as f:
         f.write(f"""
@@ -361,6 +386,10 @@ events:
 docker:
   socket: {docker.path}
   poll_interval: 200ms
+admin:
+  socket: {admin_socket}
+  state_file: {lists_file}
+  decisions: 1000
 metrics:
   listen: 127.0.0.1:{metrics_port}
 log_level: debug
@@ -611,6 +640,56 @@ log_level: debug
             expect(time.monotonic() < deadline, "label change not applied")
             time.sleep(0.1)
 
+    def admin_api():
+        expect(os.stat(admin_socket).st_mode & 0o777 == 0o600, "socket mode")
+        status, body = admin_call(admin_socket, "GET", "/status")
+        expect(status == 200 and body["version"], body)
+        status, body = admin_call(admin_socket, "GET", "/policy?host=www.a.test")
+        expect(body["mode"] == "enforce", body)
+        expect(body["mode_source"] == "policy.hosts", body)
+        expect(body["route"] == "terminate", body)
+
+        # Block list: a request that is normally let through gets 403.
+        status, entry = admin_call(admin_socket, "POST", "/lists", {
+            "kind": "ip", "value": "127.0.0.1", "action": "block",
+            "host": "www.a.test", "ttl": "5m", "comment": "e2e"})
+        expect(status == 201, entry)
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/listed")
+        expect(status == 403, status)
+        _, body = admin_call(admin_socket, "GET",
+                             "/decisions?host=www.a.test&limit=20")
+        record = next(d for d in body["decisions"]
+                      if d["path_group"] == "/listed")
+        expect(f"list:{entry['id']}" in record["reasons"], record)
+        expect(record["action"] == "block" and record["ip"] == "127.0.0.1",
+               record)
+        saved = json.load(open(lists_file))
+        expect([e["id"] for e in saved] == [entry["id"]], saved)
+        status, _ = admin_call(admin_socket, "DELETE", f"/lists/{entry['id']}")
+        expect(status == 200, status)
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/listed")
+        expect(status == 200, status)
+
+        # Allow list beats a bot verdict on an enforced host.
+        _, entry = admin_call(admin_socket, "POST", "/lists", {
+            "kind": "ip", "value": "127.0.0.0/8", "action": "allow",
+            "host": "www.a.test"})
+        status, _, body = h1_get(https_port, "www.a.test", ca_a, "/allowed",
+                                 f"User-Agent: {chrome_ua}\r\n".encode())
+        expect(status == 200, status)
+        admin_call(admin_socket, "DELETE", f"/lists/{entry['id']}")
+
+        # The request id Traefik sees leads to the decision.
+        request_id = json.loads(body)["headers"]["x-bot-request-id"]
+        status, record = admin_call(admin_socket, "GET",
+                                    f"/decisions/{request_id}")
+        expect(status == 200 and record["path_group"] == "/allowed", record)
+        expect(record["class"] == "bot" and record["action"] == "allow",
+               record)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("request_id") == request_id)
+        expect(event["path_group"] == "/allowed", event)
+
     # --- Proxy over HTTP/2 (curl) -------------------------------------------
 
     def h2_requests():
@@ -818,6 +897,7 @@ log_level: debug
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),
+        ("admin API: status, policy, lists, decisions", admin_api),
         ("wildcard certificate", wildcard_certificate),
         ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),

@@ -16,9 +16,12 @@
 #include <system_error>
 #include <utility>
 
+#include "admin/decision_log.h"
+#include "admin/lists.h"
 #include "common/hash.h"
 #include "common/log.h"
 #include "common/metrics.h"
+#include "common/version.h"
 #include "config/config.h"
 #include "docker/labels.h"
 #include "docker/watcher.h"
@@ -31,7 +34,7 @@
 
 namespace {
 
-constexpr std::string_view kVersion = "0.1.0";
+using bot_shield::kVersion;
 #if BOT_SHIELD_FOXIO
 constexpr const char* kFeatures = "ja4plus";
 #else
@@ -164,9 +167,24 @@ int Run(int argc, char** argv) {
     docker->Start();
   }
 
-  bot_shield::Gateway gateway(config, &certificates, publisher.get(),
-                              &event_settings, &library,
-                              docker ? &labels : nullptr);
+  bot_shield::ListStore lists(config.admin_state_file);
+  if (!lists.Load(std::chrono::duration_cast<std::chrono::seconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count(),
+                  &error)) {
+    Error("admin: {}", error);
+    return 1;
+  }
+  bot_shield::DecisionLog decisions(config.admin_decisions);
+
+  bot_shield::GatewayServices services;
+  services.events = publisher.get();
+  services.event_settings = &event_settings;
+  services.library = &library;
+  services.labels = docker ? &labels : nullptr;
+  services.lists = &lists;
+  services.decisions = &decisions;
+  bot_shield::Gateway gateway(config, &certificates, services);
   if (!gateway.Start(&error)) {
     Error("startup: {}", error);
     return 1;

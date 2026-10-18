@@ -1,4 +1,5 @@
 add_executable(bot_shield_tests
+  admin_test.cc
   cert_store_test.cc
   classifier_test.cc
   client_hello_test.cc

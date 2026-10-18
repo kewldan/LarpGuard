@@ -6,6 +6,8 @@
 #include <asio/ssl/context.hpp>
 #include <string>
 
+#include "admin/decision_log.h"
+#include "admin/lists.h"
 #include "config/config.h"
 #include "docker/labels.h"
 #include "events/event_sink.h"
@@ -44,6 +46,9 @@ struct GatewayContext {
   RateLimitStore* rate_limit_store = nullptr;
   // Policies from docker labels; null when Docker is not used.
   const LabelStore* labels = nullptr;
+  // Operational allow/block lists and the recent-decision log (admin API).
+  const ListStore* lists = nullptr;
+  DecisionLog* decisions = nullptr;
   // Per-IP connection limits at accept time (shared).
   ConnectionCounter* connection_counter = nullptr;
   // Analytics events; null when disabled.

@@ -79,6 +79,7 @@ struct RequestOutcome {
   std::string would_action;
   // Name of the rate limit that refused the request, if any.
   std::string rate_limit;
+  std::string request_id;
 };
 
 std::string RequestEventJson(const ConnectionRecord& record,

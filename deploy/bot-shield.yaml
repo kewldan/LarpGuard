@@ -130,6 +130,17 @@ docker:
   socket: /var/run/docker.sock
   poll_interval: 5s
 
+# Admin API (JSON over a unix socket, mode 0600; no TCP port):
+#   curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
+# GET /status, GET /policy?host=, GET|POST /lists, DELETE /lists/<id>,
+# GET /decisions[?limit=&host=&class=], GET /decisions/<request id>.
+admin:
+  socket: /run/bot-shield/admin.sock
+  # Operational allow/block lists survive restarts here ("" = memory only).
+  state_file: /var/lib/bot-shield/lists.json
+  # Recent decisions kept in memory for GET /decisions.
+  decisions: 10000
+
 fingerprints:
   # Fingerprint library; "" = built in (same as deploy/fingerprints.yaml).
   library: ""

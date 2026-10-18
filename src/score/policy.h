@@ -36,6 +36,13 @@ struct PolicySettings {
   std::vector<std::pair<std::string, HostMode>> host_modes;
 };
 
+// A host's mode and where it came from: "policy.hosts", "labels" or
+// "mode" (the global setting).
+struct ModeResolution {
+  HostMode mode = HostMode::kShadow;
+  std::string_view source;
+};
+
 struct PolicyDecision {
   // What is done.
   Action action = Action::kAllow;
@@ -51,7 +58,13 @@ class Policy {
   // Mode of `host` (normalized, no port): configured host overrides win,
   // then `label_mode` (docker labels), then the global mode.
   HostMode ModeFor(std::string_view host,
-                   std::optional<HostMode> label_mode = std::nullopt) const;
+                   std::optional<HostMode> label_mode = std::nullopt) const {
+    return ResolveMode(host, label_mode).mode;
+  }
+  ModeResolution ResolveMode(
+      std::string_view host,
+      std::optional<HostMode> label_mode = std::nullopt) const;
+  bool global_enforce() const { return settings_.enforce; }
 
   // `override_action` (from an allow/block rule) replaces the action of the
   // verdict's class; `mode` decides whether it is carried out.

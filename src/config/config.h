@@ -86,6 +86,12 @@ struct Config {
   int64_t new_connections_per_ip = 0;
   std::chrono::milliseconds new_connections_period{1000};
   int64_t new_connections_burst = 1;
+  // Admin API on a unix socket (mode 0600); empty disables.
+  std::string admin_socket;
+  // Operational lists survive restarts in this JSON file; empty: memory.
+  std::string admin_state_file;
+  // Recent decisions kept for GET /decisions.
+  std::size_t admin_decisions = 10000;
   // Docker Engine socket for botshield.* label policies; empty disables.
   std::string docker_socket;
   std::chrono::milliseconds docker_poll_interval{5000};

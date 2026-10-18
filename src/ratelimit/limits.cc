@@ -204,6 +204,20 @@ std::string RateLimitSet::BuildKey(const Limit& limit,
   return key;
 }
 
+std::vector<std::string> RateLimitSet::NamesForHost(
+    std::string_view host) const {
+  std::vector<std::string> names;
+  for (const Limit& limit : limits_) {
+    if (limit.spec.hosts.empty() ||
+        std::ranges::any_of(limit.spec.hosts, [&](const std::string& pattern) {
+          return HostMatches(pattern, host);
+        })) {
+      names.push_back(limit.spec.name);
+    }
+  }
+  return names;
+}
+
 std::optional<RateLimitHit> RateLimitSet::Check(const RateLimitRequest& request,
                                                 RateLimitStore* store,
                                                 int64_t now_ns) const {

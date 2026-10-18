@@ -3,6 +3,7 @@
 
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
+#include <asio/local/stream_protocol.hpp>
 #include <asio/ssl/context.hpp>
 #include <atomic>
 #include <memory>
@@ -11,6 +12,9 @@
 #include <thread>
 #include <vector>
 
+#include "admin/decision_log.h"
+#include "admin/lists.h"
+#include "admin/server.h"
 #include "config/config.h"
 #include "docker/labels.h"
 #include "events/event_sink.h"
@@ -44,6 +48,8 @@ class Worker {
               bool reuse_port, std::string* error);
   bool ListenMetrics(const asio::ip::tcp::endpoint& endpoint,
                      std::string* error);
+  bool ListenAdmin(const std::string& path, const AdminContext& admin,
+                   std::string* error);
 
   void Run();
   // Stops accepting; open connections keep running until they finish.
@@ -61,17 +67,27 @@ class Worker {
   asio::ssl::context upstream_tls_;
   GatewayContext context_;
   std::vector<std::unique_ptr<asio::ip::tcp::acceptor>> acceptors_;
+  std::unique_ptr<asio::local::stream_protocol::acceptor> admin_acceptor_;
   std::unique_ptr<UpstreamPool> pool_;
   std::thread thread_;
   std::atomic<bool> finished_{false};
+};
+
+// Long-lived objects the gateway uses but does not own (main owns them).
+struct GatewayServices {
+  EventSink* events = nullptr;  // Null: events off.
+  const EventSettings* event_settings = nullptr;
+  const FingerprintLibrary* library = nullptr;
+  const LabelStore* labels = nullptr;  // Null: Docker off.
+  ListStore* lists = nullptr;
+  DecisionLog* decisions = nullptr;
 };
 
 class Gateway {
  public:
   // `events` may be null (events disabled); both must outlive the gateway.
   Gateway(const Config& config, const CertStore* certificates,
-          EventSink* events, const EventSettings* event_settings,
-          const FingerprintLibrary* library, const LabelStore* labels);
+          const GatewayServices& services);
   ~Gateway();
 
   Gateway(const Gateway&) = delete;
@@ -87,13 +103,12 @@ class Gateway {
  private:
   const Config& config_;
   const CertStore* certificates_;
-  EventSink* events_;
-  const EventSettings* event_settings_;
   Classifier classifier_;
   Scorer scorer_;
   Policy policy_;
   RuleSet rules_;
-  const LabelStore* labels_;
+  GatewayServices services_;
+  AdminContext admin_;
   RateLimitSet rate_limits_;
   RateLimitStore rate_limit_store_;
   ConnectionCounter connection_counter_;

@@ -18,13 +18,11 @@
 #include <system_error>
 #include <utility>
 
+#include "admin/server.h"
 #include "common/log.h"
 #include "common/metrics.h"
 #include "config/config.h"
-#include "docker/labels.h"
 #include "events/event_sink.h"
-#include "events/events.h"
-#include "fp/library.h"
 #include "net/socket_options.h"
 #include "proxy/upstream_pool.h"
 #include "ratelimit/gcra.h"
@@ -250,6 +248,17 @@ bool Worker::Listen(const tcp::endpoint& https,
   return true;
 }
 
+bool Worker::ListenAdmin(const std::string& path, const AdminContext& admin,
+                         std::string* error) {
+  admin_acceptor_ =
+      std::make_unique<asio::local::stream_protocol::acceptor>(io_context_);
+  if (!OpenAdminSocket(admin_acceptor_.get(), path, error)) return false;
+  asio::co_spawn(io_context_, ServeAdmin(*admin_acceptor_, admin),
+                 LogUnhandled);
+  log::Info("admin API on {}", path);
+  return true;
+}
+
 bool Worker::ListenMetrics(const tcp::endpoint& endpoint, std::string* error) {
   auto acceptor = std::make_unique<tcp::acceptor>(io_context_);
   if (!OpenAcceptor(acceptor.get(), endpoint, /*reuse_port=*/false,
@@ -283,6 +292,10 @@ void Worker::StopAccepting() {
       std::error_code ec;
       acceptor->close(ec);
     }
+    if (admin_acceptor_) {
+      std::error_code ec;
+      admin_acceptor_->close(ec);
+    }
     // Pooled connections to Traefik would keep the loop alive otherwise.
     pool_->Drain();
   });
@@ -295,17 +308,14 @@ void Worker::Join() {
 }
 
 Gateway::Gateway(const Config& config, const CertStore* certificates,
-                 EventSink* events, const EventSettings* event_settings,
-                 const FingerprintLibrary* library, const LabelStore* labels)
+                 const GatewayServices& services)
     : config_(config),
       certificates_(certificates),
-      events_(events),
-      event_settings_(event_settings),
       classifier_(config.passthrough_hosts, config.non_tls),
-      scorer_(library, config.policy.suspicious_threshold,
+      scorer_(services.library, config.policy.suspicious_threshold,
               config.policy.bot_threshold),
       policy_(config.policy),
-      labels_(labels) {}
+      services_(services) {}
 
 Gateway::~Gateway() {
   Stop();
@@ -324,12 +334,14 @@ bool Gateway::Start(std::string* error) {
   shared.scorer = &scorer_;
   shared.policy = &policy_;
   shared.rules = &rules_;
-  shared.labels = labels_;
+  shared.labels = services_.labels;
+  shared.lists = services_.lists;
+  shared.decisions = services_.decisions;
   shared.rate_limits = &rate_limits_;
   shared.rate_limit_store = &rate_limit_store_;
   shared.connection_counter = &connection_counter_;
-  shared.events = events_;
-  shared.event_settings = event_settings_;
+  shared.events = services_.events;
+  shared.event_settings = services_.event_settings;
   if (!ResolveEndpoint(config_.upstream_https, &shared.upstream_https, error) ||
       !ResolveEndpoint(config_.upstream_http, &shared.upstream_http, error)) {
     return false;
@@ -366,6 +378,24 @@ bool Gateway::Start(std::string* error) {
     if (!worker->Listen(https, http, reuse_port, error)) return false;
     if (i == 0 && metrics && !worker->ListenMetrics(*metrics, error)) {
       return false;
+    }
+    if (i == 0 && !config_.admin_socket.empty()) {
+      admin_.config = &config_;
+      admin_.certificates = certificates_;
+      admin_.labels = services_.labels;
+      admin_.lists = services_.lists;
+      admin_.decisions = services_.decisions;
+      admin_.rate_limit_store = &rate_limit_store_;
+      admin_.rate_limits = &rate_limits_;
+      admin_.policy = &policy_;
+      admin_.started_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+      admin_.workers = count;
+      if (!worker->ListenAdmin(config_.admin_socket, admin_, error)) {
+        return false;
+      }
     }
     workers_.push_back(std::move(worker));
   }

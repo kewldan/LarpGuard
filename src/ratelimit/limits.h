@@ -67,6 +67,9 @@ class RateLimitSet {
                                     RateLimitStore* store,
                                     int64_t now_ns) const;
 
+  // Limits whose host filter covers `host` (other filters ignored).
+  std::vector<std::string> NamesForHost(std::string_view host) const;
+
  private:
   struct Limit {
     RateLimitSpec spec;

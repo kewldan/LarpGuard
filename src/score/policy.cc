@@ -54,17 +54,19 @@ bool ParseHostMode(std::string_view text, HostMode* mode) {
   return true;
 }
 
-HostMode Policy::ModeFor(std::string_view host,
-                         std::optional<HostMode> label_mode) const {
+ModeResolution Policy::ResolveMode(std::string_view host,
+                                   std::optional<HostMode> label_mode) const {
   // Exact names win over wildcards, configuration over labels.
   for (const auto& [pattern, mode] : settings_.host_modes) {
-    if (pattern == host) return mode;
+    if (pattern == host) return {mode, "policy.hosts"};
   }
   for (const auto& [pattern, mode] : settings_.host_modes) {
-    if (pattern.starts_with("*.") && HostMatches(pattern, host)) return mode;
+    if (pattern.starts_with("*.") && HostMatches(pattern, host)) {
+      return {mode, "policy.hosts"};
+    }
   }
-  if (label_mode) return *label_mode;
-  return settings_.enforce ? HostMode::kEnforce : HostMode::kShadow;
+  if (label_mode) return {*label_mode, "labels"};
+  return {settings_.enforce ? HostMode::kEnforce : HostMode::kShadow, "mode"};
 }
 
 PolicyDecision Policy::Decide(const Verdict& verdict, HostMode mode,

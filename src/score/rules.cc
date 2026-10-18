@@ -1,7 +1,6 @@
 #include "score/rules.h"
 
 #include <algorithm>
-#include <array>
 #include <asio/ip/address.hpp>
 #include <cctype>
 #include <charconv>
@@ -17,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/network.h"
 #include "fp/library.h"
 #include "score/policy.h"
 
@@ -134,10 +134,8 @@ struct Condition::Node {
   // Fields and comparisons.
   Field field = Field::kHost;
   CompareOp op = CompareOp::kEq;
-  // cidr(): network bytes (IPv6 form) and prefix length.
-  std::array<uint8_t, 16> network{};
-  int prefix = 0;
-  bool network_v4 = false;
+  // cidr().
+  Network network;
   std::unique_ptr<Node> left;
   std::unique_ptr<Node> right;
 };
@@ -282,37 +280,6 @@ class Lexer {
 };
 
 // --- Parser ------------------------------------------------------------------
-
-bool ParseCidr(std::string_view text, Node* node) {
-  std::string_view address_text = text;
-  int prefix = -1;
-  if (const auto slash = text.find('/'); slash != std::string_view::npos) {
-    address_text = text.substr(0, slash);
-    const std::string_view bits = text.substr(slash + 1);
-    const auto [ptr, ec] =
-        std::from_chars(bits.data(), bits.data() + bits.size(), prefix);
-    if (ec != std::errc() || ptr != bits.data() + bits.size()) return false;
-  }
-  std::error_code ec;
-  const asio::ip::address address =
-      asio::ip::make_address(std::string(address_text), ec);
-  if (ec) return false;
-  if (address.is_v4()) {
-    if (prefix < 0) prefix = 32;
-    if (prefix > 32) return false;
-    node->network_v4 = true;
-    node->prefix = prefix + 96;
-    node->network =
-        asio::ip::make_address_v6(asio::ip::v4_mapped, address.to_v4())
-            .to_bytes();
-  } else {
-    if (prefix < 0) prefix = 128;
-    if (prefix > 128) return false;
-    node->prefix = prefix;
-    node->network = address.to_v6().to_bytes();
-  }
-  return true;
-}
 
 class Parser {
  public:
@@ -515,7 +482,7 @@ class Parser {
       if (name == "cidr") {
         node->kind = NodeKind::kCidr;
         node->type = Type::kBool;
-        if (!ParseCidr(argument, node.get())) {
+        if (!Network::Parse(argument, &node->network)) {
           return Fail(error, std::format("bad network '{}'", argument));
         }
       } else {
@@ -611,28 +578,6 @@ Value FieldValue(Field field, const RuleContext& context) {
   return value;
 }
 
-bool InNetwork(const Node& node, const asio::ip::address& ip) {
-  std::array<uint8_t, 16> bytes{};
-  if (ip.is_v4()) {
-    bytes =
-        asio::ip::make_address_v6(asio::ip::v4_mapped, ip.to_v4()).to_bytes();
-  } else if (ip.is_v6()) {
-    bytes = ip.to_v6().to_bytes();
-  } else {
-    return false;
-  }
-  if (node.network_v4 && !ip.is_v4() && !ip.to_v6().is_v4_mapped()) {
-    return false;
-  }
-  int bits = node.prefix;
-  for (std::size_t i = 0; i < bytes.size() && bits > 0; ++i, bits -= 8) {
-    const auto mask =
-        static_cast<uint8_t>(bits >= 8 ? 0xFF : (0xFF << (8 - bits)) & 0xFF);
-    if ((bytes[i] & mask) != (node.network[i] & mask)) return false;
-  }
-  return true;
-}
-
 Value Evaluate(const Node& node, const RuleContext& context) {
   Value value;
   value.type = node.type;
@@ -652,7 +597,7 @@ Value Evaluate(const Node& node, const RuleContext& context) {
       value.flag = context.request->HasHeader(node.text);
       return value;
     case NodeKind::kCidr:
-      value.flag = InNetwork(node, context.ip);
+      value.flag = node.network.Contains(context.ip);
       return value;
     case NodeKind::kNot:
       value.flag = !Evaluate(*node.left, context).flag;
