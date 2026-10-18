@@ -34,6 +34,7 @@
 #include "events/events.h"
 #include "events/nats_publisher.h"
 #include "fp/library.h"
+#include "model/gbdt.h"
 #include "server/gateway.h"
 #include "tls/acme_watcher.h"
 #include "tls/cert_store.h"
@@ -210,6 +211,15 @@ int Run(int argc, char** argv) {
   bot_shield::GatewayServices services;
   services.challenger = &challenger;
   if (crawler_verifier) services.crawler_verifier = &*crawler_verifier;
+  bot_shield::GbdtModel model;
+  if (!config.model_file.empty()) {
+    if (!bot_shield::GbdtModel::Load(config.model_file, &model, &error)) {
+      Error("model: {}", error);
+      return 1;
+    }
+    services.model = &model;
+    Info("model: {} trees", model.tree_count());
+  }
   std::optional<bot_shield::BehaviorStore> behavior;
   if (config.behavior_enabled) {
     bot_shield::BehaviorSettings settings;

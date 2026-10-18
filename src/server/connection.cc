@@ -50,6 +50,8 @@
 #include "fp/library.h"
 #include "fp/tcp_syn.h"
 #include "fp/user_agent.h"
+#include "model/features.h"
+#include "model/gbdt.h"
 #include "net/classifier.h"
 #include "net/prefixed_stream.h"
 #include "net/proxy_protocol.h"
@@ -343,6 +345,11 @@ class ConnectionObserver {
     if (context_.behavior != nullptr && !verified_crawler) {
       ApplyBehavior(exchange, host, binding, &verdict);
     }
+    // Model signal; the feature vector also goes to the event (training).
+    if (!verified_crawler &&
+        (context_.model != nullptr || context_.config->model_log_features)) {
+      ApplyModel(exchange, &verdict);
+    }
     // A solved challenge earns credit (behavioural signals stay).
     const bool token_valid =
         !verified_crawler && context_.challenger != nullptr &&
@@ -499,6 +506,30 @@ class ConnectionObserver {
     if (override_action != Action::kAllow) {
       CheckRateLimits(exchange, verdict, host, decision, labels.get());
     }
+  }
+
+  void ApplyModel(Exchange& exchange, Verdict* verdict) const {
+    FeatureInput input;
+    input.request = &exchange.observed;
+    input.path = exchange.request.path;
+    input.ja4 = record_.ja4;
+    input.http2 = !exchange.h2_fingerprint.empty();
+    input.offered_h2 = record_.offered_h2;
+    input.tcp_initial_ttl = record_.tcp_initial_ttl;
+    input.reasons = verdict->reasons;
+    const std::array<float, kFeatureCount> features = ExtractFeatures(input);
+    if (context_.config->model_log_features) {
+      exchange.features.assign(features.begin(), features.end());
+    }
+    if (context_.model == nullptr) return;
+    exchange.model_score = context_.model->Predict(features);
+    if (exchange.model_score < context_.config->model_threshold) return;
+    const int weight = context_.scorer->SignalWeight("model");
+    if (weight <= 0) return;
+    GlobalMetrics().model_flags.Inc();
+    verdict->score = std::min(100, verdict->score + weight);
+    verdict->reasons.emplace_back("model");
+    verdict->bot_class = context_.scorer->Classify(verdict->score);
   }
 
   void ApplyBehavior(Exchange& exchange, std::string_view host,
@@ -742,6 +773,8 @@ class ConnectionObserver {
     outcome.rate_limit = exchange.rate_limit;
     outcome.request_id = exchange.request_id;
     outcome.watermark = exchange.watermark;
+    outcome.features = exchange.features;
+    outcome.model_score = exchange.model_score;
     try {
       context_.events->Publish(
           "req",

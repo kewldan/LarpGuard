@@ -185,6 +185,15 @@ decoy:
   html_file: ""
   json_file: ""
 
+# Model signal (docs/architecture.md 6.1): gradient-boosted trees trained
+# by tools/train_model.py from req events. Above threshold a request gets
+# signal "model" (weight in the library). log_features puts the feature
+# vector in req events: the training data; needs no model.
+model:
+  file: ""
+  threshold: 0.8
+  log_features: true
+
 # Known crawlers. A request whose User-Agent claims a search engine (Google,
 # Bing, Yandex, Apple, Baidu, ...) is checked by reverse and forward DNS in
 # the background: verified ones get class verified_bot, fakes the

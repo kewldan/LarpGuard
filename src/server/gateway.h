@@ -91,6 +91,7 @@ struct GatewayServices {
   const Challenger* challenger = nullptr;
   CrawlerVerifier* crawler_verifier = nullptr;
   BehaviorStore* behavior = nullptr;
+  const GbdtModel* model = nullptr;
 };
 
 class Gateway {

@@ -86,6 +86,8 @@ weights:
   behavior_api_without_page: 20
   behavior_no_assets: 25
   behavior_sequential_ids: 35
+  # Model signal (gradient-boosted trees, model.threshold).
+  model: 30
 )yaml";
 
 std::vector<std::string> ReadList(const YAML::Node& node) {

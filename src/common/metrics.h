@@ -70,6 +70,7 @@ struct Metrics {
   Counter tarpits;
   Counter tarpit_overflow;
   Counter decoys;
+  Counter model_flags;
   Counter requests_blocked;
   Counter requests_would_block;
   Counter rules_matched;

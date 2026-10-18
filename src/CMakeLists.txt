@@ -31,6 +31,8 @@ add_library(bot_shield_core STATIC
   fp/http_request.cc
   fp/ja4.cc
   fp/tcp_syn.cc
+  model/features.cc
+  model/gbdt.cc
   net/classifier.cc
   net/proxy_protocol.cc
   net/socket_options.cc

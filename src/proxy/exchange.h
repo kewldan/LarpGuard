@@ -103,6 +103,9 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
   std::string behavior_client;
   // Token embedded in a decoy answer, to recognize the data later.
   std::string watermark;
+  // Model feature vector (empty: not logged) and probability (< 0: none).
+  std::vector<float> features;
+  double model_score = -1;
   std::string mode;
   int64_t started_ms = 0;
   uint64_t response_bytes = 0;

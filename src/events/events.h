@@ -82,6 +82,8 @@ struct RequestOutcome {
   std::string request_id;
   // Decoy watermark (action decoy).
   std::string watermark;
+  std::vector<float> features;
+  double model_score = -1;
 };
 
 std::string RequestEventJson(const ConnectionRecord& record,

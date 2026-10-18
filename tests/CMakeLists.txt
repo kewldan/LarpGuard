@@ -14,6 +14,7 @@ add_executable(bot_shield_tests
   host_test.cc
   http_tap_test.cc
   ja4_test.cc
+  model_test.cc
   nats_publisher_test.cc
   prefixed_stream_test.cc
   proxy_protocol_test.cc

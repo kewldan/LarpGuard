@@ -124,6 +124,13 @@ struct Config {
   // Action "decoy": templates with {{watermark}}; empty: built-in ones.
   std::string decoy_html;
   std::string decoy_json;
+  // Model signal ("model" section): gradient-boosted trees from
+  // tools/train_model.py; "" = no model. Above `model_threshold` the
+  // request gets signal "model". `model_log_features` puts the feature
+  // vector in req events (training data), with or without a model.
+  std::string model_file;
+  double model_threshold = 0.8;
+  bool model_log_features = true;
   // JS challenge ("challenge" section). Keys file: see TokenKeys::Load; empty
   // means a random key per start (tokens do not survive restarts).
   std::string challenge_keys_file;

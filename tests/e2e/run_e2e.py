@@ -440,6 +440,11 @@ def main():
     lists_file = os.path.join(workdir, "lists.json")
     config_path = os.path.join(workdir, "bot-shield.yaml")
     keys_path = os.path.join(workdir, "keys.json")
+    model_path = os.path.join(workdir, "model.json")
+    fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                           "data", "gbdt_fixture.json")
+    with open(fixture) as f, open(model_path, "w") as out:
+        json.dump(json.load(f)["model"], out)
     with open(keys_path, "w") as f:
         json.dump({"active": "k1", "keys": {
             "k1": base64.b64encode(os.urandom(32)).decode()}}, f)
@@ -499,6 +504,9 @@ crawlers:
 honeypot:
   paths: ["/.env", "/trap/*"]
   ttl: 1s
+model:
+  file: {model_path}
+  threshold: 0.99
 tarpit:
   duration: 1s
   interval: 200ms
@@ -1114,6 +1122,12 @@ log_level: debug
         nats.find("e2e.events.conn",
                   lambda e: e["reason"] == "not_tls" and e["route"] == "reject")
 
+    def events_model_features():
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/tagged")
+        expect(len(event["features"]) == 40, event.get("features"))
+        expect(0 <= event["model_score"] <= 1, event.get("model_score"))
+
     def events_keep_secrets():
         for payload in nats.payloads():
             expect("secret" not in payload, payload)
@@ -1283,6 +1297,7 @@ log_level: debug
         ("events: local 502, plain HTTP, passthrough, reject",
          events_local_and_passthrough),
         ("events: no secrets or full IPs", events_keep_secrets),
+        ("events: model features and score", events_model_features),
         ("metrics", metrics_exposed),
     ]:
         checks.run(name, fn)

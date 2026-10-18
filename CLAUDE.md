@@ -100,6 +100,10 @@ ninja-build git python3 openssl`, исходники монтировать read
 - `src/behavior/` — `BehaviorStore`: поведение клиентов в окне и метки
   honeypot, общее для воркеров (шардированное, ограниченное). Новый сигнал —
   в `OnRequest` + вес в `deploy/fingerprints.yaml` и `src/fp/library.cc`.
+- `src/model/` — признаки (`features.h`, набор `kFeatureSetVersion`) и
+  `GbdtModel`. Новый или изменённый признак — новая версия набора, правка
+  `FEATURE_NAMES` в `tools/train_model.py` и пересоздание
+  `tests/data/gbdt_fixture.json` (`train_model.py --fixture`).
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в

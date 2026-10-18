@@ -366,6 +366,7 @@ bool Gateway::Start(std::string* error) {
   shared.challenger = services_.challenger;
   shared.crawler_verifier = services_.crawler_verifier;
   shared.behavior = services_.behavior;
+  shared.model = services_.model;
   shared.ai_crawler_action = config_.crawlers_ai;
   shared.rate_limits = &rate_limits_;
   shared.rate_limit_store = &rate_limit_store_;

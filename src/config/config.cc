@@ -391,6 +391,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "honeypot",
                   "tarpit",
                   "decoy",
+                  "model",
                   "fingerprints",
                   "metrics",
                   "log_level"},
@@ -591,6 +592,25 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
           "tarpit: expected 10ms <= interval <= duration <= 10m and "
           "1 <= chunk <= 65536";
       return false;
+    }
+  }
+  if (const YAML::Node model = root["model"]) {
+    if (!CheckKeys(model, "model", {"file", "threshold", "log_features"},
+                   error)) {
+      return false;
+    }
+    if (model["file"] && !model["file"].IsNull()) {
+      config->model_file = model["file"].as<std::string>();
+    }
+    if (model["threshold"]) {
+      config->model_threshold = model["threshold"].as<double>();
+      if (config->model_threshold <= 0 || config->model_threshold >= 1) {
+        *error = "model.threshold: expected 0 < threshold < 1";
+        return false;
+      }
+    }
+    if (model["log_features"]) {
+      config->model_log_features = model["log_features"].as<bool>();
     }
   }
   if (const YAML::Node decoy = root["decoy"]) {

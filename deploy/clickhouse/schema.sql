@@ -122,7 +122,9 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     would_action       String,
     rate_limit         String,
     request_id         String,
-    watermark          String
+    watermark          String,
+    features           Array(Float32),
+    model_score        Nullable(Float32)
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -182,7 +184,11 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     -- Also sent to Traefik as X-Bot-Request-Id; see GET /decisions/<id>.
     request_id         String,
     -- Token in a decoy answer (action decoy): search leaked data for it.
-    watermark          String
+    watermark          String,
+    -- Model feature vector (src/model/features.h; training data for
+    -- tools/train_model.py) and the model's probability (NULL: no model).
+    features           Array(Float32),
+    model_score        Nullable(Float32)
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)
@@ -193,6 +199,8 @@ TTL toDateTime(ts) + INTERVAL 14 DAY;
 -- table cannot be altered: for new queue columns drop bot_shield.req_mv and
 -- bot_shield.req_queue and run this file again.
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS watermark String;
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS features Array(Float32);
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS model_score Nullable(Float32);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS bot_shield.req_mv TO bot_shield.req AS
 SELECT fromUnixTimestamp64Milli(toInt64(ts_ms), 'UTC') AS ts, * EXCEPT ts_ms

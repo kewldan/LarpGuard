@@ -16,6 +16,7 @@
 #include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
+#include "model/gbdt.h"
 #include "net/classifier.h"
 #include "proxy/proxy_hooks.h"
 #include "proxy/upstream_pool.h"
@@ -54,6 +55,8 @@ struct GatewayContext {
   CrawlerVerifier* crawler_verifier = nullptr;
   // Behaviour signals and honeypot marks; null when disabled.
   BehaviorStore* behavior = nullptr;
+  // Model signal; null without a model file.
+  const GbdtModel* model = nullptr;
   // Action for AI crawlers (crawlers.ai); unset: scored like anyone.
   std::optional<Action> ai_crawler_action;
   // JS challenge and clearance tokens; null when not configured.

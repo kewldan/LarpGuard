@@ -163,6 +163,9 @@ std::string Metrics::RenderPrometheus() const {
   AppendHeader(&out, "bot_shield_decoys_total", "counter",
                "Decoy answers with watermarked fake data.");
   AppendSample(&out, "bot_shield_decoys_total", "", decoys.Get());
+  AppendHeader(&out, "bot_shield_model_flags_total", "counter",
+               "Requests the model scored above model.threshold.");
+  AppendSample(&out, "bot_shield_model_flags_total", "", model_flags.Get());
 
   AppendHeader(&out, "bot_shield_blocks_total", "counter",
                "Requests blocked, and blocks shadow mode held back.");
