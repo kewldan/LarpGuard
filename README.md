@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛡️ bot-shield
+# 🛡️ LarpGuard
 
 **A self-hosted bot-filtering gateway that sits in front of Traefik.**
 
@@ -34,7 +34,7 @@ checks that against what the client says it is.
 
 A scraper can copy Chrome's `User-Agent` string in one line of code.
 Copying Chrome's TLS ClientHello, HTTP/2 settings frame, header order and
-TCP SYN all at once is much harder. bot-shield fingerprints every layer of
+TCP SYN all at once is much harder. LarpGuard fingerprints every layer of
 the connection and asks one question: **does this stack match the browser
 it claims to be?**
 
@@ -82,7 +82,7 @@ over ports 443/80, and Traefik moves to loopback behind it.
   never applied.
 - 🧯 **Fail-open.** Workers send heartbeats, systemd runs a watchdog, and
   nftables redirects traffic straight to Traefik if the gateway dies. Adding
-  bot-shield should never take your sites down.
+  LarpGuard should never take your sites down.
 - 📊 **Analytics.** Connection and request events go to NATS and then
   ClickHouse. They never contain full IPs, query strings or cookie values.
   Anomaly clusters suggest new library entries.
@@ -90,7 +90,7 @@ over ports 443/80, and Traefik moves to loopback behind it.
 ## 🏗️ How it fits
 
 ```text
-                    ┌──────────────────────── bot-shield ────────────────────────┐
+                    ┌──────────────────────── LarpGuard ─────────────────────────┐
  client ── :443 ──▶ │ ClientHello ─▶ terminate ─▶ fingerprints ─▶ score ─▶ rules │ ──▶ Traefik :8443 ──▶ apps
   (TCP / QUIC)      │      │                                          │          │     (HTTP/2 pool,
                     │      └─▶ passthrough (unknown SNI, acme-tls/1)  ▼          │      X-Forwarded-For,
@@ -114,6 +114,9 @@ over ports 443/80, and Traefik moves to loopback behind it.
 first configure. Pinned dependencies are fetched automatically: BoringSSL,
 Asio, nghttp2, ngtcp2, nghttp3, llhttp, yaml-cpp, nlohmann/json and
 GoogleTest.
+
+The binaries, config file and labels still use the working name
+`bot-shield` (`bot-shield`, `bot-shield-watchdog`, `botshield.*`).
 
 ```bash
 cmake -S . -B build -G Ninja
@@ -142,7 +145,7 @@ Everything you need is in [`deploy/`](deploy):
 |------|------------|
 | `bot-shield.yaml` | Gateway config with every key and its default |
 | `traefik.yml` | The only Traefik change: entrypoints move to `:8443`/`:8080` and trust PROXY v2 and `X-Forwarded-*` from the gateway |
-| `docker-compose.yml` | Traefik, bot-shield and the watchdog in host network, plus optional NATS and ClickHouse |
+| `docker-compose.yml` | Traefik, LarpGuard and the watchdog in host network, plus optional NATS and ClickHouse |
 | `failopen/` | nftables table that closes `:8443`/`:8080` from outside (load it at boot), and the fail-open redirect rules |
 | `systemd/` | Units for the gateway (`Type=notify`, `WatchdogSec`) and the watchdog |
 | `clickhouse/schema.sql` | Event tables, aggregates and cluster views |
@@ -150,7 +153,7 @@ Everything you need is in [`deploy/`](deploy):
 
 > [!IMPORTANT]
 > Keep HTTP/3 **off in Traefik**, or QUIC traffic will bypass the gateway.
-> Let bot-shield accept it instead: set `http3.enabled: true`.
+> Let LarpGuard accept it instead: set `http3.enabled: true`.
 
 > [!TIP]
 > Start with `mode: shadow`. Watch `X-Bot-Score`, `X-Bot-Class` and
