@@ -50,6 +50,10 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_connections_rejected_total",
                R"(reason="not_tls")", rejected_not_tls.Get());
   AppendSample(&out, "bot_shield_connections_rejected_total",
+               R"(reason="open_per_ip")", rejected_ip_connections.Get());
+  AppendSample(&out, "bot_shield_connections_rejected_total",
+               R"(reason="new_per_ip")", rejected_ip_connection_rate.Get());
+  AppendSample(&out, "bot_shield_connections_rejected_total",
                R"(reason="invalid_client_hello")",
                rejected_invalid_hello.Get());
   AppendSample(&out, "bot_shield_connections_rejected_total",
@@ -115,6 +119,13 @@ std::string Metrics::RenderPrometheus() const {
                requests_blocked.Get());
   AppendSample(&out, "bot_shield_blocks_total", R"(mode="shadow")",
                requests_would_block.Get());
+
+  AppendHeader(&out, "bot_shield_rate_limited_total", "counter",
+               "Requests over a rate limit (shadow: let through).");
+  AppendSample(&out, "bot_shield_rate_limited_total", R"(mode="enforce")",
+               rate_limited.Get());
+  AppendSample(&out, "bot_shield_rate_limited_total", R"(mode="shadow")",
+               rate_limited_shadow.Get());
 
   AppendHeader(&out, "bot_shield_rules_matched_total", "counter",
                "Rule matches (score, allow and block rules).");

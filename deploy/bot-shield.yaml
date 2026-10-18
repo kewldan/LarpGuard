@@ -95,6 +95,34 @@ rules: []
 #    action: score
 #    score: -40
 
+# Request rate limits (GCRA). Every matching limit counts the request; over
+# a limit the answer is 429 with Retry-After on enforced hosts (shadow hosts
+# only record it). Filters: hosts, paths (globs), methods, classes. Key parts:
+# ip, ip_prefix, ja4, fp, host, header:<name>, cookie:<name>; a request
+# missing a part is not limited by that rule. burst defaults to the count.
+rate_limits: []
+#  - name: login
+#    paths: [/login]
+#    methods: [POST]
+#    key: [ip]
+#    rate: 5/m
+#  - name: bots
+#    classes: [bot]
+#    key: [ip_prefix]
+#    rate: 30/m
+#  - name: api
+#    paths: ["/api/*"]
+#    key: ["header:x-api-key"]
+#    rate: 100/s
+#    burst: 200
+
+# Per-IP limits checked right after accept, before TLS. 0 / "" = off; mind
+# clients sharing one address behind NAT.
+connection_limits:
+  open_per_ip: 0
+  new_per_ip: ""
+  new_burst_per_ip: 1
+
 fingerprints:
   # Fingerprint library; "" = built in (same as deploy/fingerprints.yaml).
   library: ""

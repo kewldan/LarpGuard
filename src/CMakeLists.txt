@@ -26,6 +26,9 @@ add_library(bot_shield_core STATIC
   proxy/h2_upstream.cc
   proxy/http_message.cc
   proxy/upstream_pool.cc
+  ratelimit/gcra.cc
+  ratelimit/limits.cc
+  ratelimit/store.cc
   score/policy.cc
   score/rules.cc
   score/scorer.cc

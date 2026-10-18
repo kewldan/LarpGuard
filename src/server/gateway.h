@@ -17,6 +17,8 @@
 #include "fp/library.h"
 #include "net/classifier.h"
 #include "proxy/upstream_pool.h"
+#include "ratelimit/limits.h"
+#include "ratelimit/store.h"
 #include "score/policy.h"
 #include "score/rules.h"
 #include "score/scorer.h"
@@ -90,6 +92,9 @@ class Gateway {
   Scorer scorer_;
   Policy policy_;
   RuleSet rules_;
+  RateLimitSet rate_limits_;
+  RateLimitStore rate_limit_store_;
+  ConnectionCounter connection_counter_;
   std::vector<std::unique_ptr<Worker>> workers_;
 };
 

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "common/log.h"
+#include "ratelimit/limits.h"
 #include "score/policy.h"
 #include "score/rules.h"
 
@@ -77,6 +78,14 @@ struct Config {
   PolicySettings policy;
   // Ordered rules on top of the score ("rules" section).
   std::vector<RuleSpec> rules;
+  // Request rate limits ("rate_limits" section).
+  std::vector<RateLimitSpec> rate_limits;
+  // Per-IP limits applied when a connection is accepted, before TLS
+  // ("connection_limits"); 0 disables each.
+  std::size_t open_connections_per_ip = 0;
+  int64_t new_connections_per_ip = 0;
+  std::chrono::milliseconds new_connections_period{1000};
+  int64_t new_connections_burst = 1;
   // Fingerprint library file; empty means the built-in one.
   std::string fingerprint_library;
 

@@ -199,6 +199,44 @@ rules:
   EXPECT_FALSE(ParseConfig("rules: {a: 1}\n", &config, &error));
 }
 
+TEST(ConfigTest, ParsesRateAndConnectionLimits) {
+  const char* yaml = R"(
+rate_limits:
+  - name: login
+    paths: [/login]
+    methods: POST
+    key: [ip]
+    rate: 5/m
+  - name: api
+    key: ["header:x-api-key"]
+    rate: 100/s
+    burst: 20
+connection_limits:
+  open_per_ip: 64
+  new_per_ip: 30/s
+  new_burst_per_ip: 60
+)";
+  Config config;
+  std::string error;
+  ASSERT_TRUE(ParseConfig(yaml, &config, &error)) << error;
+  ASSERT_EQ(config.rate_limits.size(), 2u);
+  EXPECT_EQ(config.rate_limits[0].methods, std::vector<std::string>{"POST"});
+  EXPECT_EQ(config.rate_limits[0].burst, 5);  // Defaults to the count.
+  EXPECT_EQ(config.rate_limits[1].burst, 20);
+  EXPECT_EQ(config.open_connections_per_ip, 64u);
+  EXPECT_EQ(config.new_connections_per_ip, 30);
+  EXPECT_EQ(config.new_connections_burst, 60);
+
+  EXPECT_FALSE(
+      ParseConfig("rate_limits: [{name: a, key: [ip]}]\n", &config, &error));
+  EXPECT_FALSE(ParseConfig("rate_limits: [{name: a, key: [mac], rate: 1/s}]\n",
+                           &config, &error));
+  EXPECT_FALSE(
+      ParseConfig("connection_limits: {new_per_ip: fast}\n", &config, &error));
+  EXPECT_FALSE(
+      ParseConfig("connection_limits: {open_per_ip: -1}\n", &config, &error));
+}
+
 TEST(ConfigTest, RejectsUnknownKeys) {
   Config config;
   std::string error;

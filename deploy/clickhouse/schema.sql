@@ -119,7 +119,8 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     class              String,
     reasons            Array(String),
     action             String,
-    would_action       String
+    would_action       String,
+    rate_limit         String
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -173,7 +174,9 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     class              LowCardinality(String),
     reasons            Array(LowCardinality(String)),
     action             LowCardinality(String),
-    would_action       LowCardinality(String)
+    would_action       LowCardinality(String),
+    -- Rate limit that refused the request (action/would_action rate_limit).
+    rate_limit         LowCardinality(String)
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)

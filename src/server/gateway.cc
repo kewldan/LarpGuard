@@ -8,6 +8,7 @@
 #include <asio/use_awaitable.hpp>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <exception>
 #include <format>
 #include <memory>
@@ -25,6 +26,9 @@
 #include "fp/library.h"
 #include "net/socket_options.h"
 #include "proxy/upstream_pool.h"
+#include "ratelimit/gcra.h"
+#include "ratelimit/limits.h"
+#include "ratelimit/store.h"
 #include "score/rules.h"
 #include "server/connection.h"
 #include "server/metrics_server.h"
@@ -74,6 +78,72 @@ bool OpenAcceptor(tcp::acceptor* acceptor, const tcp::endpoint& endpoint,
   return true;
 }
 
+// Client IP as a key (IPv4-mapped addresses unmapped).
+std::string ClientIp(const tcp::socket& socket) {
+  std::error_code ec;
+  asio::ip::address address = socket.remote_endpoint(ec).address();
+  if (address.is_v6() && address.to_v6().is_v4_mapped()) {
+    address = asio::ip::make_address_v4(asio::ip::v4_mapped, address.to_v6());
+  }
+  return address.to_string();
+}
+
+// Per-IP limits before any TLS work: rate of new connections and number of
+// open ones. On success `ip` is set when an open-connection slot was taken.
+bool AdmitConnection(const tcp::socket& socket, const GatewayContext& context,
+                     std::string* ip) {
+  const Config& config = *context.config;
+  if (config.new_connections_per_ip <= 0 &&
+      config.open_connections_per_ip == 0) {
+    return true;
+  }
+  const std::string address = ClientIp(socket);
+  Metrics& metrics = GlobalMetrics();
+  if (config.new_connections_per_ip > 0) {
+    const GcraParams params = GcraParams::FromRate(
+        config.new_connections_per_ip,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            config.new_connections_period)
+            .count(),
+        config.new_connections_burst);
+    const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
+    if (!context.rate_limit_store->Check("conn\x1f" + address, params, now)
+             .allowed) {
+      metrics.rejected_ip_connection_rate.Inc();
+      return false;
+    }
+  }
+  if (config.open_connections_per_ip > 0) {
+    if (!context.connection_counter->Acquire(address,
+                                             config.open_connections_per_ip)) {
+      metrics.rejected_ip_connections.Inc();
+      return false;
+    }
+    *ip = address;
+  }
+  return true;
+}
+
+// Runs a connection handler and releases its per-IP slot afterwards.
+asio::awaitable<void> ServeConnection(tcp::socket socket, bool https,
+                                      std::string ip,
+                                      const GatewayContext& context) {
+  struct Slot {
+    ConnectionCounter* counter;
+    std::string ip;
+    ~Slot() {
+      if (!ip.empty()) counter->Release(ip);
+    }
+  } slot{context.connection_counter, std::move(ip)};
+  if (https) {
+    co_await HandleHttpsConnection(std::move(socket), context);
+  } else {
+    co_await HandleHttpConnection(std::move(socket), context);
+  }
+}
+
 asio::awaitable<void> AcceptLoop(tcp::acceptor& acceptor, bool https,
                                  const GatewayContext& context) {
   constexpr auto kUse = asio::as_tuple(asio::use_awaitable);
@@ -96,14 +166,12 @@ asio::awaitable<void> AcceptLoop(tcp::acceptor& acceptor, bool https,
       metrics.rejected_connection_limit.Inc();
       continue;  // `socket` closes here.
     }
-    if (https) {
-      asio::co_spawn(executor,
-                     HandleHttpsConnection(std::move(socket), context),
-                     LogUnhandled);
-    } else {
-      asio::co_spawn(executor, HandleHttpConnection(std::move(socket), context),
-                     LogUnhandled);
-    }
+    std::string ip;
+    if (!AdmitConnection(socket, context, &ip)) continue;
+    asio::co_spawn(
+        executor,
+        ServeConnection(std::move(socket), https, std::move(ip), context),
+        LogUnhandled);
   }
 }
 
@@ -243,7 +311,10 @@ Gateway::~Gateway() {
 }
 
 bool Gateway::Start(std::string* error) {
-  if (!RuleSet::Compile(config_.rules, &rules_, error)) return false;
+  if (!RuleSet::Compile(config_.rules, &rules_, error) ||
+      !RateLimitSet::Compile(config_.rate_limits, &rate_limits_, error)) {
+    return false;
+  }
   GatewayContext shared;
   shared.config = &config_;
   shared.certificates = certificates_;
@@ -251,6 +322,9 @@ bool Gateway::Start(std::string* error) {
   shared.scorer = &scorer_;
   shared.policy = &policy_;
   shared.rules = &rules_;
+  shared.rate_limits = &rate_limits_;
+  shared.rate_limit_store = &rate_limit_store_;
+  shared.connection_counter = &connection_counter_;
   shared.events = events_;
   shared.event_settings = event_settings_;
   if (!ResolveEndpoint(config_.upstream_https, &shared.upstream_https, error) ||

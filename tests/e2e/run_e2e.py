@@ -289,6 +289,15 @@ rules:
   - name: admin
     when: 'path ~ "/admin*"'
     action: block
+rate_limits:
+  - name: limited-path
+    paths: ["/limited*"]
+    key: [ip, host]
+    rate: 3/m
+  - name: api-keys
+    paths: ["/api/*"]
+    key: ["header:x-api-key"]
+    rate: 2/m
 timeouts:
   client_hello: 1s
 events:
@@ -474,6 +483,42 @@ log_level: debug
         status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
         expect(status == 403, status)
 
+    def rate_limits():
+        statuses = [h1_get(https_port, "www.a.test", ca_a, "/limited")
+                    for _ in range(4)]
+        expect([s for s, _, _ in statuses] == [200, 200, 200, 429],
+               [s for s, _, _ in statuses])
+        _, headers, _ = statuses[3]
+        expect(int(headers["retry-after"]) >= 1, headers)
+        expect(headers["ratelimit-policy"] == '"limited-path";q=3;w=60',
+               headers)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/limited" and
+                          e.get("status") == 429)
+        expect(event["action"] == "rate_limit" and event["local"], event)
+        expect(event["rate_limit"] == "limited-path", event)
+        # The monitoring allow rule bypasses the limit.
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/limited",
+                              b"X-Monitor: e2e-token\r\n")
+        expect(status == 200, status)
+        # Shadow host: never refused, only recorded.
+        for _ in range(5):
+            status, _, _ = h1_get(https_port, "a.test", ca_a, "/limited-shadow")
+            expect(status == 200, status)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/limited-shadow" and
+                          e.get("would_action") == "rate_limit")
+        expect(event["action"] == "allow", event)
+        # Per API key; requests without a key are not limited.
+        for key, expected in [(b"k1", 200), (b"k1", 200), (b"k1", 429),
+                              (b"k2", 200)]:
+            status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/api/x",
+                                  b"X-Api-Key: " + key + b"\r\n")
+            expect(status == expected, (key, status, expected))
+        for _ in range(4):
+            status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/api/x")
+            expect(status == 200, status)
+
     # --- Proxy over HTTP/2 (curl) -------------------------------------------
 
     def h2_requests():
@@ -654,6 +699,10 @@ log_level: debug
         expect(values['bot_shield_blocks_total{mode="shadow"}'] >= 1,
                "shadow blocks")
         expect(values["bot_shield_rules_matched_total"] >= 3, "rule matches")
+        expect(values['bot_shield_rate_limited_total{mode="enforce"}'] >= 2,
+               "rate limited")
+        expect(values['bot_shield_rate_limited_total{mode="shadow"}'] >= 2,
+               "rate limited in shadow")
         expect(values['bot_shield_connections_rejected_total'
                       '{reason="client_hello_timeout"}'] >= 1, "timeout count")
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
@@ -673,6 +722,7 @@ log_level: debug
         ("verdict: enforce host blocks spoofed browser",
          enforce_blocks_spoofed_browser),
         ("rules: allow and block override verdicts", rules_override_verdicts),
+        ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("wildcard certificate", wildcard_certificate),
         ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),
@@ -700,6 +750,46 @@ log_level: debug
         expect(elapsed < 5, f"shutdown took {elapsed:.1f}s")
 
     checks.run("graceful shutdown (pool drained)", graceful_shutdown)
+
+    def connection_limits():
+        port = free_port()
+        # Its own acme.json: the shared one was deliberately broken above.
+        limited_acme = os.path.join(workdir, "limited-acme.json")
+        write_atomic(limited_acme, acme_json([(*gw_a, "a.test")]))
+        limited_config = os.path.join(workdir, "limited.yaml")
+        with open(limited_config, "w") as f:
+            f.write(f"""
+listen:
+  https: 127.0.0.1:{port}
+  http: ""
+traefik:
+  acme_json: {limited_acme}
+  upstream_https: 127.0.0.1:{tls_port}
+connection_limits:
+  new_per_ip: 3/m
+  new_burst_per_ip: 3
+metrics:
+  listen: ""
+""")
+        limited = subprocess.Popen([binary, "--config", limited_config],
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        try:
+            wait_port(port)  # Uses one connection of the burst.
+            for _ in range(2):
+                status, _, _ = h1_get(port, "a.test", ca_a, "/")
+                expect(status == 200, status)
+            # The fourth connection from this IP is closed before TLS.
+            try:
+                h1_get(port, "a.test", ca_a, "/")
+                raise AssertionError("connection over the limit was served")
+            except (ssl.SSLError, ConnectionError, OSError):
+                pass
+        finally:
+            limited.send_signal(signal.SIGTERM)
+            limited.wait(timeout=10)
+
+    checks.run("connection limits: new connections per IP", connection_limits)
     if process.poll() is None:
         process.kill()
     upstream_process.kill()

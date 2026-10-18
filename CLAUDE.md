@@ -10,7 +10,7 @@ Self-hosted шлюз фильтрации ботов перед Traefik. Осн�
 TCP/JA4/HTTP2/заголовков, события в NATS → ClickHouse). Следующий этап — M2:
 HTTP-aware прокси (ADR-015), вердикты (библиотека отпечатков, скоринг,
 shadow/enforce, `X-Bot-*`) и правила на своём языке (ADR-008) сделаны.
-Следующий этап — M3: rate limiting, docker-лейблы, admin API.
+M3: rate limiting сделан (`src/ratelimit/`), дальше docker-лейблы и admin API.
 
 ## Команды
 
@@ -76,6 +76,10 @@ ninja-build git python3 openssl`, исходники монтировать read
   встроена в `src/fp/library.cc` и должна совпадать с файлом (тест
   `LibraryTest.BuiltInMatchesDeployFile`). Значения отпечатков в библиотеку —
   только проверяемые (пересчитанные или из спецификаций), не по памяти.
+- `src/ratelimit/` — GCRA (`gcra`), общее для всех воркеров шардированное
+  хранилище (`store`: состояние не делить по воркерам — лимит умножится),
+  описание лимитов и ключей (`limits`). Лимиты проверяются после вердикта
+  в `ConnectionObserver::CheckRateLimits`, лимиты соединений — в `accept`.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в

@@ -11,6 +11,7 @@ add_executable(bot_shield_tests
   prefixed_stream_test.cc
   proxy_protocol_test.cc
   proxy_test.cc
+  ratelimit_test.cc
   rules_test.cc
   scoring_test.cc
   tcp_syn_test.cc

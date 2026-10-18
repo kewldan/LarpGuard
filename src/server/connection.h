@@ -12,6 +12,8 @@
 #include "net/classifier.h"
 #include "proxy/proxy_hooks.h"
 #include "proxy/upstream_pool.h"
+#include "ratelimit/limits.h"
+#include "ratelimit/store.h"
 #include "score/policy.h"
 #include "score/rules.h"
 #include "score/scorer.h"
@@ -36,6 +38,11 @@ struct GatewayContext {
   const Scorer* scorer = nullptr;
   const Policy* policy = nullptr;
   const RuleSet* rules = nullptr;
+  // Request rate limits and their shared state (all workers).
+  const RateLimitSet* rate_limits = nullptr;
+  RateLimitStore* rate_limit_store = nullptr;
+  // Per-IP connection limits at accept time (shared).
+  ConnectionCounter* connection_counter = nullptr;
   // Analytics events; null when disabled.
   EventSink* events = nullptr;
   const EventSettings* event_settings = nullptr;

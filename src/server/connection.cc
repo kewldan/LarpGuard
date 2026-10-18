@@ -13,6 +13,7 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/write.hpp>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -49,6 +50,7 @@
 #include "proxy/http_message.h"
 #include "proxy/proxy_hooks.h"
 #include "proxy/transport.h"
+#include "ratelimit/limits.h"
 #include "score/policy.h"
 #include "score/rules.h"
 #include "score/scorer.h"
@@ -100,6 +102,12 @@ class ActiveConnection {
 };
 
 // Host part of an authority, normalized ("Shop.Test:443" -> "shop.test").
+int64_t SteadyNanos() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
 std::string HostOnly(std::string_view authority) {
   if (authority.starts_with('[')) {
     return NormalizeHost(authority.substr(0, authority.find(']') + 1));
@@ -250,9 +258,59 @@ class ConnectionObserver {
       metrics.requests_blocked.Inc();
       exchange.RespondLocally(context_.policy->block_status(),
                               "request blocked\n");
-    } else if (decision.would_action == Action::kBlock) {
+      return;
+    }
+    if (decision.would_action == Action::kBlock) {
       metrics.requests_would_block.Inc();
     }
+    // An allow rule (monitoring, partners) also bypasses rate limits.
+    if (override_action != Action::kAllow) {
+      CheckRateLimits(exchange, verdict, host, decision);
+    }
+  }
+
+  // Counts the request against the matching rate limits. Over a limit:
+  // 429 when the host is enforced, otherwise only recorded.
+  void CheckRateLimits(Exchange& exchange, const Verdict& verdict,
+                       std::string_view host,
+                       const PolicyDecision& decision) const {
+    if (context_.rate_limits == nullptr || context_.rate_limits->empty()) {
+      return;
+    }
+    const std::string_view path_and_query = exchange.request.path;
+    RateLimitRequest request;
+    request.request = &exchange.observed;
+    request.ip = record_.peer;
+    request.host = host;
+    request.path = path_and_query.substr(0, path_and_query.find('?'));
+    request.method = exchange.request.method;
+    request.bot_class = BotClassName(verdict.bot_class);
+    request.ja4 = record_.ja4;
+    request.h2_fingerprint = exchange.h2_fingerprint;
+    const std::optional<RateLimitHit> hit = context_.rate_limits->Check(
+        request, context_.rate_limit_store, SteadyNanos());
+    if (!hit) return;
+
+    exchange.rate_limit = hit->name;
+    Metrics& metrics = GlobalMetrics();
+    if (!decision.enforce) {
+      metrics.rate_limited_shadow.Inc();
+      if (decision.would_action == Action::kAllow) {
+        exchange.would_action = "rate_limit";
+      }
+      return;
+    }
+    metrics.rate_limited.Inc();
+    exchange.action = "rate_limit";
+    exchange.would_action = "rate_limit";
+    const int64_t retry_after = RetryAfterSeconds(hit->result.retry_after_ns);
+    exchange.RespondLocally(
+        429, "too many requests\n",
+        {{"retry-after", std::to_string(retry_after)},
+         {"ratelimit-policy", std::format(R"("{}";q={};w={})", hit->name,
+                                          hit->burst, hit->window_seconds)},
+         {"ratelimit",
+          std::format(R"("{}";r=0;t={})", hit->name, retry_after)}});
   }
 
   // Score rules adjust the verdict, then the first allow/block rule may
@@ -320,6 +378,7 @@ class ConnectionObserver {
     outcome.reasons = exchange.reasons;
     outcome.action = exchange.action;
     outcome.would_action = exchange.would_action;
+    outcome.rate_limit = exchange.rate_limit;
     try {
       context_.events->Publish(
           "req",

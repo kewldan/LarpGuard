@@ -54,6 +54,10 @@ struct Metrics {
   Counter requests_blocked;
   Counter requests_would_block;
   Counter rules_matched;
+  Counter rate_limited;
+  Counter rate_limited_shadow;
+  Counter rejected_ip_connections;
+  Counter rejected_ip_connection_rate;
   Counter alpn_mismatches;
   Counter idle_timeouts;
   Counter bytes_client_to_upstream;

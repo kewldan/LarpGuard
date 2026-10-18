@@ -16,9 +16,11 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "common/host.h"
 #include "common/log.h"
+#include "ratelimit/limits.h"
 #include "score/policy.h"
 #include "score/rules.h"
 
@@ -294,11 +296,57 @@ bool ParsePolicy(const YAML::Node& node, Config* config, std::string* error) {
   return true;
 }
 
+std::vector<std::string> ReadStrings(const YAML::Node& node) {
+  std::vector<std::string> out;
+  if (!node) return out;
+  if (node.IsScalar()) {
+    out.push_back(node.as<std::string>());
+    return out;
+  }
+  for (const auto& item : node) out.push_back(item.as<std::string>());
+  return out;
+}
+
+bool ParseRateLimits(const YAML::Node& node, Config* config,
+                     std::string* error) {
+  if (!node.IsSequence()) {
+    *error = "rate_limits: expected a list";
+    return false;
+  }
+  config->rate_limits.clear();
+  for (const auto& item : node) {
+    if (!CheckKeys(item, "rate_limits[]",
+                   {"name", "hosts", "paths", "methods", "classes", "key",
+                    "rate", "burst"},
+                   error)) {
+      return false;
+    }
+    RateLimitSpec spec;
+    if (item["name"]) spec.name = item["name"].as<std::string>();
+    spec.hosts = ReadStrings(item["hosts"]);
+    spec.paths = ReadStrings(item["paths"]);
+    spec.methods = ReadStrings(item["methods"]);
+    spec.classes = ReadStrings(item["classes"]);
+    spec.key = ReadStrings(item["key"]);
+    if (!item["rate"] ||
+        !ParseRate(item["rate"].as<std::string>(), &spec.count, &spec.period)) {
+      *error =
+          std::format("rate_limits '{}': rate must be like 120/m", spec.name);
+      return false;
+    }
+    spec.burst = item["burst"] ? item["burst"].as<int64_t>() : spec.count;
+    config->rate_limits.push_back(std::move(spec));
+  }
+  RateLimitSet compiled;
+  return RateLimitSet::Compile(config->rate_limits, &compiled, error);
+}
+
 bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   if (!CheckKeys(root, "",
                  {"listen", "workers", "traefik", "passthrough_hosts",
                   "non_tls", "timeouts", "max_connections", "events", "mode",
-                  "policy", "rules", "fingerprints", "metrics", "log_level"},
+                  "policy", "rules", "rate_limits", "connection_limits",
+                  "fingerprints", "metrics", "log_level"},
                  error)) {
     return false;
   }
@@ -388,6 +436,40 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     if (!RuleSet::Compile(config->rules, &compiled, &rule_error)) {
       *error = "rules: " + rule_error;
       return false;
+    }
+  }
+  if (const YAML::Node limits = root["rate_limits"]) {
+    if (!ParseRateLimits(limits, config, error)) return false;
+  }
+  if (const YAML::Node limits = root["connection_limits"]) {
+    if (!CheckKeys(limits, "connection_limits",
+                   {"open_per_ip", "new_per_ip", "new_burst_per_ip"}, error)) {
+      return false;
+    }
+    if (limits["open_per_ip"]) {
+      const auto value = limits["open_per_ip"].as<int64_t>();
+      if (value < 0) {
+        *error = "connection_limits.open_per_ip: expected >= 0";
+        return false;
+      }
+      config->open_connections_per_ip = static_cast<std::size_t>(value);
+    }
+    if (limits["new_per_ip"]) {
+      const auto text = limits["new_per_ip"].as<std::string>();
+      if (text.empty()) {
+        config->new_connections_per_ip = 0;
+      } else if (!ParseRate(text, &config->new_connections_per_ip,
+                            &config->new_connections_period)) {
+        *error = "connection_limits.new_per_ip: expected a rate like 30/s";
+        return false;
+      }
+    }
+    if (limits["new_burst_per_ip"]) {
+      config->new_connections_burst = limits["new_burst_per_ip"].as<int64_t>();
+      if (config->new_connections_burst < 1) {
+        *error = "connection_limits.new_burst_per_ip: expected >= 1";
+        return false;
+      }
     }
   }
   if (const YAML::Node fingerprints = root["fingerprints"]) {

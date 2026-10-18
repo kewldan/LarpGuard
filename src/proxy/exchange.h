@@ -46,8 +46,10 @@ class Exchange {
   std::size_t ReadResponseBody(std::span<uint8_t> out);
   // The client stream or connection is gone: stop the upstream stream.
   void CancelFromClient();
-  // Answers without Traefik (errors, later block/challenge pages).
-  void RespondLocally(int status, std::string_view body);
+  // Answers without Traefik (errors, block pages, 429s); `extra_headers`
+  // are added to the generated response.
+  void RespondLocally(int status, std::string_view body,
+                      const HeaderList& extra_headers = {});
 
   // --- Called by the upstream side -----------------------------------------
   std::size_t ReadRequestBody(std::span<uint8_t> out);
@@ -84,6 +86,8 @@ class Exchange {
   std::vector<std::string> reasons;
   std::string action;
   std::string would_action;
+  // Rate limit that refused the request, if any.
+  std::string rate_limit;
   int64_t started_ms = 0;
   uint64_t response_bytes = 0;
 
