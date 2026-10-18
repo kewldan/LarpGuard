@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS bot_shield.conn_queue
     ja4_r        String,
     tcp_fp       String,
     ja4t         String,
-    h2_fp        String
+    h2_fp        String,
+    quic_fp      String
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -64,7 +65,9 @@ CREATE TABLE IF NOT EXISTS bot_shield.conn
     ja4_r        String,
     tcp_fp       LowCardinality(String),
     ja4t         LowCardinality(String),
-    h2_fp        LowCardinality(String)
+    h2_fp        LowCardinality(String),
+    -- QUIC transport parameter ids in client order (listener quic).
+    quic_fp      LowCardinality(String)
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)
@@ -198,6 +201,7 @@ TTL toDateTime(ts) + INTERVAL 14 DAY;
 -- Upgrades of existing installations (no-ops on new ones). The NATS queue
 -- table cannot be altered: for new queue columns drop bot_shield.req_mv and
 -- bot_shield.req_queue and run this file again.
+ALTER TABLE bot_shield.conn ADD COLUMN IF NOT EXISTS quic_fp LowCardinality(String);
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS watermark String;
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS features Array(Float32);
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS model_score Nullable(Float32);
