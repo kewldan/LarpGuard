@@ -27,9 +27,7 @@
 #include "proxy/proxy_hooks.h"
 #include "proxy/upstream_pool.h"
 #include "ratelimit/gcra.h"
-#include "ratelimit/limits.h"
 #include "ratelimit/store.h"
-#include "score/rules.h"
 #include "server/connection.h"
 #include "server/health.h"
 #include "server/metrics_server.h"
@@ -356,14 +354,11 @@ void Worker::Join() {
 }
 
 Gateway::Gateway(const Config& config, const CertStore* certificates,
-                 const GatewayServices& services)
+                 GatewayServices services)
     : config_(config),
       certificates_(certificates),
       classifier_(config.passthrough_hosts, config.non_tls, config.no_sni),
-      scorer_(services.library, config.policy.suspicious_threshold,
-              config.policy.bot_threshold),
-      policy_(config.policy),
-      services_(services),
+      services_(std::move(services)),
       attack_(config.attack_auto_rps,
               std::chrono::duration_cast<std::chrono::seconds>(
                   config.attack_auto_duration)
@@ -375,26 +370,21 @@ Gateway::~Gateway() {
 }
 
 bool Gateway::Start(std::string* error) {
-  if (!RuleSet::Compile(config_.rules, &rules_, error) ||
-      !RateLimitSet::Compile(config_.rate_limits, &rate_limits_, error)) {
+  if (services_.verdicts == nullptr || !services_.verdicts->snapshot()) {
+    *error = "no verdict set";
     return false;
   }
   GatewayContext shared;
   shared.config = &config_;
   shared.certificates = certificates_;
   shared.classifier = &classifier_;
-  shared.scorer = &scorer_;
-  shared.policy = &policy_;
-  shared.rules = &rules_;
+  shared.verdicts = services_.verdicts;
   shared.labels = services_.labels;
   shared.lists = services_.lists;
   shared.decisions = services_.decisions;
   shared.challenger = services_.challenger;
   shared.crawler_verifier = services_.crawler_verifier;
   shared.behavior = services_.behavior;
-  shared.model = services_.model;
-  shared.ai_crawler_action = config_.crawlers_ai;
-  shared.rate_limits = &rate_limits_;
   shared.rate_limit_store = &rate_limit_store_;
   shared.connection_counter = &connection_counter_;
   shared.pending_counter = &pending_counter_;
@@ -447,8 +437,8 @@ bool Gateway::Start(std::string* error) {
       admin_.lists = services_.lists;
       admin_.decisions = services_.decisions;
       admin_.rate_limit_store = &rate_limit_store_;
-      admin_.rate_limits = &rate_limits_;
-      admin_.policy = &policy_;
+      admin_.verdicts = services_.verdicts;
+      admin_.reload = services_.reload;
       admin_.attack = &attack_;
       admin_.started_ms =
           std::chrono::duration_cast<std::chrono::milliseconds>(

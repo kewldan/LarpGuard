@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -59,7 +60,14 @@ class Challenger {
 
   // A valid, unexpired __bs token bound to this client.
   bool HasValidToken(const HttpRequest& request, const ClientBinding& binding,
-                     int64_t now) const;
+                     int64_t now) const {
+    return SessionId(request, binding, now).has_value();
+  }
+  // For a valid token: an id of the clearance session (16 hex chars of its
+  // hash; rate limit key "session"). nullopt without a valid token.
+  std::optional<std::string> SessionId(const HttpRequest& request,
+                                       const ClientBinding& binding,
+                                       int64_t now) const;
 
   // The Cookie header without the gateway's own cookie ("" if nothing left).
   static std::string StripCookie(std::string_view cookie_header);

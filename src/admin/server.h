@@ -4,6 +4,7 @@
 #include <asio/awaitable.hpp>
 #include <asio/local/stream_protocol.hpp>
 #include <cstdint>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -13,9 +14,8 @@
 #include "admin/lists.h"
 #include "config/config.h"
 #include "docker/labels.h"
-#include "ratelimit/limits.h"
 #include "ratelimit/store.h"
-#include "score/policy.h"
+#include "server/verdicts.h"
 #include "tls/cert_store.h"
 
 namespace bot_shield {
@@ -28,8 +28,10 @@ struct AdminContext {
   ListStore* lists = nullptr;
   const DecisionLog* decisions = nullptr;
   const RateLimitStore* rate_limit_store = nullptr;
-  const RateLimitSet* rate_limits = nullptr;
-  const Policy* policy = nullptr;
+  // Policy, rules, limits and library; replaced on reload.
+  const VerdictStore* verdicts = nullptr;
+  // Re-reads the configuration (POST /reload); null: not available.
+  std::function<bool(std::string* summary)> reload;
   AttackMode* attack = nullptr;  // May be null.
   int64_t started_ms = 0;
   int workers = 0;
@@ -46,6 +48,7 @@ struct AdminResponse {
 //   GET    /lists            POST /lists        DELETE /lists/<id>
 //   GET    /decisions?limit=&host=&class=       GET /decisions/<request id>
 //   GET    /attack           POST /attack       DELETE /attack/<host>
+//   POST   /reload           (rules, limits, policy, library, model)
 AdminResponse HandleAdminRequest(std::string_view method,
                                  std::string_view target, std::string_view body,
                                  const AdminContext& context,

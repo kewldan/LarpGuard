@@ -54,6 +54,11 @@ User-Agent со стеком клиента (TLS, HTTP/2, TCP); в режиме 
   известная автоматизация, решённый челлендж) и вычисляемый в шлюзе.
 - HTTP/3 на входе (ngtcp2 + nghttp3): те же вердикты, что по TCP, JA4 для
   QUIC и отпечаток transport parameters, Retry против поддельных адресов.
+- Горячая перезагрузка библиотеки, политики, правил, лимитов и модели по
+  `SIGHUP` или `POST /reload`; битый конфиг не применяется.
+- Действие `throttle` (отдельный лимит), ключ лимита `session` (токен
+  челленджа), лейблы `botshield.ai_crawlers`, `botshield.challenge.paths`,
+  `botshield.honeypot.paths`.
 - Fail-open: heartbeat воркеров, systemd watchdog и `bot-shield-watchdog`,
   который при отказе шлюза направляет трафик прямо в Traefik.
 - События `conn` и `req` (со статусом, длительностью и вердиктом) в NATS без полных IP

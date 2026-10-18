@@ -21,11 +21,20 @@ namespace bot_shield {
 //   botshield.passthrough=true
 //   botshield.ratelimit.<name>=rate=20/s burst=40 key=ip path=/api/*
 //                              methods=POST classes=bot
+//   botshield.ai_crawlers=default|allow|challenge|block|tarpit|decoy|throttle
+//   botshield.challenge.paths=/checkout*,/login   (JS challenge there)
+//   botshield.honeypot.paths=/wp-admin/*          (traps on these hosts)
 struct LabelHostPolicy {
   std::string host;
   std::string container;
   std::optional<HostMode> mode;
   bool passthrough = false;
+  // botshield.ai_crawlers set: replaces crawlers.ai for these hosts
+  // (`ai_crawlers` nullopt then means "default", scored like anyone).
+  bool ai_crawlers_set = false;
+  std::optional<Action> ai_crawlers;
+  std::vector<std::string> challenge_paths;
+  std::vector<std::string> honeypot_paths;
 };
 
 class LabelPolicies {
@@ -39,6 +48,10 @@ class LabelPolicies {
   // Exact host first, then "*.parent" entries.
   std::optional<HostMode> ModeFor(std::string_view host) const;
   bool IsPassthrough(std::string_view host) const;
+  // The policy of `host` (exact, then "*.parent"), or null.
+  const LabelHostPolicy* PolicyFor(std::string_view host) const {
+    return Find(host);
+  }
   const RateLimitSet& rate_limits() const { return rate_limits_; }
 
   std::size_t host_count() const { return hosts_.size(); }

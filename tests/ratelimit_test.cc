@@ -202,6 +202,21 @@ TEST_F(RateLimitSetTest, KeysSeparateClientsAndSkipMissingParts) {
   for (int i = 0; i < 5; ++i) EXPECT_FALSE(Check(limits));
 }
 
+TEST_F(RateLimitSetTest, SessionKey) {
+  RateLimitSet limits;
+  std::string error;
+  ASSERT_TRUE(RateLimitSet::Compile({Spec("per-session", {"session"}, 1, 1)},
+                                    &limits, &error))
+      << error;
+  // Without a clearance session the limit does not apply.
+  for (int i = 0; i < 3; ++i) EXPECT_FALSE(Check(limits));
+  request_.session = "0123456789abcdef";
+  EXPECT_FALSE(Check(limits));
+  EXPECT_TRUE(Check(limits));
+  request_.session = "fedcba9876543210";  // Another session.
+  EXPECT_FALSE(Check(limits));
+}
+
 TEST_F(RateLimitSetTest, IpKeysUnmapIpv4) {
   RateLimitSet limits;
   std::string error;

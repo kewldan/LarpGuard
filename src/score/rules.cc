@@ -703,8 +703,8 @@ bool RuleSet::Compile(const std::vector<RuleSpec>& specs, RuleSet* rules,
       rule.score = spec.score;
     } else {
       *error = std::format(
-          "rule '{}': action must be allow, challenge, block, tarpit, decoy "
-          "or score",
+          "rule '{}': action must be allow, challenge, block, tarpit, decoy, "
+          "throttle or score",
           spec.name);
       return false;
     }

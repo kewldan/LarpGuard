@@ -91,6 +91,10 @@ struct Config {
   std::vector<RuleSpec> rules;
   // Request rate limits ("rate_limits" section).
   std::vector<RateLimitSpec> rate_limits;
+  // Action "throttle": a lower limit for the requests it applies to
+  // ("throttle" section: rate, burst, key; no filters). Unset: throttle
+  // acts like allow.
+  std::optional<RateLimitSpec> throttle;
   // Per-IP limits applied when a connection is accepted, before TLS
   // ("connection_limits"); 0 disables each.
   std::size_t open_connections_per_ip = 0;

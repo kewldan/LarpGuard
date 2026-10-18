@@ -201,6 +201,43 @@ std::shared_ptr<const LabelPolicies> LabelPolicies::Build(
       }
     }
 
+    bool ai_crawlers_set = false;
+    std::optional<Action> ai_crawlers;
+    if (const auto it = container->labels.find("botshield.ai_crawlers");
+        it != container->labels.end()) {
+      Action action = Action::kAllow;
+      if (it->second == "default") {
+        ai_crawlers_set = true;
+      } else if (ParseAction(it->second, &action)) {
+        ai_crawlers_set = true;
+        ai_crawlers = action;
+      } else {
+        warn(
+            std::format("botshield.ai_crawlers '{}' is not an action or "
+                        "default",
+                        it->second));
+      }
+    }
+    // Comma-separated globs on the path; each must start with '/'.
+    const auto paths = [&](std::string_view label) {
+      std::vector<std::string> out;
+      if (const auto it = container->labels.find(std::string(label));
+          it != container->labels.end()) {
+        for (std::string& path : SplitList(it->second)) {
+          if (path.starts_with('/')) {
+            out.push_back(std::move(path));
+          } else {
+            warn(std::format("{}: '{}' must start with /", label, path));
+          }
+        }
+      }
+      return out;
+    };
+    const std::vector<std::string> challenge_paths =
+        paths("botshield.challenge.paths");
+    const std::vector<std::string> honeypot_paths =
+        paths("botshield.honeypot.paths");
+
     std::vector<std::string> owned_hosts;
     for (const std::string& host : hosts) {
       if (!IsValidPattern(host)) {
@@ -214,8 +251,9 @@ std::shared_ptr<const LabelPolicies> LabelPolicies::Build(
         continue;
       }
       owned_hosts.push_back(host);
-      policies->hosts_.push_back(
-          LabelHostPolicy{host, container->name, mode, passthrough});
+      policies->hosts_.push_back(LabelHostPolicy{
+          host, container->name, mode, passthrough, ai_crawlers_set,
+          ai_crawlers, challenge_paths, honeypot_paths});
     }
 
     for (const auto& [key, value] : container->labels) {

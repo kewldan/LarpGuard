@@ -28,6 +28,7 @@
 #include "score/policy.h"
 #include "score/rules.h"
 #include "score/scorer.h"
+#include "server/verdicts.h"
 #include "tls/cert_store.h"
 #include "tls/client_hello.h"
 
@@ -46,12 +47,10 @@ struct GatewayContext {
   // Per-worker HTTP/2 connection pool to Traefik.
   UpstreamPool* pool = nullptr;
   ProxySettings proxy_settings;
-  // Verdicts (shared, immutable).
-  const Scorer* scorer = nullptr;
-  const Policy* policy = nullptr;
-  const RuleSet* rules = nullptr;
-  // Request rate limits and their shared state (all workers).
-  const RateLimitSet* rate_limits = nullptr;
+  // Library, scoring, policy, rules, limits, model: one snapshot per
+  // request (replaced on reload).
+  const VerdictStore* verdicts = nullptr;
+  // Rate limit state (all workers; survives reloads).
   RateLimitStore* rate_limit_store = nullptr;
   // Policies from docker labels; null when Docker is not used.
   const LabelStore* labels = nullptr;
@@ -59,10 +58,6 @@ struct GatewayContext {
   CrawlerVerifier* crawler_verifier = nullptr;
   // Behaviour signals and honeypot marks; null when disabled.
   BehaviorStore* behavior = nullptr;
-  // Model signal; null without a model file.
-  const GbdtModel* model = nullptr;
-  // Action for AI crawlers (crawlers.ai); unset: scored like anyone.
-  std::optional<Action> ai_crawler_action;
   // JS challenge and clearance tokens; null when not configured.
   const Challenger* challenger = nullptr;
   // Operational allow/block lists and the recent-decision log (admin API).

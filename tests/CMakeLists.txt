@@ -23,6 +23,7 @@ add_executable(bot_shield_tests
   rules_test.cc
   scoring_test.cc
   tcp_syn_test.cc
+  verdicts_test.cc
   test_util.cc
 )
 target_compile_options(bot_shield_tests PRIVATE -Wall -Wextra)

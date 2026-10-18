@@ -112,6 +112,11 @@ ninja-build git python3 openssl`, исходники монтировать read
   `GbdtModel`. Новый или изменённый признак — новая версия набора, правка
   `FEATURE_NAMES` в `tools/train_model.py` и пересоздание
   `tests/data/gbdt_fixture.json` (`train_model.py --fixture`).
+- `src/server/verdicts` — `VerdictSet`: всё, что решает вердикт и
+  перезагружается без рестарта (библиотека, политика, правила, лимиты,
+  throttle, honeypot, crawlers.ai, модель). Новая перезагружаемая настройка —
+  сюда и в `VerdictSet::Build`; в `OnProxyRequest` — через `verdicts_`
+  (снапшот на запрос), не через `context_.config`.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в

@@ -425,7 +425,10 @@ def main():
         [docker_container("labelled", {
             "traefik.http.routers.labelled.rule": "Host(`x.w.test`)",
             "botshield.mode": "enforce",
-            "botshield.ratelimit.burst": "rate=2/m path=/labels/limited*"}),
+            "botshield.ratelimit.burst": "rate=2/m path=/labels/limited*",
+            "botshield.challenge.paths": "/labels/checkout*",
+            "botshield.honeypot.paths": "/labels/trap",
+            "botshield.ai_crawlers": "allow"}),
          docker_container("passthru", {"botshield.hosts": "y.w.test",
                                        "botshield.passthrough": "true"}),
          docker_container("override", {"botshield.hosts": "www.a.test",
@@ -481,6 +484,9 @@ rules:
   - name: fake
     when: 'path ~ "/decoy*"'
     action: decoy
+  - name: slowdown
+    when: 'path ~ "/throttled*"'
+    action: throttle
 rate_limits:
   - name: limited-path
     paths: ["/limited*"]
@@ -509,6 +515,9 @@ http3:
 model:
   file: {model_path}
   threshold: 0.99
+throttle:
+  rate: 2/m
+  key: [ip]
 tarpit:
   duration: 1s
   interval: 200ms
@@ -848,6 +857,51 @@ log_level: debug
         expect(headers["content-type"] == "application/json", headers)
         expect(len(json.loads(body)["items"]) == 2, body)
 
+    def throttle():
+        statuses = [h1_get(https_port, "www.a.test", ca_a, "/throttled")[0]
+                    for _ in range(3)]
+        expect(statuses == [200, 200, 429], statuses)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("rate_limit") == "throttle")
+        expect(event["action"] == "rate_limit", event)
+        # Shadow host: recorded, not refused.
+        statuses = [h1_get(https_port, "a.test", ca_a, "/throttled")[0]
+                    for _ in range(3)]
+        expect(statuses == [200, 200, 200], statuses)
+
+    def hot_reload():
+        original = open(config_path).read()
+        reloaded_rule = (
+            "  - name: reloaded\n"
+            "    when: 'path ~ \"/reloaded*\"'\n"
+            "    action: block\n")
+        expect(h1_get(https_port, "www.a.test", ca_a, "/reloaded")[0] == 200,
+               "before")
+        with open(config_path, "w") as f:
+            f.write(original.replace("rules:\n", "rules:\n" + reloaded_rule))
+        process.send_signal(signal.SIGHUP)
+        deadline = time.monotonic() + 5
+        while h1_get(https_port, "www.a.test", ca_a, "/reloaded")[0] != 403:
+            expect(time.monotonic() < deadline, "SIGHUP reload not applied")
+            time.sleep(0.05)
+        # A broken file is refused and the current rules stay.
+        with open(config_path, "w") as f:
+            f.write(original.replace("rules:\n", "rules:\n" + reloaded_rule
+                                     .replace("path ~", "nonsense ~")))
+        status, body = admin_call(admin_socket, "POST", "/reload")
+        expect(status == 422 and "nonsense" in body["error"], body)
+        expect(h1_get(https_port, "www.a.test", ca_a, "/reloaded")[0] == 403,
+               "kept")
+        # Back to the original through the admin API.
+        with open(config_path, "w") as f:
+            f.write(original)
+        status, body = admin_call(admin_socket, "POST", "/reload")
+        expect(status == 200 and "generation" in body["summary"], body)
+        expect(h1_get(https_port, "www.a.test", ca_a, "/reloaded")[0] == 200,
+               "after")
+        status, body = admin_call(admin_socket, "GET", "/status")
+        expect(body["verdicts_generation"] >= 3, body)
+
     def rate_limits():
         statuses = [h1_get(https_port, "www.a.test", ca_a, "/limited")
                     for _ in range(4)]
@@ -908,6 +962,20 @@ log_level: debug
         status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/yaml-wins",
                               f"User-Agent: {chrome_ua}\r\n".encode())
         expect(status == 403, status)
+        # botshield.challenge.paths: a challenge page there (enforced).
+        status, headers, _ = h1_get(https_port, "x.w.test", ca_w,
+                                    "/labels/checkout/1",
+                                    b"Accept: text/html\r\n")
+        expect(status == 403 and headers["content-type"].startswith(
+            "text/html"), (status, headers))
+        event = nats.find("e2e.events.req", lambda e: e.get("path_group")
+                          == "/labels/checkout/:n")
+        expect("label:challenge_path" in event["reasons"], event)
+        # botshield.ai_crawlers=allow beats crawlers.ai: block.
+        gptbot = "Mozilla/5.0 (compatible; GPTBot/1.2)"
+        status, _, _ = h1_get(https_port, "x.w.test", ca_w, "/labels/ai",
+                              f"User-Agent: {gptbot}\r\n".encode())
+        expect(status == 200, status)
         # Label changes apply without a restart.
         docker.containers[0]["Labels"]["botshield.mode"] = "shadow"
         deadline = time.monotonic() + 5
@@ -918,6 +986,14 @@ log_level: debug
                 break
             expect(time.monotonic() < deadline, "label change not applied")
             time.sleep(0.1)
+        # botshield.honeypot.paths: a trap on these hosts only.
+        _, _, body = h1_get(https_port, "x.w.test", ca_w, "/labels/trap")
+        reasons = json.loads(body)["headers"]["x-bot-reasons"].split(",")
+        expect("honeypot" in reasons, reasons)
+        _, _, body = h1_get(https_port, "a.test", ca_a, "/labels/trap")
+        reasons = json.loads(body)["headers"]["x-bot-reasons"].split(",")
+        expect("honeypot" not in reasons, reasons)
+        time.sleep(1.2)  # honeypot.ttl: the mark is gone for later checks.
 
     def admin_api():
         expect(os.stat(admin_socket).st_mode & 0o777 == 0o600, "socket mode")
@@ -1350,6 +1426,8 @@ log_level: debug
         ("honeypot marks, sequential IDs", honeypot_and_behavior),
         ("tarpit (h1, h2, client leaves) and decoy with watermark",
          tarpit_and_decoy),
+        ("throttle action: own limit, enforce and shadow", throttle),
+        ("hot reload: SIGHUP, POST /reload, broken file kept out", hot_reload),
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),

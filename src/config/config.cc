@@ -284,7 +284,8 @@ bool ParsePolicy(const YAML::Node& node, Config* config, std::string* error) {
          !ParseAction(actions["verified_bot"].as<std::string>(),
                       &policy.verified_bot_action))) {
       *error =
-          "policy.actions: expected allow, challenge, block, tarpit or decoy";
+          "policy.actions: expected allow, challenge, block, tarpit, decoy or "
+          "throttle";
       return false;
     }
   }
@@ -390,6 +391,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "behavior",
                   "honeypot",
                   "tarpit",
+                  "throttle",
                   "http3",
                   "decoy",
                   "model",
@@ -490,6 +492,28 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   }
   if (const YAML::Node limits = root["rate_limits"]) {
     if (!ParseRateLimits(limits, config, error)) return false;
+  }
+  if (const YAML::Node throttle = root["throttle"]) {
+    if (!CheckKeys(throttle, "throttle", {"rate", "burst", "key"}, error)) {
+      return false;
+    }
+    RateLimitSpec spec;
+    spec.name = "throttle";
+    spec.key = throttle["key"] ? ReadStrings(throttle["key"])
+                               : std::vector<std::string>{"ip_prefix", "ja4"};
+    if (!throttle["rate"] || !ParseRate(throttle["rate"].as<std::string>(),
+                                        &spec.count, &spec.period)) {
+      *error = "throttle: rate must be like 30/m";
+      return false;
+    }
+    spec.burst =
+        throttle["burst"] ? throttle["burst"].as<int64_t>() : spec.count;
+    RateLimitSet compiled;
+    if (!RateLimitSet::Compile({spec}, &compiled, error)) {
+      *error = std::format("throttle: {}", *error);
+      return false;
+    }
+    config->throttle = std::move(spec);
   }
   if (const YAML::Node limits = root["connection_limits"]) {
     if (!CheckKeys(
@@ -681,8 +705,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
         config->crawlers_ai = action;
       } else {
         *error =
-            "crawlers.ai: expected default, allow, challenge, block, tarpit or "
-            "decoy";
+            "crawlers.ai: expected default, allow, challenge, block, tarpit, "
+            "decoy or throttle";
         return false;
       }
     }

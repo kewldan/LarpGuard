@@ -87,6 +87,39 @@ ContainerInfo Container(std::string name,
   return container;
 }
 
+TEST(DockerLabelsTest, CrawlerChallengeAndHoneypotLabels) {
+  const std::vector<ContainerInfo> containers = {
+      Container("shop", {{"botshield.hosts", "shop.test"},
+                         {"botshield.ai_crawlers", "block"},
+                         {"botshield.challenge.paths", "/checkout*, /login"},
+                         {"botshield.honeypot.paths", "/wp-admin/*"}}),
+      Container("blog", {{"botshield.hosts", "blog.test"},
+                         {"botshield.ai_crawlers", "default"}}),
+      Container("bad", {{"botshield.hosts", "bad.test"},
+                        {"botshield.ai_crawlers", "captcha"},
+                        {"botshield.challenge.paths", "checkout"}}),
+  };
+  std::vector<std::string> warnings;
+  const auto policies = LabelPolicies::Build(containers, &warnings);
+  const LabelHostPolicy* shop = policies->PolicyFor("shop.test");
+  ASSERT_NE(shop, nullptr);
+  EXPECT_TRUE(shop->ai_crawlers_set);
+  EXPECT_EQ(shop->ai_crawlers, Action::kBlock);
+  EXPECT_EQ(shop->challenge_paths,
+            (std::vector<std::string>{"/checkout*", "/login"}));
+  EXPECT_EQ(shop->honeypot_paths, (std::vector<std::string>{"/wp-admin/*"}));
+  const LabelHostPolicy* blog = policies->PolicyFor("blog.test");
+  ASSERT_NE(blog, nullptr);
+  EXPECT_TRUE(blog->ai_crawlers_set);  // "default": scored like anyone.
+  EXPECT_FALSE(blog->ai_crawlers.has_value());
+  const LabelHostPolicy* bad = policies->PolicyFor("bad.test");
+  ASSERT_NE(bad, nullptr);
+  EXPECT_FALSE(bad->ai_crawlers_set);
+  EXPECT_TRUE(bad->challenge_paths.empty());
+  EXPECT_EQ(warnings.size(), 2u);
+  EXPECT_EQ(policies->PolicyFor("other.test"), nullptr);
+}
+
 TEST(DockerLabelsTest, BuildsPolicies) {
   const std::vector<ContainerInfo> containers = {
       Container("shop",

@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <format>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include "challenge/token.h"
+#include "common/hash.h"
 #include "common/url.h"
 #include "fp/http_request.h"
 #include "score/scorer.h"
@@ -224,9 +226,9 @@ Challenger::Result Challenger::Verify(std::string_view query,
   return result;
 }
 
-bool Challenger::HasValidToken(const HttpRequest& request,
-                               const ClientBinding& binding,
-                               int64_t now) const {
+std::optional<std::string> Challenger::SessionId(const HttpRequest& request,
+                                                 const ClientBinding& binding,
+                                                 int64_t now) const {
   for (const auto& [name, value] : request.headers) {
     if (name != "cookie") continue;
     std::string_view rest = value;
@@ -238,17 +240,17 @@ bool Challenger::HasValidToken(const HttpRequest& request,
       if (equals != std::string_view::npos &&
           field.substr(0, equals) == kCookieName) {
         TokenClaims claims;
-        if (VerifyToken(settings_.keys, field.substr(equals + 1), now,
-                        &claims) &&
+        const std::string_view token = field.substr(equals + 1);
+        if (VerifyToken(settings_.keys, token, now, &claims) &&
             claims.binding == binding) {
-          return true;
+          return Sha256Hex(token, 16);
         }
       }
       if (end == std::string_view::npos) break;
       rest.remove_prefix(end + 1);
     }
   }
-  return false;
+  return std::nullopt;
 }
 
 std::string Challenger::StripCookie(std::string_view cookie_header) {

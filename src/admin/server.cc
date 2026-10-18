@@ -64,7 +64,10 @@ AdminResponse Status(const AdminContext& context, int64_t now_seconds) {
       200,
       {{"version", kVersion},
        {"uptime_s", now_seconds - context.started_ms / 1000},
-       {"mode", context.policy->global_enforce() ? "enforce" : "shadow"},
+       {"mode", context.verdicts->snapshot()->policy->global_enforce()
+                    ? "enforce"
+                    : "shadow"},
+       {"verdicts_generation", context.verdicts->snapshot()->generation},
        {"workers", context.workers},
        {"certificates", context.certificates->snapshot()->certificate_count()},
        {"label_hosts", labels ? labels->host_count() : 0},
@@ -85,13 +88,14 @@ AdminResponse HostPolicy(const AdminContext& context,
   if (host.empty()) return Error(400, "host parameter is required");
   const auto labels =
       context.labels != nullptr ? context.labels->snapshot() : nullptr;
-  const ModeResolution mode = context.policy->ResolveMode(
+  const auto verdicts = context.verdicts->snapshot();
+  const ModeResolution mode = verdicts->policy->ResolveMode(
       host, labels ? labels->ModeFor(host) : std::nullopt);
   const bool passthrough_config = std::ranges::any_of(
       context.config->passthrough_hosts,
       [&](const std::string& pattern) { return HostMatches(pattern, host); });
   const bool passthrough_labels = labels && labels->IsPassthrough(host);
-  std::vector<std::string> limits = context.rate_limits->NamesForHost(host);
+  std::vector<std::string> limits = verdicts->rate_limits.NamesForHost(host);
   if (labels) {
     for (std::string& name : labels->rate_limits().NamesForHost(host)) {
       limits.push_back(std::move(name));
@@ -332,6 +336,13 @@ AdminResponse HandleAdminRequest(std::string_view method,
   if (path == "/policy") {
     if (method != "GET") return Error(405, "method not allowed");
     return HostPolicy(context, QueryParam(params, "host"));
+  }
+  if (path == "/reload") {
+    if (method != "POST") return Error(405, "method not allowed");
+    if (!context.reload) return Error(501, "reload is not available");
+    std::string summary;
+    if (!context.reload(&summary)) return Error(422, summary);
+    return {200, {{"reloaded", true}, {"summary", summary}}};
   }
   if (path == "/lists" || path.starts_with("/lists/")) {
     return Lists(method, path.substr(6), body, context, now_seconds);

@@ -29,7 +29,7 @@ constexpr char kSeparator = '\x1f';
 
 bool IsKnownComponent(std::string_view component) {
   return component == "ip" || component == "ip_prefix" || component == "ja4" ||
-         component == "fp" || component == "host" ||
+         component == "fp" || component == "host" || component == "session" ||
          (component.starts_with("header:") && component.size() > 7) ||
          (component.starts_with("cookie:") && component.size() > 7);
 }
@@ -191,6 +191,8 @@ std::string RateLimitSet::BuildKey(const Limit& limit,
       }
     } else if (component == "host") {
       value = request.host;
+    } else if (component == "session") {
+      value = request.session;
     } else if (component.starts_with("header:")) {
       value = request.request->Header(std::string_view(component).substr(7));
     } else if (component.starts_with("cookie:")) {

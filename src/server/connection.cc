@@ -51,7 +51,6 @@
 #include "fp/tcp_syn.h"
 #include "fp/user_agent.h"
 #include "model/features.h"
-#include "model/gbdt.h"
 #include "net/classifier.h"
 #include "net/prefixed_stream.h"
 #include "net/proxy_protocol.h"
@@ -69,6 +68,7 @@
 #include "score/policy.h"
 #include "score/rules.h"
 #include "score/scorer.h"
+#include "server/verdicts.h"
 #include "tls/cert_store.h"
 #include "tls/client_hello.h"
 
@@ -293,12 +293,20 @@ class ConnectionObserver {
         return;
       }
     }
-    if (context_.scorer == nullptr || context_.policy == nullptr) return;
+    if (context_.verdicts == nullptr) return;
+    // One snapshot for the whole request, even if a reload lands meanwhile.
+    verdicts_ = context_.verdicts->snapshot();
+    session_ =
+        context_.challenger != nullptr
+            ? context_.challenger->SessionId(exchange.observed, binding, now)
+            : std::nullopt;
     const std::string host = HostOnly(exchange.request.authority);
     const std::shared_ptr<const LabelPolicies> labels =
         context_.labels != nullptr ? context_.labels->snapshot() : nullptr;
-    const HostMode mode = context_.policy->ModeFor(
+    const HostMode mode = verdicts_->policy->ModeFor(
         host, labels ? labels->ModeFor(host) : std::nullopt);
+    const LabelHostPolicy* label_policy =
+        labels ? labels->PolicyFor(host) : nullptr;
     // "off": plain proxying, no verdicts and no limits.
     exchange.mode = HostModeName(mode);
     if (mode == HostMode::kOff) return;
@@ -326,7 +334,7 @@ class ConnectionObserver {
     input.pseudo_order = pseudo;
     input.header_fp = header_fp;
     input.tcp_initial_ttl = record_.tcp_initial_ttl;
-    Verdict verdict = context_.scorer->Score(input);
+    Verdict verdict = verdicts_->scorer->Score(input);
     // Claimed crawlers: verified search engines skip scoring, fakes are
     // penalized, AI crawlers get their configured action.
     const KnownCrawler* crawler = FindCrawler(request.Header("user-agent"));
@@ -343,9 +351,9 @@ class ConnectionObserver {
             break;
           case CrawlerStatus::kFailed:
             verdict.score = std::min(
-                100,
-                verdict.score + context_.scorer->SignalWeight("fake_crawler"));
-            verdict.bot_class = context_.scorer->Classify(verdict.score);
+                100, verdict.score +
+                         verdicts_->scorer->SignalWeight("fake_crawler"));
+            verdict.bot_class = verdicts_->scorer->Classify(verdict.score);
             verdict.reasons.push_back(
                 std::format("fake_crawler:{}", crawler->id));
             break;
@@ -355,37 +363,54 @@ class ConnectionObserver {
       }
       if (crawler->ai) {
         verdict.reasons.push_back(std::format("ai_crawler:{}", crawler->id));
-        crawler_action = context_.ai_crawler_action;
+        // botshield.ai_crawlers on the host's container beats crawlers.ai.
+        crawler_action =
+            label_policy != nullptr && label_policy->ai_crawlers_set
+                ? label_policy->ai_crawlers
+                : verdicts_->ai_crawler_action;
       }
     }
     // Behaviour (5.4) and honeypot marks (6.3); verified crawlers crawl
     // regularly by nature and skip both.
     if (context_.behavior != nullptr && !verified_crawler) {
-      ApplyBehavior(exchange, host, binding, &verdict);
+      ApplyBehavior(exchange, host, binding, label_policy, &verdict);
     }
     // Model signal; the feature vector also goes to the event (training).
     if (!verified_crawler &&
-        (context_.model != nullptr || context_.config->model_log_features)) {
+        (verdicts_->model != nullptr || context_.config->model_log_features)) {
       ApplyModel(exchange, &verdict);
     }
     // A solved challenge earns credit (behavioural signals stay).
-    const bool token_valid =
-        !verified_crawler && context_.challenger != nullptr &&
-        context_.challenger->HasValidToken(request, binding, now);
+    const bool token_valid = !verified_crawler &&
+                             context_.challenger != nullptr &&
+                             session_.has_value();
     if (token_valid) {
       GlobalMetrics().tokens_valid.Inc();
       verdict.score =
           std::max(0, verdict.score - context_.challenger->token_credit());
-      verdict.bot_class = context_.scorer->Classify(verdict.score);
+      verdict.bot_class = verdicts_->scorer->Classify(verdict.score);
       verdict.reasons.emplace_back("token_valid");
     }
     std::optional<Action> override_action;
-    if (context_.rules != nullptr && !context_.rules->empty()) {
+    if (!verdicts_->rules.empty()) {
       override_action = ApplyRules(exchange, input, host, &verdict);
       // Score rules cannot turn a verified crawler into a scored client.
       if (verified_crawler) verdict.bot_class = BotClass::kVerifiedBot;
     }
     if (!override_action) override_action = crawler_action;
+    // botshield.challenge.paths: a challenge there unless a rule decided.
+    if (!override_action && label_policy != nullptr &&
+        !label_policy->challenge_paths.empty()) {
+      const std::string_view target = exchange.request.path;
+      const std::string_view path = target.substr(0, target.find('?'));
+      if (std::ranges::any_of(label_policy->challenge_paths,
+                              [path](const std::string& glob) {
+                                return GlobMatch(glob, path);
+                              })) {
+        override_action = Action::kChallenge;
+        verdict.reasons.emplace_back("label:challenge_path");
+      }
+    }
     // Operational lists (admin API) beat rules and the class.
     if (context_.lists != nullptr) {
       ListMatchInput list_input;
@@ -400,7 +425,7 @@ class ConnectionObserver {
       }
     }
     PolicyDecision decision =
-        context_.policy->Decide(verdict, mode, override_action);
+        verdicts_->policy->Decide(verdict, mode, override_action);
     // Never challenge a client that already holds a valid token.
     if (token_valid && decision.would_action == Action::kChallenge) {
       decision.would_action = Action::kAllow;
@@ -453,7 +478,7 @@ class ConnectionObserver {
 
     if (decision.action == Action::kBlock) {
       metrics.requests_blocked.Inc();
-      exchange.RespondLocally(context_.policy->block_status(),
+      exchange.RespondLocally(verdicts_->policy->block_status(),
                               "request blocked\n");
       return;
     }
@@ -499,7 +524,7 @@ class ConnectionObserver {
       // Too many at once: a plain block costs nothing.
       metrics.tarpit_overflow.Inc();
       metrics.requests_blocked.Inc();
-      exchange.RespondLocally(context_.policy->block_status(),
+      exchange.RespondLocally(verdicts_->policy->block_status(),
                               "request blocked\n");
       return;
     }
@@ -539,19 +564,21 @@ class ConnectionObserver {
     if (context_.config->model_log_features) {
       exchange.features.assign(features.begin(), features.end());
     }
-    if (context_.model == nullptr) return;
-    exchange.model_score = context_.model->Predict(features);
-    if (exchange.model_score < context_.config->model_threshold) return;
-    const int weight = context_.scorer->SignalWeight("model");
+    if (verdicts_->model == nullptr) return;
+    exchange.model_score = verdicts_->model->Predict(features);
+    if (exchange.model_score < verdicts_->model_threshold) return;
+    const int weight = verdicts_->scorer->SignalWeight("model");
     if (weight <= 0) return;
     GlobalMetrics().model_flags.Inc();
     verdict->score = std::min(100, verdict->score + weight);
     verdict->reasons.emplace_back("model");
-    verdict->bot_class = context_.scorer->Classify(verdict->score);
+    verdict->bot_class = verdicts_->scorer->Classify(verdict->score);
   }
 
   void ApplyBehavior(Exchange& exchange, std::string_view host,
-                     const ClientBinding& binding, Verdict* verdict) const {
+                     const ClientBinding& binding,
+                     const LabelHostPolicy* label_policy,
+                     Verdict* verdict) const {
     const HttpRequest& request = exchange.observed;
     const int64_t now_ms = SteadyMillis();
     const std::string_view target = exchange.request.path;
@@ -563,9 +590,13 @@ class ConnectionObserver {
         std::format("fp|{}|{}", binding.ja4_hash, binding.ip_hash)};
     std::vector<std::string> signals;
     const Config& config = *context_.config;
-    if (std::ranges::any_of(config.honeypot_paths, [path](const auto& glob) {
-          return GlobMatch(glob, path);
-        })) {
+    const auto matches = [path](const std::vector<std::string>& globs) {
+      return std::ranges::any_of(globs, [path](const std::string& glob) {
+        return GlobMatch(glob, path);
+      });
+    };
+    if (matches(verdicts_->honeypot_paths) ||
+        (label_policy != nullptr && matches(label_policy->honeypot_paths))) {
       GlobalMetrics().honeypot_hits.Inc();
       signals.emplace_back("honeypot");
       context_.behavior->Trap(trap_keys, now_ms,
@@ -582,7 +613,7 @@ class ConnectionObserver {
         now_ms, &signals);
     int added = 0;
     for (std::string& signal : signals) {
-      const int weight = context_.scorer->SignalWeight(signal);
+      const int weight = verdicts_->scorer->SignalWeight(signal);
       if (weight <= 0) continue;
       verdict->score = std::min(100, verdict->score + weight);
       verdict->reasons.push_back(std::move(signal));
@@ -590,7 +621,7 @@ class ConnectionObserver {
     }
     if (added > 0) {
       GlobalMetrics().behavior_signals.Inc(added);
-      verdict->bot_class = context_.scorer->Classify(verdict->score);
+      verdict->bot_class = verdicts_->scorer->Classify(verdict->score);
     }
   }
 
@@ -667,10 +698,12 @@ class ConnectionObserver {
   void CheckRateLimits(Exchange& exchange, const Verdict& verdict,
                        std::string_view host, const PolicyDecision& decision,
                        const LabelPolicies* labels) const {
-    const bool configured =
-        context_.rate_limits != nullptr && !context_.rate_limits->empty();
+    const bool configured = !verdicts_->rate_limits.empty();
     const bool labelled = labels != nullptr && !labels->rate_limits().empty();
-    if (!configured && !labelled) return;
+    // Action "throttle": the throttle limit applies on top of the others.
+    const bool throttled = decision.would_action == Action::kThrottle &&
+                           !verdicts_->throttle.empty();
+    if (!configured && !labelled && !throttled) return;
     const std::string_view path_and_query = exchange.request.path;
     RateLimitRequest request;
     request.request = &exchange.observed;
@@ -681,11 +714,16 @@ class ConnectionObserver {
     request.bot_class = BotClassName(verdict.bot_class);
     request.ja4 = record_.ja4;
     request.h2_fingerprint = exchange.h2_fingerprint;
+    if (session_) request.session = *session_;
     const int64_t now = SteadyNanos();
     std::optional<RateLimitHit> hit;
+    if (throttled) {
+      hit = verdicts_->throttle.Check(request, context_.rate_limit_store, now);
+    }
     if (configured) {
-      hit =
-          context_.rate_limits->Check(request, context_.rate_limit_store, now);
+      std::optional<RateLimitHit> limit_hit =
+          verdicts_->rate_limits.Check(request, context_.rate_limit_store, now);
+      if (!hit) hit = std::move(limit_hit);
     }
     if (labelled) {
       // Label limits count the request too; the first refusal is reported.
@@ -747,15 +785,15 @@ class ConnectionObserver {
     rules.reasons = &verdict->reasons;
 
     std::vector<std::string> matched;
-    const int delta = context_.rules->ScoreDelta(rules, &matched);
+    const int delta = verdicts_->rules.ScoreDelta(rules, &matched);
     if (delta != 0) {
       verdict->score = std::clamp(verdict->score + delta, 0, 100);
-      verdict->bot_class = context_.scorer->Classify(verdict->score);
+      verdict->bot_class = verdicts_->scorer->Classify(verdict->score);
       rules.score = verdict->score;
       rules.bot_class = BotClassName(verdict->bot_class);
     }
     const std::optional<Action> action =
-        context_.rules->Decide(rules, &matched);
+        verdicts_->rules.Decide(rules, &matched);
     GlobalMetrics().rules_matched.Inc(matched.size());
     for (const std::string& name : matched) {
       verdict->reasons.push_back("rule:" + name);
@@ -846,6 +884,10 @@ class ConnectionObserver {
   ConnectionRecord record_;
   std::unique_ptr<H1Tap> h1_;
   PendingSlot* pending_slot_ = nullptr;
+  // Verdict snapshot of the request being decided (OnProxyRequest).
+  std::shared_ptr<const VerdictSet> verdicts_;
+  // Its clearance session (valid __bs token), if any.
+  std::optional<std::string> session_;
   asio::any_io_executor executor_;
   int request_sequence_ = 0;
 };

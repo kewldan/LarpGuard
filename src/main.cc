@@ -9,8 +9,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <format>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -33,9 +35,8 @@
 #include "docker/watcher.h"
 #include "events/events.h"
 #include "events/nats_publisher.h"
-#include "fp/library.h"
-#include "model/gbdt.h"
 #include "server/gateway.h"
+#include "server/verdicts.h"
 #include "tls/acme_watcher.h"
 #include "tls/cert_store.h"
 
@@ -95,6 +96,18 @@ std::string RandomHex(std::size_t bytes) {
   return bot_shield::HexEncode(raw);
 }
 
+// One line about the verdict set for the log and POST /reload.
+std::string VerdictSummary(const bot_shield::VerdictSet& set,
+                           const bot_shield::Config& config) {
+  return std::format(
+      "generation {}, library {} ({} browser profiles, {} automation), "
+      "mode {}, model {}",
+      set.generation, set.library->version(), set.library->profile_count(),
+      set.library->automation().size(),
+      config.policy.enforce ? "enforce" : "shadow",
+      set.model ? std::format("{} trees", set.model->tree_count()) : "off");
+}
+
 int Run(int argc, char** argv) {
   using bot_shield::log::Error;
   using bot_shield::log::Info;
@@ -151,19 +164,35 @@ int Run(int argc, char** argv) {
          config.events_subject_prefix);
   }
 
-  bot_shield::FingerprintLibrary library =
-      bot_shield::FingerprintLibrary::BuiltIn();
-  if (!config.fingerprint_library.empty() &&
-      !bot_shield::FingerprintLibrary::Load(config.fingerprint_library,
-                                            &library, &error)) {
-    Error("fingerprints: {}", error);
-    return 1;
+  // Library, policy, rules, limits and model; replaced by SIGHUP and
+  // POST /reload without a restart.
+  bot_shield::VerdictStore verdicts;
+  {
+    std::shared_ptr<const bot_shield::VerdictSet> initial;
+    if (!bot_shield::VerdictSet::Build(config, &initial, &error)) {
+      Error("{}", error);
+      return 1;
+    }
+    verdicts.set(initial);
   }
-  Info(
-      "fingerprints: library {} ({} browser profiles, {} automation), "
-      "mode {}",
-      library.version(), library.profile_count(), library.automation().size(),
-      config.policy.enforce ? "enforce" : "shadow");
+  Info("{}", VerdictSummary(*verdicts.snapshot(), config));
+  std::mutex reload_mutex;
+  // Re-reads the file; only the verdict sections take effect (the rest
+  // needs a restart). Nothing changes when the new file is invalid.
+  const auto reload = [&](std::string* summary) {
+    const std::scoped_lock lock(reload_mutex);
+    bot_shield::Config fresh;
+    std::shared_ptr<const bot_shield::VerdictSet> next;
+    if (!bot_shield::LoadConfigFile(options.config_path, &fresh, summary) ||
+        !bot_shield::VerdictSet::Build(fresh, &next, summary)) {
+      Error("reload failed, keeping the current configuration: {}", *summary);
+      return false;
+    }
+    verdicts.set(next);
+    *summary = VerdictSummary(*verdicts.snapshot(), fresh);
+    Info("reloaded: {}", *summary);
+    return true;
+  };
 
   bot_shield::LabelStore labels;
   std::unique_ptr<bot_shield::DockerWatcher> docker;
@@ -211,15 +240,6 @@ int Run(int argc, char** argv) {
   bot_shield::GatewayServices services;
   services.challenger = &challenger;
   if (crawler_verifier) services.crawler_verifier = &*crawler_verifier;
-  bot_shield::GbdtModel model;
-  if (!config.model_file.empty()) {
-    if (!bot_shield::GbdtModel::Load(config.model_file, &model, &error)) {
-      Error("model: {}", error);
-      return 1;
-    }
-    services.model = &model;
-    Info("model: {} trees", model.tree_count());
-  }
   std::optional<bot_shield::BehaviorStore> behavior;
   if (config.behavior_enabled) {
     bot_shield::BehaviorSettings settings;
@@ -231,7 +251,8 @@ int Run(int argc, char** argv) {
   }
   services.events = publisher.get();
   services.event_settings = &event_settings;
-  services.library = &library;
+  services.verdicts = &verdicts;
+  services.reload = reload;
   services.labels = docker ? &labels : nullptr;
   services.lists = &lists;
   services.decisions = &decisions;
@@ -311,6 +332,16 @@ int Run(int argc, char** argv) {
         signals.async_wait(on_signal);
       };
   signals.async_wait(on_signal);
+
+  asio::signal_set hangup(control, SIGHUP);
+  std::function<void(const std::error_code&, int)> on_hangup =
+      [&](const std::error_code& ec, int /*signal*/) {
+        if (ec) return;
+        std::string summary;
+        reload(&summary);
+        hangup.async_wait(on_hangup);
+      };
+  hangup.async_wait(on_hangup);
 
   control.run();
   gateway.Join();

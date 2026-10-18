@@ -21,6 +21,7 @@
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
 #include "score/policy.h"
+#include "server/verdicts.h"
 #include "tls/cert_store.h"
 
 namespace bot_shield {
@@ -229,24 +230,24 @@ class AdminServerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     config_.passthrough_hosts = {"grpc.test"};
-    PolicySettings settings;
-    settings.host_modes = {{"shop.test", HostMode::kEnforce}};
-    policy_ = std::make_unique<Policy>(settings);
+    config_.policy.host_modes = {{"shop.test", HostMode::kEnforce}};
     RateLimitSpec spec;
     spec.name = "login";
     spec.key = {"ip"};
     spec.count = 5;
     spec.period = std::chrono::minutes(1);
     spec.hosts = {"shop.test"};
+    config_.rate_limits = {spec};
     std::string error;
-    ASSERT_TRUE(RateLimitSet::Compile({spec}, &rate_limits_, &error));
+    std::shared_ptr<const VerdictSet> verdicts;
+    ASSERT_TRUE(VerdictSet::Build(config_, &verdicts, &error)) << error;
+    verdicts_.set(verdicts);
     context_.config = &config_;
     context_.certificates = &certificates_;
     context_.lists = &lists_;
     context_.decisions = &decisions_;
     context_.rate_limit_store = &store_;
-    context_.rate_limits = &rate_limits_;
-    context_.policy = policy_.get();
+    context_.verdicts = &verdicts_;
     context_.attack = &attack_;
     context_.started_ms = (kNow - 100) * 1000;
     context_.workers = 2;
@@ -262,11 +263,28 @@ class AdminServerTest : public ::testing::Test {
   ListStore lists_{""};
   DecisionLog decisions_{100};
   RateLimitStore store_;
-  RateLimitSet rate_limits_;
-  std::unique_ptr<Policy> policy_;
+  VerdictStore verdicts_;
   AttackMode attack_{0, 600};
   AdminContext context_;
 };
+
+TEST_F(AdminServerTest, Reload) {
+  EXPECT_EQ(Call("POST", "/reload").status, 501);
+  EXPECT_EQ(Call("GET", "/reload").status, 405);
+  bool succeed = true;
+  context_.reload = [&](std::string* summary) {
+    *summary = succeed ? "generation 2" : "rules: bad rule";
+    return succeed;
+  };
+  AdminResponse response = Call("POST", "/reload");
+  EXPECT_EQ(response.status, 200);
+  EXPECT_EQ(response.body["summary"], "generation 2");
+  succeed = false;
+  response = Call("POST", "/reload");
+  EXPECT_EQ(response.status, 422);
+  EXPECT_EQ(response.body["error"], "rules: bad rule");
+  EXPECT_EQ(Call("GET", "/status").body["verdicts_generation"], 1);
+}
 
 TEST_F(AdminServerTest, Status) {
   const AdminResponse response = Call("GET", "/status");

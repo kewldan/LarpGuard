@@ -7,6 +7,7 @@
 #include <asio/ssl/context.hpp>
 #include <asio/steady_timer.hpp>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -87,21 +88,22 @@ class Worker {
 struct GatewayServices {
   EventSink* events = nullptr;  // Null: events off.
   const EventSettings* event_settings = nullptr;
-  const FingerprintLibrary* library = nullptr;
+  const VerdictStore* verdicts = nullptr;
+  // POST /reload in the admin API; may be empty.
+  std::function<bool(std::string* summary)> reload;
   const LabelStore* labels = nullptr;  // Null: Docker off.
   ListStore* lists = nullptr;
   DecisionLog* decisions = nullptr;
   const Challenger* challenger = nullptr;
   CrawlerVerifier* crawler_verifier = nullptr;
   BehaviorStore* behavior = nullptr;
-  const GbdtModel* model = nullptr;
 };
 
 class Gateway {
  public:
   // `events` may be null (events disabled); both must outlive the gateway.
   Gateway(const Config& config, const CertStore* certificates,
-          const GatewayServices& services);
+          GatewayServices services);
   ~Gateway();
 
   Gateway(const Gateway&) = delete;
@@ -120,12 +122,8 @@ class Gateway {
   const Config& config_;
   const CertStore* certificates_;
   Classifier classifier_;
-  Scorer scorer_;
-  Policy policy_;
-  RuleSet rules_;
   GatewayServices services_;
   AdminContext admin_;
-  RateLimitSet rate_limits_;
   RateLimitStore rate_limit_store_;
   ConnectionCounter connection_counter_;
   ConnectionCounter pending_counter_;
