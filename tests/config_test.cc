@@ -72,13 +72,16 @@ traefik:
   tls_verify: true
 passthrough_hosts: [GRPC.example.com, "*.raw.example.com"]
 non_tls: passthrough
+no_sni: passthrough
 timeouts:
   client_hello: 1s
   tls_handshake: 2s
+  request_headers: 7s
   upstream_connect: 3s
   idle: 4m
   drain: 5s
 max_connections: 1000
+max_requests_per_connection: 50
 metrics:
   listen: ""
 log_level: debug
@@ -97,12 +100,38 @@ log_level: debug
   EXPECT_EQ(
       config.passthrough_hosts,
       (std::vector<std::string>{"grpc.example.com", "*.raw.example.com"}));
-  EXPECT_EQ(config.non_tls, NonTlsAction::kPassthrough);
+  EXPECT_EQ(config.non_tls, FallbackRoute::kPassthrough);
+  EXPECT_EQ(config.no_sni, FallbackRoute::kPassthrough);
   EXPECT_EQ(config.client_hello_timeout, milliseconds(1000));
+  EXPECT_EQ(config.request_headers_timeout, milliseconds(7000));
+  EXPECT_EQ(config.max_requests_per_connection, 50u);
   EXPECT_EQ(config.idle_timeout, milliseconds(240000));
   EXPECT_EQ(config.max_connections, 1000u);
   EXPECT_FALSE(config.metrics_listen.has_value());
   EXPECT_EQ(config.log_level, log::Level::kDebug);
+}
+
+TEST(ConfigTest, GatewayProtectionDefaults) {
+  const Config config;
+  EXPECT_EQ(config.no_sni, FallbackRoute::kReject);
+  EXPECT_EQ(config.request_headers_timeout, std::chrono::seconds(10));
+  EXPECT_EQ(config.max_requests_per_connection, 1000u);
+  EXPECT_EQ(config.pending_connections_per_ip, 128u);
+  EXPECT_EQ(config.challenge_endpoint_rate, 30);
+  EXPECT_EQ(config.challenge_endpoint_period, std::chrono::minutes(1));
+  EXPECT_EQ(config.attack_auto_rps, 0);
+}
+
+TEST(ConfigTest, ParsesAttack) {
+  Config config;
+  std::string error;
+  ASSERT_TRUE(ParseConfig("attack: {auto_rps: 500, auto_duration: 15m}\n",
+                          &config, &error))
+      << error;
+  EXPECT_EQ(config.attack_auto_rps, 500);
+  EXPECT_EQ(config.attack_auto_duration, std::chrono::minutes(15));
+  EXPECT_FALSE(ParseConfig("attack: {auto_rps: -1}\n", &config, &error));
+  EXPECT_FALSE(ParseConfig("attack: {rps: 1}\n", &config, &error));
 }
 
 TEST(ConfigTest, ParsesEvents) {
@@ -182,6 +211,8 @@ challenge:
   token_ttl: 1h
   difficulty: {suspicious: 12, bot: 20}
   token_credit: 30
+  endpoint_rate: 10/s
+  endpoint_burst: 5
 )",
                           &config, &error))
       << error;
@@ -190,12 +221,18 @@ challenge:
   EXPECT_EQ(config.challenge_suspicious_difficulty, 12);
   EXPECT_EQ(config.challenge_bot_difficulty, 20);
   EXPECT_EQ(config.challenge_token_credit, 30);
+  EXPECT_EQ(config.challenge_endpoint_rate, 10);
+  EXPECT_EQ(config.challenge_endpoint_period, std::chrono::seconds(1));
+  EXPECT_EQ(config.challenge_endpoint_burst, 5);
 
   Config bad;
   EXPECT_FALSE(
       ParseConfig("challenge: {difficulty: {bot: 40}}\n", &bad, &error));
   EXPECT_FALSE(ParseConfig("challenge: {token_credit: -1}\n", &bad, &error));
   EXPECT_FALSE(ParseConfig("challenge: {captcha: true}\n", &bad, &error));
+  EXPECT_FALSE(
+      ParseConfig("challenge: {endpoint_rate: often}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("challenge: {endpoint_burst: 0}\n", &bad, &error));
 }
 
 TEST(ConfigTest, ParsesAndValidatesRules) {
@@ -242,6 +279,7 @@ connection_limits:
   open_per_ip: 64
   new_per_ip: 30/s
   new_burst_per_ip: 60
+  pending_per_ip: 16
 )";
   Config config;
   std::string error;
@@ -253,6 +291,7 @@ connection_limits:
   EXPECT_EQ(config.open_connections_per_ip, 64u);
   EXPECT_EQ(config.new_connections_per_ip, 30);
   EXPECT_EQ(config.new_connections_burst, 60);
+  EXPECT_EQ(config.pending_connections_per_ip, 16u);
 
   EXPECT_FALSE(
       ParseConfig("rate_limits: [{name: a, key: [ip]}]\n", &config, &error));
@@ -262,6 +301,8 @@ connection_limits:
       ParseConfig("connection_limits: {new_per_ip: fast}\n", &config, &error));
   EXPECT_FALSE(
       ParseConfig("connection_limits: {open_per_ip: -1}\n", &config, &error));
+  EXPECT_FALSE(ParseConfig("connection_limits: {pending_per_ip: -1}\n", &config,
+                           &error));
 }
 
 TEST(ConfigTest, ParsesDocker) {
@@ -294,6 +335,11 @@ TEST(ConfigTest, RejectsBadValues) {
   EXPECT_FALSE(ParseConfig("timeouts: {idle: 0s}\n", &config, &error));
   EXPECT_FALSE(ParseConfig("workers: -1\n", &config, &error));
   EXPECT_FALSE(ParseConfig("non_tls: drop\n", &config, &error));
+  EXPECT_FALSE(ParseConfig("no_sni: drop\n", &config, &error));
+  EXPECT_FALSE(
+      ParseConfig("max_requests_per_connection: 0\n", &config, &error));
+  EXPECT_FALSE(
+      ParseConfig("timeouts: {request_headers: 0s}\n", &config, &error));
   EXPECT_FALSE(
       ParseConfig("passthrough_hosts: [\"bad host\"]\n", &config, &error));
   EXPECT_FALSE(ParseConfig("listen: {https: nope}\n", &config, &error));

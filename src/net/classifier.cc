@@ -46,8 +46,10 @@ std::string_view RouteReasonName(RouteReason reason) {
 }
 
 Classifier::Classifier(std::vector<std::string> passthrough_hosts,
-                       NonTlsAction non_tls)
-    : passthrough_hosts_(std::move(passthrough_hosts)), non_tls_(non_tls) {
+                       FallbackRoute non_tls, FallbackRoute no_sni)
+    : passthrough_hosts_(std::move(passthrough_hosts)),
+      non_tls_(non_tls),
+      no_sni_(no_sni) {
   for (std::string& host : passthrough_hosts_) host = NormalizeHost(host);
 }
 
@@ -57,8 +59,8 @@ RouteDecision Classifier::Classify(ParseStatus status, const ClientHello& hello,
     case ParseStatus::kOk:
       break;
     case ParseStatus::kNotTls:
-      return {non_tls_ == NonTlsAction::kPassthrough ? Route::kPassthrough
-                                                     : Route::kReject,
+      return {non_tls_ == FallbackRoute::kPassthrough ? Route::kPassthrough
+                                                      : Route::kReject,
               RouteReason::kNotTls, nullptr};
     case ParseStatus::kNeedMore:
     case ParseStatus::kInvalid:
@@ -70,7 +72,9 @@ RouteDecision Classifier::Classify(ParseStatus status, const ClientHello& hello,
     return {Route::kPassthrough, RouteReason::kAcmeTlsAlpn, nullptr};
   }
   if (hello.server_name.empty()) {
-    return {Route::kPassthrough, RouteReason::kNoServerName, nullptr};
+    return {no_sni_ == FallbackRoute::kPassthrough ? Route::kPassthrough
+                                                   : Route::kReject,
+            RouteReason::kNoServerName, nullptr};
   }
   if (IsPassthroughHost(hello.server_name)) {
     return {Route::kPassthrough, RouteReason::kPassthroughPolicy, nullptr};

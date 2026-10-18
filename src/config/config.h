@@ -26,9 +26,10 @@ struct Endpoint {
   friend bool operator==(const Endpoint&, const Endpoint&) = default;
 };
 
-// What to do with a connection on the HTTPS listener that does not start with
-// a TLS handshake record.
-enum class NonTlsAction { kReject, kPassthrough };
+// What to do with an HTTPS-port connection the gateway cannot route by
+// certificate: one that does not start with a TLS handshake record, or a
+// ClientHello without SNI.
+enum class FallbackRoute { kReject, kPassthrough };
 
 struct Config {
   // Listeners. `listen_http` is optional: without it port 80 stays with
@@ -52,15 +53,25 @@ struct Config {
 
   // Hosts never terminated here (exact names or "*.parent").
   std::vector<std::string> passthrough_hosts;
-  NonTlsAction non_tls = NonTlsAction::kReject;
+  FallbackRoute non_tls = FallbackRoute::kReject;
+  // ClientHello without SNI. Passed through, Traefik would route it by the
+  // Host header and skip every check here, so it is rejected by default.
+  FallbackRoute no_sni = FallbackRoute::kReject;
 
   std::chrono::milliseconds client_hello_timeout{5000};
   std::chrono::milliseconds tls_handshake_timeout{10000};
   std::chrono::milliseconds upstream_connect_timeout{5000};
   std::chrono::milliseconds idle_timeout{300000};
+  // From the end of the TLS handshake (or the first byte of a keep-alive
+  // request) until the request headers are complete.
+  std::chrono::milliseconds request_headers_timeout{10000};
   std::chrono::milliseconds drain_timeout{30000};
 
   std::size_t max_connections = 100000;
+  // Requests on one client connection; then HTTP/1.1 closes it and HTTP/2
+  // sends GOAWAY, so a client has to reconnect (and pass the connection
+  // limits again).
+  std::size_t max_requests_per_connection = 1000;
 
   // Analytics events. No NATS server means no events (and no HTTP taps).
   std::optional<Endpoint> events_nats;
@@ -86,6 +97,9 @@ struct Config {
   int64_t new_connections_per_ip = 0;
   std::chrono::milliseconds new_connections_period{1000};
   int64_t new_connections_burst = 1;
+  // Connections per IP that have not finished their first request's headers
+  // (ClientHello, handshake, headers): bounds slowloris-style clients.
+  std::size_t pending_connections_per_ip = 128;
   // Known crawlers ("crawlers" section): verify search crawlers by reverse
   // DNS, and what to do with AI crawlers (unset: score them like anyone).
   bool crawlers_verify = true;
@@ -97,6 +111,16 @@ struct Config {
   int challenge_suspicious_difficulty = 16;
   int challenge_bot_difficulty = 19;
   int challenge_token_credit = 40;
+  // Requests to /__bs/* per client IP (challenge pages and solutions); they
+  // are answered here and bypass the other rate limits.
+  int64_t challenge_endpoint_rate = 30;
+  std::chrono::milliseconds challenge_endpoint_period{60000};
+  int64_t challenge_endpoint_burst = 10;
+  // Under-attack mode ("attack" section): a host gets it automatically when
+  // its request rate stays above `attack_auto_rps` (0 = only by the admin
+  // API) and keeps it for `attack_auto_duration`.
+  int64_t attack_auto_rps = 0;
+  std::chrono::milliseconds attack_auto_duration{std::chrono::minutes(10)};
   // Admin API on a unix socket (mode 0600); empty disables.
   std::string admin_socket;
   // Operational lists survive restarts in this JSON file; empty: memory.

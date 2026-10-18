@@ -75,7 +75,8 @@ class H1ServerConnection
 
   llhttp_settings_t parser_settings_{};
   llhttp_t parser_{};
-  std::string buffer_;  // Received, not yet parsed.
+  std::string buffer_;        // Received, not yet parsed.
+  std::size_t requests_ = 0;  // Request heads completed on this connection.
 
   // Current request.
   std::string method_;

@@ -1,6 +1,7 @@
 add_library(bot_shield_core STATIC
   challenge/challenger.cc
   challenge/token.cc
+  admin/attack.cc
   admin/decision_log.cc
   admin/lists.cc
   admin/server.cc

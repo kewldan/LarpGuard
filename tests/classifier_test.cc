@@ -44,7 +44,7 @@ class ClassifierTest : public ::testing::Test {
   }
 
   CertSnapshot certificates_;
-  Classifier classifier_{{"grpc.test", "*.raw.test"}, NonTlsAction::kReject};
+  Classifier classifier_{{"grpc.test", "*.raw.test"}, FallbackRoute::kReject};
 };
 
 TEST_F(ClassifierTest, TerminatesKnownHost) {
@@ -60,8 +60,7 @@ TEST_F(ClassifierTest, PassesAcmeTlsAlpnThrough) {
   EXPECT_EQ(decision.reason, RouteReason::kAcmeTlsAlpn);
 }
 
-TEST_F(ClassifierTest, PassesUnknownOrMissingServerNameThrough) {
-  EXPECT_EQ(Classify(Hello("")).reason, RouteReason::kNoServerName);
+TEST_F(ClassifierTest, PassesUnknownServerNameThrough) {
   const RouteDecision decision = Classify(Hello("unknown.test"));
   EXPECT_EQ(decision.route, Route::kPassthrough);
   EXPECT_EQ(decision.reason, RouteReason::kNoCertificate);
@@ -82,8 +81,27 @@ TEST_F(ClassifierTest, RejectsInvalidAndNonTls) {
   EXPECT_EQ(decision.reason, RouteReason::kNotTls);
 }
 
+// Traefik would route a passed-through connection without SNI by its Host
+// header, past every check here.
+TEST_F(ClassifierTest, RejectsMissingServerNameByDefault) {
+  const RouteDecision decision = Classify(Hello(""));
+  EXPECT_EQ(decision.route, Route::kReject);
+  EXPECT_EQ(decision.reason, RouteReason::kNoServerName);
+  // ACME TLS-ALPN-01 always carries SNI; without it the ALPN still wins.
+  EXPECT_EQ(Classify(Hello("", {"acme-tls/1"})).route, Route::kPassthrough);
+}
+
+TEST_F(ClassifierTest, MissingServerNamePassthroughWhenConfigured) {
+  const Classifier classifier({}, FallbackRoute::kReject,
+                              FallbackRoute::kPassthrough);
+  const RouteDecision decision =
+      classifier.Classify(ParseStatus::kOk, Hello(""), certificates_);
+  EXPECT_EQ(decision.route, Route::kPassthrough);
+  EXPECT_EQ(decision.reason, RouteReason::kNoServerName);
+}
+
 TEST_F(ClassifierTest, NonTlsPassthroughWhenConfigured) {
-  const Classifier classifier({}, NonTlsAction::kPassthrough);
+  const Classifier classifier({}, FallbackRoute::kPassthrough);
   const RouteDecision decision =
       classifier.Classify(ParseStatus::kNotTls, Hello(""), certificates_);
   EXPECT_EQ(decision.route, Route::kPassthrough);

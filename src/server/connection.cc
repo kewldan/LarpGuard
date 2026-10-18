@@ -58,7 +58,9 @@
 #include "proxy/http_message.h"
 #include "proxy/proxy_hooks.h"
 #include "proxy/transport.h"
+#include "ratelimit/gcra.h"
 #include "ratelimit/limits.h"
+#include "ratelimit/store.h"
 #include "score/policy.h"
 #include "score/rules.h"
 #include "score/scorer.h"
@@ -123,6 +125,35 @@ std::string HostOnly(std::string_view authority) {
   return NormalizeHost(authority.substr(0, authority.find(':')));
 }
 
+// A per-IP slot for a connection that has not finished its first request's
+// headers yet; released then, when the connection is passed through, or when
+// it ends.
+class PendingSlot {
+ public:
+  PendingSlot() = default;
+  ~PendingSlot() { Release(); }
+
+  PendingSlot(const PendingSlot&) = delete;
+  PendingSlot& operator=(const PendingSlot&) = delete;
+
+  // False if `ip` already has `limit` pending connections.
+  bool Acquire(ConnectionCounter* counter, std::string ip, std::size_t limit) {
+    if (!counter->Acquire(ip, limit)) return false;
+    counter_ = counter;
+    ip_ = std::move(ip);
+    return true;
+  }
+  void Release() {
+    if (counter_ == nullptr) return;
+    counter_->Release(ip_);
+    counter_ = nullptr;
+  }
+
+ private:
+  ConnectionCounter* counter_ = nullptr;
+  std::string ip_;
+};
+
 // Per-connection observation: fingerprints, byte counters and the passive HTTP
 // taps. Emits a "conn" event when the handler finishes and a "req" event for
 // every request the taps see. Never touches the proxied bytes.
@@ -153,6 +184,8 @@ class ConnectionObserver {
   ConnectionObserver& operator=(const ConnectionObserver&) = delete;
 
   ConnectionRecord& record() { return record_; }
+  // Released once the first request's headers are in.
+  void set_pending_slot(PendingSlot* slot) { pending_slot_ = slot; }
 
   void OnSyn(std::span<const uint8_t> packet) {
     TcpSyn syn;
@@ -207,6 +240,10 @@ class ConnectionObserver {
   // Request headers are parsed: score them, tell Traefik the verdict in
   // X-Bot-* headers and, when enforcing, answer a block ourselves.
   void OnProxyRequest(Exchange& exchange) {
+    if (pending_slot_ != nullptr) {
+      pending_slot_->Release();
+      pending_slot_ = nullptr;
+    }
     exchange.request_id = std::format("{}-{}-{}",
                                       context_.event_settings != nullptr
                                           ? context_.event_settings->instance
@@ -239,6 +276,14 @@ class ConnectionObserver {
     // "off": plain proxying, no verdicts and no limits.
     exchange.mode = HostModeName(mode);
     if (mode == HostMode::kOff) return;
+    // Under-attack mode: counted before the verdict so a flood of any
+    // class trips the automatic switch.
+    bool under_attack = false;
+    if (context_.attack != nullptr && context_.challenger != nullptr) {
+      under_attack = context_.attack->Active(host, now) ||
+                     context_.attack->CountRequest(host, now, SteadyNanos(),
+                                                   context_.rate_limit_store);
+    }
     const HttpRequest& request = exchange.observed;
     std::string pseudo;
     for (const std::string& name : request.pseudo_header_order) {
@@ -324,6 +369,17 @@ class ConnectionObserver {
       decision.would_action = Action::kAllow;
       decision.action = Action::kAllow;
     }
+    // Under attack every host challenges clients without a token, shadow
+    // mode or not; explicit allows (rules, lists) and verified crawlers pass.
+    if (under_attack && !token_valid && !verified_crawler &&
+        override_action != Action::kAllow &&
+        decision.action == Action::kAllow) {
+      decision.action = Action::kChallenge;
+      decision.would_action = Action::kChallenge;
+      decision.enforce = true;
+      verdict.reasons.emplace_back("under_attack");
+      GlobalMetrics().attack_challenges.Inc();
+    }
 
     exchange.score = verdict.score;
     exchange.bot_class = BotClassName(verdict.bot_class);
@@ -408,6 +464,28 @@ class ConnectionObserver {
                                        : target.substr(question + 1);
     exchange.mode = "challenge";
     Metrics& metrics = GlobalMetrics();
+    // Answered here, so the request rate limits never see these paths.
+    const Config& config = *context_.config;
+    const GcraResult allowed = context_.rate_limit_store->Check(
+        "bs\x1f" + Unmapped(record_.peer).to_string(),
+        GcraParams::FromRate(
+            config.challenge_endpoint_rate,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                config.challenge_endpoint_period)
+                .count(),
+            config.challenge_endpoint_burst),
+        SteadyNanos());
+    if (!allowed.allowed) {
+      metrics.challenge_endpoint_limited.Inc();
+      exchange.action = "rate_limit";
+      exchange.rate_limit = "challenge_endpoint";
+      exchange.RespondLocally(
+          429, "too many requests\n",
+          {{"retry-after",
+            std::to_string(RetryAfterSeconds(allowed.retry_after_ns))},
+           {"cache-control", "no-store"}});
+      return;
+    }
     if (path == "/__bs/verify") {
       const Challenger::Result result =
           context_.challenger->Verify(query, binding, now);
@@ -618,6 +696,7 @@ class ConnectionObserver {
   const GatewayContext& context_;
   ConnectionRecord record_;
   std::unique_ptr<H1Tap> h1_;
+  PendingSlot* pending_slot_ = nullptr;
   int request_sequence_ = 0;
 };
 
@@ -654,7 +733,11 @@ void CountRoute(const RouteDecision& decision) {
       metrics.route_passthrough_acme_tls_alpn.Inc();
       break;
     case RouteReason::kNoServerName:
-      metrics.route_passthrough_no_server_name.Inc();
+      if (decision.route == Route::kPassthrough) {
+        metrics.route_passthrough_no_server_name.Inc();
+      } else {
+        metrics.rejected_no_server_name.Inc();
+      }
       break;
     case RouteReason::kPassthroughPolicy:
       metrics.route_passthrough_policy.Inc();
@@ -868,7 +951,17 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
   Metrics& metrics = GlobalMetrics();
   metrics.connections_https.Inc();
   const ConnectionInfo info = MakeConnectionInfo(socket);
+  PendingSlot pending;
+  const std::size_t pending_limit = context.config->pending_connections_per_ip;
+  if (pending_limit > 0 &&
+      !pending.Acquire(context.pending_counter,
+                       Unmapped(info.peer.address()).to_string(),
+                       pending_limit)) {
+    metrics.rejected_pending_per_ip.Inc();
+    co_return;
+  }
   ConnectionObserver observer(context, info, "https");
+  observer.set_pending_slot(&pending);
   if (const auto syn = ReadSavedSyn(socket.native_handle()); !syn.empty()) {
     metrics.syn_captured.Inc();
     observer.OnSyn(syn);
@@ -916,6 +1009,9 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
     case Route::kReject:
       co_return;
     case Route::kPassthrough:
+      // Nothing more to see here; Traefik applies its own timeouts.
+      observer.set_pending_slot(nullptr);
+      pending.Release();
       co_await RunPassthrough(std::move(socket), std::move(buffer),
                               context.upstream_https, info, hello.server_name,
                               context, observer);

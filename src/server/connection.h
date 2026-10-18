@@ -6,6 +6,7 @@
 #include <asio/ssl/context.hpp>
 #include <string>
 
+#include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "challenge/challenger.h"
@@ -57,8 +58,12 @@ struct GatewayContext {
   // Operational allow/block lists and the recent-decision log (admin API).
   const ListStore* lists = nullptr;
   DecisionLog* decisions = nullptr;
+  // Under-attack mode (admin API and attack.auto_rps); shared.
+  AttackMode* attack = nullptr;
   // Per-IP connection limits at accept time (shared).
   ConnectionCounter* connection_counter = nullptr;
+  // Per-IP connections still before their first request headers (shared).
+  ConnectionCounter* pending_counter = nullptr;
   // Analytics events; null when disabled.
   EventSink* events = nullptr;
   const EventSettings* event_settings = nullptr;

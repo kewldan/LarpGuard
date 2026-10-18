@@ -33,6 +33,15 @@ struct Metrics {
   Counter rejected_not_tls;
   Counter rejected_invalid_hello;
   Counter client_hello_timeouts;
+  Counter rejected_no_server_name;
+  Counter rejected_pending_per_ip;
+  Counter request_header_timeouts;
+  Counter connection_request_limits;
+  Counter h2_client_resets;
+  Counter challenge_endpoint_limited;
+  Gauge attack_hosts;
+  Counter attack_auto_activations;
+  Counter attack_challenges;
 
   Counter route_terminate;
   Counter route_passthrough_acme_tls_alpn;

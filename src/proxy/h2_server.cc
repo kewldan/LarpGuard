@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "common/metrics.h"
+#include "net/watchdog.h"
 #include "proxy/exchange.h"
 #include "proxy/h2_connection.h"
 #include "proxy/http_message.h"
@@ -28,6 +29,17 @@ constexpr uint32_t kMaxConcurrentStreams = 100;
 constexpr uint32_t kInitialWindowSize = 1 << 20;
 constexpr int32_t kConnectionWindowSize = 1 << 24;
 constexpr uint32_t kMaxHeaderListSize = 64 * 1024;
+// Flood limits, set explicitly rather than relying on nghttp2's defaults.
+// Rapid reset (CVE-2023-44487): RST_STREAM from the client drains a token
+// bucket; when it is empty nghttp2 sends GOAWAY. Browsers cancel a few
+// streams on navigation, never hundreds.
+constexpr uint64_t kStreamResetBurst = 200;
+constexpr uint64_t kStreamResetRate = 33;
+// CONTINUATION flood (CVE-2024-27316 and relatives): frames per header block.
+constexpr std::size_t kMaxContinuations = 8;
+// Pending SETTINGS/PING ACKs (SETTINGS and PING floods).
+constexpr std::size_t kMaxOutboundAck = 1000;
+constexpr std::size_t kMaxSettingsEntries = 32;
 constexpr std::string_view kBadGateway = "bad gateway\n";
 constexpr std::string_view kMethodNotAllowed = "method not allowed\n";
 
@@ -58,7 +70,8 @@ H2ServerConnection::H2ServerConnection(std::unique_ptr<Transport> transport,
     : H2Connection(std::move(transport), settings.idle_timeout),
       pool_(pool),
       client_(std::move(client)),
-      hooks_(std::move(hooks)) {
+      hooks_(std::move(hooks)),
+      settings_(settings) {
   nghttp2_session_callbacks* callbacks = nullptr;
   nghttp2_session_callbacks_new(&callbacks);
   nghttp2_session_callbacks_set_on_begin_headers_callback(callbacks,
@@ -67,12 +80,19 @@ H2ServerConnection::H2ServerConnection(std::unique_ptr<Transport> transport,
   nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks, &OnFrameRecv);
   nghttp2_session_callbacks_set_on_data_chunk_recv_callback(callbacks,
                                                             &OnDataChunk);
+  nghttp2_session_callbacks_set_on_invalid_frame_recv_callback(
+      callbacks, &OnInvalidFrameRecv);
   nghttp2_session_callbacks_set_on_stream_close_callback(callbacks,
                                                          &OnStreamClose);
   nghttp2_option* option = nullptr;
   nghttp2_option_new(&option);
   // Window updates follow what the upstream actually consumed.
   nghttp2_option_set_no_auto_window_update(option, 1);
+  nghttp2_option_set_stream_reset_rate_limit(option, kStreamResetBurst,
+                                             kStreamResetRate);
+  nghttp2_option_set_max_continuations(option, kMaxContinuations);
+  nghttp2_option_set_max_outbound_ack(option, kMaxOutboundAck);
+  nghttp2_option_set_max_settings(option, kMaxSettingsEntries);
   nghttp2_session_server_new2(&session_, callbacks, this, option);
   nghttp2_option_del(option);
   nghttp2_session_callbacks_del(callbacks);
@@ -88,7 +108,32 @@ void H2ServerConnection::Start() {
                           settings.size());
   nghttp2_session_set_local_window_size(session_, NGHTTP2_FLAG_NONE, 0,
                                         kConnectionWindowSize);
+  UpdateHeadersDeadline();
   StartIo();
+}
+
+void H2ServerConnection::OnInputProcessed() { UpdateHeadersDeadline(); }
+
+void H2ServerConnection::UpdateHeadersDeadline() {
+  if (closed()) return;
+  if (!AwaitingHeaders()) {
+    if (headers_deadline_) {
+      headers_deadline_->Stop();
+      headers_deadline_.reset();
+    }
+    return;
+  }
+  if (headers_deadline_) return;
+  std::weak_ptr<H2Connection> weak = weak_from_this();
+  headers_deadline_ = Watchdog::Create(
+      transport_->executor(), settings_.request_headers_timeout, [weak] {
+        auto self = weak.lock();
+        if (!self || self->closed()) return;
+        auto* server = static_cast<H2ServerConnection*>(self.get());
+        if (!server->AwaitingHeaders()) return;
+        GlobalMetrics().request_header_timeouts.Inc();
+        server->Close();
+      });
 }
 
 void H2ServerConnection::OnBytesRead(std::span<const uint8_t> data) {
@@ -116,6 +161,10 @@ void H2ServerConnection::Report(Stream& stream) const {
 }
 
 void H2ServerConnection::OnClosed() {
+  if (headers_deadline_) {
+    headers_deadline_->Stop();
+    headers_deadline_.reset();
+  }
   for (auto& [id, stream] : streams_) {
     if (stream->exchange) {
       if (!stream->exchange->response_ended) {
@@ -128,6 +177,18 @@ void H2ServerConnection::OnClosed() {
 }
 
 void H2ServerConnection::OnRequestHeaders(Stream& stream, bool end_stream) {
+  if (requests_ >= settings_.max_requests_per_connection) {
+    // Arrived before the client saw our GOAWAY.
+    nghttp2_submit_rst_stream(session_, NGHTTP2_FLAG_NONE, stream.id,
+                              NGHTTP2_REFUSED_STREAM);
+    return;
+  }
+  if (++requests_ == settings_.max_requests_per_connection) {
+    // Graceful: streams up to this one finish, the client reconnects.
+    GlobalMetrics().connection_request_limits.Inc();
+    nghttp2_submit_goaway(session_, NGHTTP2_FLAG_NONE, stream.id,
+                          NGHTTP2_NO_ERROR, nullptr, 0);
+  }
   if (!fingerprint_.complete()) {
     fingerprint_.OnFirstRequest(stream.observed.pseudo_header_order);
   }
@@ -210,11 +271,10 @@ void H2ServerConnection::OnResponseProgress(int32_t id) {
 int H2ServerConnection::OnBeginHeaders(nghttp2_session* session,
                                        const nghttp2_frame* frame,
                                        void* user_data) {
-  if (frame->hd.type != NGHTTP2_HEADERS ||
-      frame->headers.cat != NGHTTP2_HCAT_REQUEST) {
-    return 0;
-  }
+  if (frame->hd.type != NGHTTP2_HEADERS) return 0;
   auto* self = static_cast<H2ServerConnection*>(user_data);
+  self->header_block_stream_ = frame->hd.stream_id;
+  if (frame->headers.cat != NGHTTP2_HCAT_REQUEST) return 0;
   auto stream = std::make_unique<Stream>();
   stream->id = frame->hd.stream_id;
   stream->observed.version = "2";
@@ -288,7 +348,13 @@ int H2ServerConnection::OnFrameRecv(nghttp2_session* /*session*/,
           static_cast<uint32_t>(frame->priority.pri_spec.stream_id),
           frame->priority.pri_spec.weight);
       break;
+    case NGHTTP2_RST_STREAM:
+      GlobalMetrics().h2_client_resets.Inc();
+      break;
     case NGHTTP2_HEADERS: {
+      if (self->header_block_stream_ == frame->hd.stream_id) {
+        self->header_block_stream_ = 0;
+      }
       Stream* stream = self->FindStream(frame->hd.stream_id);
       if (stream == nullptr) break;
       if (frame->headers.cat == NGHTTP2_HCAT_REQUEST) {
@@ -324,11 +390,24 @@ int H2ServerConnection::OnDataChunk(nghttp2_session* session, uint8_t /*flags*/,
   return 0;
 }
 
+int H2ServerConnection::OnInvalidFrameRecv(nghttp2_session* /*session*/,
+                                           const nghttp2_frame* frame,
+                                           int /*error_code*/,
+                                           void* user_data) {
+  auto* self = static_cast<H2ServerConnection*>(user_data);
+  if (frame->hd.type == NGHTTP2_HEADERS &&
+      self->header_block_stream_ == frame->hd.stream_id) {
+    self->header_block_stream_ = 0;
+  }
+  return 0;
+}
+
 int H2ServerConnection::OnStreamClose(nghttp2_session* /*session*/,
                                       int32_t stream_id,
                                       uint32_t /*error_code*/,
                                       void* user_data) {
   auto* self = static_cast<H2ServerConnection*>(user_data);
+  if (self->header_block_stream_ == stream_id) self->header_block_stream_ = 0;
   Stream* stream = self->FindStream(stream_id);
   if (stream == nullptr) return 0;
   if (stream->exchange) {

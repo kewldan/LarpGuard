@@ -262,6 +262,78 @@ def h1_exchange(port, server_name, cafile, raw, responses=1,
     return results
 
 
+H2_PREFACE = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+H2_DATA, H2_HEADERS, H2_RST_STREAM, H2_SETTINGS, H2_GOAWAY = 0, 1, 3, 4, 7
+H2_END_STREAM, H2_END_HEADERS = 0x1, 0x4
+
+
+def h2_frame(kind, flags, stream, payload=b""):
+    return (struct.pack(">I", len(payload))[1:] + bytes([kind, flags]) +
+            struct.pack(">I", stream) + payload)
+
+
+def h2_request_block(authority, path="/"):
+    """HPACK for GET https://<authority><path>, no Huffman, no indexing."""
+    return (b"\x82\x87" + b"\x04" + bytes([len(path)]) + path.encode() +
+            b"\x01" + bytes([len(authority)]) + authority.encode())
+
+
+def h2_connect(port, server_name, cafile):
+    tls = tls_socket(port, server_name, cafile, ["h2"])
+    expect(tls.selected_alpn_protocol() == "h2", "no h2")
+    tls.sendall(H2_PREFACE + h2_frame(H2_SETTINGS, 0, 0) +
+                h2_frame(H2_SETTINGS, 1, 0))
+    return tls
+
+
+def h2_read_frames(tls, timeout=10):
+    """Reads frames until the server closes; [(kind, flags, stream, data)]."""
+    tls.settimeout(timeout)
+    data = b""
+    while True:
+        try:
+            chunk = tls.recv(65536)
+        except (ConnectionError, ssl.SSLError):
+            break
+        if not chunk:
+            break
+        data += chunk
+    frames = []
+    while len(data) >= 9:
+        length = int.from_bytes(data[:3], "big")
+        if len(data) < 9 + length:
+            break
+        frames.append((data[3], data[4],
+                       int.from_bytes(data[5:9], "big") & 0x7fffffff,
+                       data[9:9 + length]))
+        data = data[9 + length:]
+    return frames
+
+
+def wait_closed(sock, timeout):
+    """Seconds until the peer closes `sock` (fails after `timeout`)."""
+    started = time.monotonic()
+    sock.settimeout(timeout)
+    try:
+        while sock.recv(4096):
+            pass
+    except (ConnectionError, ssl.SSLError):
+        pass
+    except socket.timeout:
+        raise AssertionError(f"still open after {timeout}s")
+    return time.monotonic() - started
+
+
+def read_metrics(url):
+    body = urllib.request.urlopen(url + "/metrics", timeout=2).read().decode()
+    values = {}
+    for line in body.splitlines():
+        if line and not line.startswith("#"):
+            key, value = line.rsplit(" ", 1)
+            values[key] = float(value)
+    return values
+
+
 def h1_get(port, server_name, cafile, path, extra=b""):
     raw = (f"GET {path} HTTP/1.1\r\nHost: {server_name}\r\n".encode() + extra +
            b"\r\n")
@@ -975,14 +1047,85 @@ log_level: debug
             expect("127.0.0.1" not in payload, payload)
             expect("6.6.6.6" not in payload, payload)
 
+    def under_attack():
+        html = b"Accept: text/html\r\n"
+        status, data = admin_call(admin_socket, "POST", "/attack",
+                                  {"host": "a.test", "ttl": "5m"})
+        expect(status == 201 and data["host"] == "a.test", (status, data))
+        # a.test is a shadow host, yet everyone without a token is challenged.
+        status, headers, body = h1_get(https_port, "a.test", ca_a,
+                                       "/attack/page", html)
+        expect(status == 403 and headers["content-type"].startswith(
+            "text/html"), (status, headers))
+        status, _, api = h1_get(https_port, "a.test", ca_a, "/attack/api")
+        expect(status == 403 and b"challenge_required" in api, (status, api))
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/attack/page")
+        expect("under_attack" in event["reasons"], event)
+        # Explicit allows (rules) and other hosts pass.
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/attack/monitor",
+                              b"X-Monitor: e2e-token\r\n")
+        expect(status == 200, status)
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/attack/other",
+                              html)
+        expect(status == 200, status)
+        # A solved challenge lets the client through.
+        verify = solve_challenge(body.decode())
+        status, headers, _ = h1_get(https_port, "a.test", ca_a, verify)
+        expect(status == 302, status)
+        cookie = headers["set-cookie"].split(";")[0]
+        status, _, body = h1_get(https_port, "a.test", ca_a, "/attack/page",
+                                 html + f"Cookie: {cookie}\r\n".encode())
+        expect(status == 200, (status, body))
+        status, data = admin_call(admin_socket, "GET", "/attack")
+        expect([e["host"] for e in data["entries"]] == ["a.test"], data)
+        status, _ = admin_call(admin_socket, "DELETE", "/attack/a.test")
+        expect(status == 200, status)
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/attack/page", html)
+        expect(status == 200, status)
+
+    def challenge_endpoint_limit():
+        # /__bs/* is answered here: its own per-IP limit (default 30/m,
+        # burst 10), not the request rate limits.
+        statuses = [h1_get(https_port, "a.test", ca_a,
+                           "/__bs/challenge?r=%2F")[0] for _ in range(15)]
+        expect(statuses[0] == 200 and statuses[-1] == 429, statuses)
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/after-bs")
+        expect(status == 200, status)
+
+    def no_sni_rejected():
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        raw = socket.create_connection(("127.0.0.1", https_port), timeout=5)
+        try:
+            with context.wrap_socket(raw, server_hostname=None) as tls:
+                tls.sendall(b"GET / HTTP/1.1\r\nHost: a.test\r\n\r\n")
+                expect(tls.recv(1024) == b"", "served without SNI")
+        except (ssl.SSLError, ConnectionError):
+            pass
+
+    def h2_rapid_reset():
+        with h2_connect(https_port, "a.test", ca_a) as tls:
+            burst = b""
+            for i in range(300):
+                stream = 1 + 2 * i
+                burst += h2_frame(H2_HEADERS, H2_END_HEADERS, stream,
+                                  h2_request_block("a.test", "/reset"))
+                burst += h2_frame(H2_RST_STREAM, 0, stream,
+                                  struct.pack(">I", 8))  # CANCEL
+            try:
+                tls.sendall(burst)
+            except (ConnectionError, ssl.SSLError):
+                pass
+            frames = h2_read_frames(tls)
+        goaway = [f for f in frames if f[0] == H2_GOAWAY]
+        expect(goaway, [f[0] for f in frames][:20])
+        last_stream, code = struct.unpack(">II", goaway[0][3][:8])
+        expect(code != 0 and last_stream < 599, (last_stream, code))
+
     def metrics_exposed():
-        body = urllib.request.urlopen(metrics_url + "/metrics",
-                                      timeout=2).read().decode()
-        values = {}
-        for line in body.splitlines():
-            if line and not line.startswith("#"):
-                key, value = line.rsplit(" ", 1)
-                values[key] = float(value)
+        values = read_metrics(metrics_url)
         proxied = values['bot_shield_proxied_requests_total{source="upstream"}']
         expect(proxied >= 60, f"proxied {proxied}")
         opened = values["bot_shield_upstream_connections_opened_total"]
@@ -1001,7 +1144,7 @@ log_level: debug
                "rate limited in shadow")
         expect(values['bot_shield_connections_rejected_total'
                       '{reason="client_hello_timeout"}'] >= 1, "timeout count")
-        expect(values['bot_shield_challenges_total{result="passed"}'] == 1,
+        expect(values['bot_shield_challenges_total{result="passed"}'] == 2,
                "challenges passed")
         expect(values['bot_shield_challenges_total{result="failed"}'] == 1,
                "challenges failed")
@@ -1013,6 +1156,13 @@ log_level: debug
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
         expect(values['bot_shield_events_total{result="published"}'] >= 50,
                "events published")
+        expect(values['bot_shield_connections_rejected_total'
+                      '{reason="no_server_name"}'] >= 1, "no SNI rejected")
+        expect(values["bot_shield_h2_client_resets_total"] >= 100, "resets")
+        expect(values["bot_shield_attack_challenges_total"] >= 2, "attack")
+        expect(values["bot_shield_attack_hosts"] == 0, "attack hosts")
+        expect(values["bot_shield_challenge_endpoint_limited_total"] >= 1,
+               "challenge endpoint limit")
 
     for name, fn in [
         ("h1: GET with forwarding headers over the h2 pool", h1_get_forwarding),
@@ -1033,6 +1183,10 @@ log_level: debug
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),
         ("admin API: status, policy, lists, decisions", admin_api),
+        ("under attack: challenge without token, admin switch", under_attack),
+        ("/__bs/* endpoints: own per-IP limit", challenge_endpoint_limit),
+        ("ClientHello without SNI rejected", no_sni_rejected),
+        ("h2: rapid reset ends in GOAWAY", h2_rapid_reset),
         ("wildcard certificate", wildcard_certificate),
         ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),
@@ -1100,6 +1254,143 @@ metrics:
             limited.wait(timeout=10)
 
     checks.run("connection limits: new connections per IP", connection_limits)
+
+    # A gateway with tight protection settings of its own.
+    guarded_port, guarded_metrics = free_port(), free_port()
+    guarded_acme = os.path.join(workdir, "guarded-acme.json")
+    write_atomic(guarded_acme, acme_json([(*gw_a, "a.test")]))
+    guarded_config = os.path.join(workdir, "guarded.yaml")
+    with open(guarded_config, "w") as f:
+        f.write(f"""
+listen:
+  https: 127.0.0.1:{guarded_port}
+  http: ""
+traefik:
+  acme_json: {guarded_acme}
+  upstream_https: 127.0.0.1:{tls_port}
+timeouts:
+  request_headers: 1s
+max_requests_per_connection: 5
+connection_limits:
+  pending_per_ip: 2
+metrics:
+  listen: 127.0.0.1:{guarded_metrics}
+""")
+    guarded = subprocess.Popen([binary, "--config", guarded_config],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+    wait_port(guarded_port)
+
+    def h1_request_headers_timeout():
+        # Silent after the handshake: closed after request_headers.
+        with tls_socket(guarded_port, "a.test", ca_a, ["http/1.1"]) as tls:
+            elapsed = wait_closed(tls, 5)
+        expect(0.8 < elapsed < 3, f"closed after {elapsed:.1f}s")
+        # Slowloris: a header line every 300 ms never completes the head.
+        with tls_socket(guarded_port, "a.test", ca_a, ["http/1.1"]) as tls:
+            started = time.monotonic()
+            tls.sendall(b"GET / HTTP/1.1\r\nHost: a.test\r\n")
+            closed = False
+            for i in range(20):
+                time.sleep(0.3)
+                try:
+                    tls.sendall(f"X-Slow-{i}: 1\r\n".encode())
+                except (ConnectionError, ssl.SSLError):
+                    closed = True
+                    break
+            if not closed:
+                wait_closed(tls, 2)
+            elapsed = time.monotonic() - started
+        expect(elapsed < 3, f"slowloris lasted {elapsed:.1f}s")
+        # Keep-alive: idling between requests is fine, the next head gets
+        # its own deadline.
+        with tls_socket(guarded_port, "a.test", ca_a, ["http/1.1"]) as tls:
+            reader = tls.makefile("rb")
+            for _ in range(2):
+                tls.sendall(b"GET / HTTP/1.1\r\nHost: a.test\r\n\r\n")
+                response = http.client.HTTPResponse(_Buffered(reader))
+                response.begin()
+                response.read()
+                expect(response.status == 200, response.status)
+                time.sleep(1.5)
+
+    def h2_request_headers_timeout():
+        with h2_connect(guarded_port, "a.test", ca_a) as tls:
+            started = time.monotonic()
+            frames = h2_read_frames(tls, timeout=5)
+            elapsed = time.monotonic() - started
+        expect(0.8 < elapsed < 3, f"closed after {elapsed:.1f}s")
+        expect(frames and frames[0][0] == H2_SETTINGS, frames)
+        # A header block left open (no END_HEADERS) after the first request.
+        with h2_connect(guarded_port, "a.test", ca_a) as tls:
+            tls.sendall(h2_frame(H2_HEADERS, H2_END_HEADERS | H2_END_STREAM,
+                                 1, h2_request_block("a.test")) +
+                        h2_frame(H2_HEADERS, 0, 3,
+                                 h2_request_block("a.test")))
+            started = time.monotonic()
+            frames = h2_read_frames(tls, timeout=5)
+            elapsed = time.monotonic() - started
+        expect(any(f[0] == H2_HEADERS and f[2] == 1 for f in frames), frames)
+        expect(elapsed < 3, f"open header block lasted {elapsed:.1f}s")
+
+    def requests_per_connection():
+        raw = b"GET / HTTP/1.1\r\nHost: a.test\r\n\r\n" * 5
+        results = h1_exchange(guarded_port, "a.test", ca_a, raw, responses=5)
+        expect([r[0] for r in results] == [200] * 5, results)
+        expect(all(r[1].get("connection") != "close" for r in results[:4]),
+               results)
+        expect(results[4][1].get("connection") == "close", results[4][1])
+        with h2_connect(guarded_port, "a.test", ca_a) as tls:
+            tls.sendall(b"".join(
+                h2_frame(H2_HEADERS, H2_END_HEADERS | H2_END_STREAM, 1 + 2 * i,
+                         h2_request_block("a.test", f"/r{i}"))
+                for i in range(8)))
+            frames = h2_read_frames(tls)
+        goaway = [f for f in frames if f[0] == H2_GOAWAY]
+        expect(goaway, [f[0] for f in frames])
+        last_stream, code = struct.unpack(">II", goaway[0][3][:8])
+        expect((last_stream, code) == (9, 0), (last_stream, code))
+        answered = sorted({f[2] for f in frames if f[0] == H2_HEADERS})
+        expect(answered == [1, 3, 5, 7, 9], answered)
+
+    def pending_per_ip():
+        # Two connections that never send a ClientHello hold both slots.
+        held = [socket.create_connection(("127.0.0.1", guarded_port),
+                                         timeout=5) for _ in range(2)]
+        time.sleep(0.2)
+        try:
+            with socket.create_connection(("127.0.0.1", guarded_port),
+                                          timeout=5) as third:
+                elapsed = wait_closed(third, 2)
+            expect(elapsed < 0.5, f"third connection open {elapsed:.1f}s")
+        finally:
+            for s in held:
+                s.close()
+        time.sleep(0.2)
+        status, _, _ = h1_get(guarded_port, "a.test", ca_a, "/")
+        expect(status == 200, status)
+        values = read_metrics(f"http://127.0.0.1:{guarded_metrics}")
+        expect(values['bot_shield_connections_rejected_total'
+                      '{reason="pending_per_ip"}'] >= 1, "pending rejections")
+        expect(values["bot_shield_request_header_timeouts_total"] >= 4,
+               "header timeouts")
+        expect(values["bot_shield_connection_request_limit_total"] >= 2,
+               "request limits")
+
+    try:
+        for name, fn in [
+            ("timeouts: h1 request headers (silent, slowloris)",
+             h1_request_headers_timeout),
+            ("timeouts: h2 first request and open header block",
+             h2_request_headers_timeout),
+            ("limits: requests per connection (h1 close, h2 GOAWAY)",
+             requests_per_connection),
+            ("limits: pending connections per IP", pending_per_ip),
+        ]:
+            checks.run(name, fn)
+    finally:
+        guarded.send_signal(signal.SIGTERM)
+        guarded.wait(timeout=10)
     if process.poll() is None:
         process.kill()
     upstream_process.kill()

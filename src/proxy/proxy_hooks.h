@@ -27,6 +27,12 @@ struct ProxyHooks {
 
 struct ProxySettings {
   std::chrono::milliseconds idle_timeout{300000};
+  // The first request's headers must be complete this long after the
+  // connection starts; later ones this long after their first byte
+  // (HTTP/1.1) or HEADERS frame (HTTP/2).
+  std::chrono::milliseconds request_headers_timeout{10000};
+  // Then HTTP/1.1 answers with "Connection: close" and HTTP/2 sends GOAWAY.
+  std::size_t max_requests_per_connection = 1000;
   // Request body buffered per exchange before the client is throttled.
   std::size_t max_buffered_body = std::size_t{1} << 20;
 };

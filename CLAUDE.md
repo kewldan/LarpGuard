@@ -89,8 +89,9 @@ ninja-build git python3 openssl`, исходники монтировать read
   (`watcher`). Приоритет режима: `policy.hosts` в YAML → лейблы → `mode`.
 - `src/admin/` — admin API на unix-сокете (`server`), оперативные списки
   (`lists`: главнее правил, allow побеждает block) и журнал решений
-  (`decision_log`). Новый эндпоинт — в `HandleAdminRequest` + тест в
-  `admin_test.cc`.
+  (`decision_log`), режим «под атакой» (`attack`: челлендж всем без
+  токена, admin API и `attack.auto_rps`). Новый эндпоинт — в
+  `HandleAdminRequest` + тест в `admin_test.cc`.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в
@@ -113,6 +114,11 @@ ninja-build git python3 openssl`, исходники монтировать read
   любой проблеме отключаются; они не могут повлиять на проксирование.
 - Всё, что шлюз не может корректно обслужить, уходит в Traefik
   (passthrough), а не закрывается: добавление шлюза не должно ломать сайты.
+  Исключение — ClientHello без SNI (`no_sni: reject`): Traefik
+  маршрутизирует passthrough по `Host`, это обход проверок (раздел 11.1).
+- Защита самого шлюза (тайм-ауты заголовков, `pending_per_ip`, лимиты
+  nghttp2, `max_requests_per_connection`) описана в разделе 11.1
+  `docs/architecture.md`; новые лимиты — с e2e-проверкой.
 - Горячий путь без синхронного сетевого I/O и без глобальных блокировок
   (кроме взятия снапшота сертификатов).
 

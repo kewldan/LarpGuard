@@ -34,10 +34,18 @@ passthrough_hosts: []
 
 # HTTPS-port traffic that is not TLS: reject | passthrough.
 non_tls: reject
+# ClientHello without SNI: reject | passthrough. Traefik routes passed-through
+# TLS by the Host header, so passing these on would skip every check here;
+# see also the TLS options in deploy/traefik-tls.yml.
+no_sni: reject
 
 timeouts:
   client_hello: 5s
   tls_handshake: 10s
+  # Request headers: the first request within this time after the
+  # handshake, later ones within this time after their first byte (HTTP/1.1)
+  # or HEADERS frame (HTTP/2). Slow clients (slowloris) are closed.
+  request_headers: 10s
   upstream_connect: 5s
   idle: 300s
   drain: 30s
@@ -45,6 +53,10 @@ timeouts:
   upstream_idle: 90s
 
 max_connections: 100000
+# Requests per client connection; then HTTP/1.1 answers "Connection: close"
+# and HTTP/2 sends GOAWAY, so the client reconnects past the connection
+# limits again.
+max_requests_per_connection: 1000
 
 events:
   # NATS server for analytics events (subjects <subject_prefix>.conn and
@@ -126,6 +138,10 @@ connection_limits:
   open_per_ip: 0
   new_per_ip: ""
   new_burst_per_ip: 1
+  # Connections per IP still before their first request's headers
+  # (ClientHello, handshake, headers). Short-lived for real clients, so it is
+  # on even behind NAT; 0 = off.
+  pending_per_ip: 128
 
 # botshield.* labels on containers (mode, passthrough, rate limits) read
 # from the Docker Engine API. "" disables. Policies in this file (policy.hosts)
@@ -156,11 +172,26 @@ challenge:
   # Leading zero bits of SHA-256 (~1M hashes/s per core in a browser).
   difficulty: {suspicious: 16, bot: 19}
   token_credit: 40
+  # /__bs/* (challenge pages, solutions) per client IP. They are answered
+  # here and bypass rate_limits.
+  endpoint_rate: 30/m
+  endpoint_burst: 10
+
+# Under-attack mode: every client without a valid __bs token gets the
+# challenge (shadow hosts too; allow rules, allow lists and verified crawlers
+# pass). Switched per host or for all ("*") by the admin API:
+#   POST /attack {"host": "shop.example.com", "ttl": "1h"}, DELETE /attack/<host>
+# or automatically for a host whose rate stays above auto_rps for ~10 s.
+attack:
+  # Requests per second per host; 0 = admin API only.
+  auto_rps: 0
+  auto_duration: 10m
 
 # Admin API (JSON over a unix socket, mode 0600; no TCP port):
 #   curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
 # GET /status, GET /policy?host=, GET|POST /lists, DELETE /lists/<id>,
-# GET /decisions[?limit=&host=&class=], GET /decisions/<request id>.
+# GET /decisions[?limit=&host=&class=], GET /decisions/<request id>,
+# GET|POST /attack, DELETE /attack/<host>.
 admin:
   socket: /run/bot-shield/admin.sock
   # Operational allow/block lists survive restarts here ("" = memory only).

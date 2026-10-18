@@ -39,7 +39,6 @@ using asio::experimental::awaitable_operators::operator&&;
 
 constexpr std::size_t kReadChunk = std::size_t{16} * 1024;
 constexpr std::size_t kMaxHeadBytes = std::size_t{64} * 1024;
-constexpr auto kHeadTimeout = std::chrono::seconds(30);
 constexpr std::string_view kBadGateway = "bad gateway\n";
 
 std::string Lowercase(std::string_view text) {
@@ -503,10 +502,12 @@ asio::awaitable<void> H1ServerConnection::Run() {
     message_complete_ = false;
     response_done_ = false;
 
-    // Request head: idle wait for the first byte, then a bounded deadline.
-    if (buffer_.empty() && !co_await ReadMore()) break;
+    // Request head. The first request must be complete within
+    // request_headers of the handshake; a keep-alive connection may idle
+    // until the next request starts, which then gets the same deadline.
+    if (requests_ > 0 && buffer_.empty() && !co_await ReadMore()) break;
     {
-      ScopedWatchdog deadline(executor, kHeadTimeout,
+      ScopedWatchdog deadline(executor, settings_.request_headers_timeout,
                               [this] { transport_->Close(); });
       bool ok = true;
       while (!headers_complete_) {
@@ -521,11 +522,18 @@ asio::awaitable<void> H1ServerConnection::Run() {
         }
       }
       if (!ok) {
-        if (!buffer_.empty() || headers_too_large_) {
+        if (deadline->expired()) {
+          GlobalMetrics().request_header_timeouts.Inc();
+        } else if (!buffer_.empty() || headers_too_large_) {
           co_await RespondError(headers_too_large_ ? 431 : 400);
         }
         break;
       }
+    }
+    if (++requests_ >= settings_.max_requests_per_connection && keep_alive_) {
+      // The response says "Connection: close"; the client reconnects.
+      keep_alive_ = false;
+      GlobalMetrics().connection_request_limits.Inc();
     }
 
     if (upgrade_) {

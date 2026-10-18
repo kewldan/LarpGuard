@@ -223,6 +223,10 @@ Worker::Worker(int index, GatewayContext shared, const Config& config)
   pool_ = std::make_unique<UpstreamPool>(io_context_.get_executor(), upstream);
   context_.pool = pool_.get();
   context_.proxy_settings.idle_timeout = config.idle_timeout;
+  context_.proxy_settings.request_headers_timeout =
+      config.request_headers_timeout;
+  context_.proxy_settings.max_requests_per_connection =
+      config.max_requests_per_connection;
 }
 
 bool Worker::Listen(const tcp::endpoint& https,
@@ -311,11 +315,15 @@ Gateway::Gateway(const Config& config, const CertStore* certificates,
                  const GatewayServices& services)
     : config_(config),
       certificates_(certificates),
-      classifier_(config.passthrough_hosts, config.non_tls),
+      classifier_(config.passthrough_hosts, config.non_tls, config.no_sni),
       scorer_(services.library, config.policy.suspicious_threshold,
               config.policy.bot_threshold),
       policy_(config.policy),
-      services_(services) {}
+      services_(services),
+      attack_(config.attack_auto_rps,
+              std::chrono::duration_cast<std::chrono::seconds>(
+                  config.attack_auto_duration)
+                  .count()) {}
 
 Gateway::~Gateway() {
   Stop();
@@ -343,6 +351,8 @@ bool Gateway::Start(std::string* error) {
   shared.rate_limits = &rate_limits_;
   shared.rate_limit_store = &rate_limit_store_;
   shared.connection_counter = &connection_counter_;
+  shared.pending_counter = &pending_counter_;
+  shared.attack = &attack_;
   shared.events = services_.events;
   shared.event_settings = services_.event_settings;
   if (!ResolveEndpoint(config_.upstream_https, &shared.upstream_https, error) ||
@@ -391,6 +401,7 @@ bool Gateway::Start(std::string* error) {
       admin_.rate_limit_store = &rate_limit_store_;
       admin_.rate_limits = &rate_limits_;
       admin_.policy = &policy_;
+      admin_.attack = &attack_;
       admin_.started_ms =
           std::chrono::duration_cast<std::chrono::milliseconds>(
               std::chrono::system_clock::now().time_since_epoch())

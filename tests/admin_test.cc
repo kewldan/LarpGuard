@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/server.h"
@@ -150,6 +151,61 @@ TEST(ListStoreTest, PersistsToStateFile) {
   std::remove(path.c_str());
 }
 
+TEST(AttackModeTest, HostsWildcardsAndExpiry) {
+  AttackMode attack(0, 600);
+  EXPECT_FALSE(attack.Active("shop.test", kNow));
+  std::string error;
+  ASSERT_TRUE(
+      attack.Enable({"Shop.Test", "admin", kNow, kNow + 60}, kNow, &error))
+      << error;
+  ASSERT_TRUE(attack.Enable({"*.api.test", "admin", kNow, 0}, kNow, &error));
+  EXPECT_TRUE(attack.Active("shop.test", kNow));
+  EXPECT_TRUE(attack.Active("v1.api.test", kNow));
+  EXPECT_FALSE(attack.Active("other.test", kNow));
+  // Expired entries stop matching and disappear.
+  EXPECT_FALSE(attack.Active("shop.test", kNow + 60));
+  EXPECT_EQ(attack.Entries(kNow + 60).size(), 1u);
+  EXPECT_FALSE(attack.Enable({"bad host", "admin", kNow, 0}, kNow, &error));
+
+  ASSERT_TRUE(attack.Enable({"*", "admin", kNow, 0}, kNow, &error));
+  EXPECT_TRUE(attack.Active("other.test", kNow));
+  EXPECT_TRUE(attack.Disable("*"));
+  EXPECT_FALSE(attack.Disable("*"));
+  EXPECT_FALSE(attack.Active("other.test", kNow));
+}
+
+TEST(AttackModeTest, SwitchesOnAboveAutoRps) {
+  RateLimitStore store;
+  AttackMode off(0, 600);
+  AttackMode attack(10, 600);
+  constexpr int64_t kSecond = 1'000'000'000;
+  int64_t now_ns = kSecond;
+  // At the threshold the host never trips.
+  for (int i = 0; i < 300; ++i) {
+    EXPECT_FALSE(attack.CountRequest("shop.test", kNow, now_ns, &store));
+    EXPECT_FALSE(off.CountRequest("shop.test", kNow, now_ns, &store));
+    now_ns += kSecond / 10;
+  }
+  EXPECT_FALSE(attack.Active("shop.test", kNow));
+  // Twice the threshold: about ten seconds of excess switch it on.
+  bool switched = false;
+  int requests = 0;
+  while (!switched && requests < 1000) {
+    switched = attack.CountRequest("shop.test", kNow, now_ns, &store);
+    now_ns += kSecond / 20;
+    ++requests;
+  }
+  EXPECT_TRUE(switched);
+  EXPECT_GT(requests, 150);
+  EXPECT_TRUE(attack.Active("shop.test", kNow));
+  EXPECT_FALSE(attack.Active("other.test", kNow));
+  const std::vector<AttackEntry> entries = attack.Entries(kNow);
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].source, "auto");
+  EXPECT_EQ(entries[0].until, kNow + 600);
+  EXPECT_FALSE(attack.Active("shop.test", kNow + 600));
+}
+
 TEST(DecisionLogTest, BoundedNewestFirstWithFilters) {
   DecisionLog log(3);
   for (int i = 0; i < 5; ++i) {
@@ -191,6 +247,7 @@ class AdminServerTest : public ::testing::Test {
     context_.rate_limit_store = &store_;
     context_.rate_limits = &rate_limits_;
     context_.policy = policy_.get();
+    context_.attack = &attack_;
     context_.started_ms = (kNow - 100) * 1000;
     context_.workers = 2;
   }
@@ -207,6 +264,7 @@ class AdminServerTest : public ::testing::Test {
   RateLimitStore store_;
   RateLimitSet rate_limits_;
   std::unique_ptr<Policy> policy_;
+  AttackMode attack_{0, 600};
   AdminContext context_;
 };
 
@@ -272,6 +330,33 @@ TEST_F(AdminServerTest, Decisions) {
   EXPECT_TRUE(Call("GET", "/decisions?class=human").body["decisions"].empty());
   EXPECT_EQ(Call("GET", "/decisions?limit=0").status, 400);
   EXPECT_EQ(Call("GET", "/decisions?limit=x").status, 400);
+}
+
+TEST_F(AdminServerTest, AttackMode) {
+  AdminResponse response =
+      Call("POST", "/attack", R"({"host":"Shop.Test","ttl":"1h"})");
+  ASSERT_EQ(response.status, 201) << response.body.dump();
+  EXPECT_EQ(response.body["host"], "shop.test");
+  EXPECT_EQ(response.body["until"], kNow + 3600);
+  EXPECT_TRUE(attack_.Active("shop.test", kNow));
+  ASSERT_EQ(Call("POST", "/attack", R"({"host":"*"})").status, 201);
+
+  response = Call("GET", "/attack");
+  ASSERT_EQ(response.status, 200);
+  ASSERT_EQ(response.body["entries"].size(), 2u);
+  EXPECT_EQ(response.body["entries"][0]["source"], "admin");
+  EXPECT_FALSE(response.body["entries"][1].contains("until"));
+  EXPECT_EQ(Call("GET", "/status").body["attack_entries"], 2);
+
+  EXPECT_EQ(Call("POST", "/attack", "{bad").status, 400);
+  EXPECT_EQ(Call("POST", "/attack", R"({"host":"a b"})").status, 400);
+  EXPECT_EQ(Call("POST", "/attack", R"({"host":"x.test","ttl":"-1s"})").status,
+            400);
+  EXPECT_EQ(Call("DELETE", "/attack/*").status, 200);
+  EXPECT_EQ(Call("DELETE", "/attack/shop.test").status, 200);
+  EXPECT_EQ(Call("DELETE", "/attack/shop.test").status, 404);
+  EXPECT_FALSE(attack_.Active("shop.test", kNow));
+  EXPECT_EQ(Call("PUT", "/attack").status, 405);
 }
 
 TEST(AdminConfigTest, Parses) {

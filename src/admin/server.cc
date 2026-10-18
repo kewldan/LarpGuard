@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "common/host.h"
@@ -36,6 +37,7 @@
 #include "common/metrics.h"
 #include "common/url.h"
 #include "common/version.h"
+#include "config/config.h"
 #include "docker/labels.h"
 #include "net/watchdog.h"
 #include "proxy/http_message.h"
@@ -69,6 +71,9 @@ AdminResponse Status(const AdminContext& context, int64_t now_seconds) {
        {"connections_active", metrics.connections_active.Get()},
        {"rate_limit_keys", context.rate_limit_store->size()},
        {"list_entries", context.lists->Entries(now_seconds).size()},
+       {"attack_entries", context.attack != nullptr
+                              ? context.attack->Entries(now_seconds).size()
+                              : 0},
        {"nats_connected", metrics.nats_connected.Get() == 1},
        {"events_published", metrics.events_published.Get()},
        {"events_dropped", metrics.events_dropped.Get()}}};
@@ -148,6 +153,75 @@ AdminResponse Lists(std::string_view method, std::string_view rest,
     if (!context.lists->Remove(id, &error)) return Error(404, error);
     log::Info("admin: list entry {} removed", id);
     return {200, {{"removed", id}}};
+  }
+  return Error(405, "method not allowed");
+}
+
+nlohmann::json AttackToJson(const AttackEntry& entry) {
+  nlohmann::json json = {
+      {"host", entry.host}, {"source", entry.source}, {"since", entry.since}};
+  if (entry.until != 0) json["until"] = entry.until;
+  return json;
+}
+
+// Under-attack mode: GET lists hosts, POST {"host": "<host>|*", "ttl":
+// "1h"} switches one on (no ttl: until switched off), DELETE /attack/<host>
+// switches it off.
+AdminResponse Attack(std::string_view method, std::string_view rest,
+                     std::string_view body, const AdminContext& context,
+                     int64_t now_seconds) {
+  if (context.attack == nullptr) return Error(404, "attack mode unavailable");
+  if (rest.empty() && method == "GET") {
+    nlohmann::json entries = nlohmann::json::array();
+    for (const AttackEntry& entry : context.attack->Entries(now_seconds)) {
+      entries.push_back(AttackToJson(entry));
+    }
+    return {200,
+            {{"entries", entries}, {"auto_rps", context.attack->auto_rps()}}};
+  }
+  if (rest.empty() && method == "POST") {
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, false);
+    if (json.is_discarded() || !json.is_object()) {
+      return Error(400, "body must be a JSON object");
+    }
+    const auto host = json.find("host");
+    if (host == json.end() || !host->is_string()) {
+      return Error(400, R"(expected {"host": "<host>" or "*"})");
+    }
+    AttackEntry entry;
+    entry.host = host->get<std::string>();
+    entry.source = "admin";
+    entry.since = now_seconds;
+    if (const auto ttl = json.find("ttl"); ttl != json.end()) {
+      int64_t seconds = 0;
+      std::chrono::milliseconds duration{0};
+      if (ttl->is_number_integer()) {
+        seconds = ttl->get<int64_t>();
+      } else if (ttl->is_string() &&
+                 ParseDuration(ttl->get<std::string>(), &duration)) {
+        seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+      }
+      if (seconds <= 0) {
+        return Error(400, "ttl must be positive seconds or a duration like 1h");
+      }
+      entry.until = now_seconds + seconds;
+    }
+    std::string error;
+    if (!context.attack->Enable(entry, now_seconds, &error)) {
+      return Error(400, error);
+    }
+    log::Warn("admin: under-attack mode on for {}", entry.host);
+    entry.host = NormalizeHost(entry.host);
+    return {201, AttackToJson(entry)};
+  }
+  if (!rest.empty() && method == "DELETE") {
+    const std::string host = PercentDecode(rest.substr(1));
+    if (!context.attack->Disable(host)) {
+      return Error(404, "host is not under attack");
+    }
+    log::Info("admin: under-attack mode off for {}", host);
+    return {200, {{"removed", host}}};
   }
   return Error(405, "method not allowed");
 }
@@ -261,6 +335,9 @@ AdminResponse HandleAdminRequest(std::string_view method,
   }
   if (path == "/lists" || path.starts_with("/lists/")) {
     return Lists(method, path.substr(6), body, context, now_seconds);
+  }
+  if (path == "/attack" || path.starts_with("/attack/")) {
+    return Attack(method, path.substr(7), body, context, now_seconds);
   }
   if (path == "/decisions" || path.starts_with("/decisions/")) {
     if (method != "GET") return Error(405, "method not allowed");

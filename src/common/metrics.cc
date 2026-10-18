@@ -58,6 +58,25 @@ std::string Metrics::RenderPrometheus() const {
                rejected_invalid_hello.Get());
   AppendSample(&out, "bot_shield_connections_rejected_total",
                R"(reason="client_hello_timeout")", client_hello_timeouts.Get());
+  AppendSample(&out, "bot_shield_connections_rejected_total",
+               R"(reason="no_server_name")", rejected_no_server_name.Get());
+  AppendSample(&out, "bot_shield_connections_rejected_total",
+               R"(reason="pending_per_ip")", rejected_pending_per_ip.Get());
+
+  AppendHeader(&out, "bot_shield_request_header_timeouts_total", "counter",
+               "Client connections closed for slow request headers.");
+  AppendSample(&out, "bot_shield_request_header_timeouts_total", "",
+               request_header_timeouts.Get());
+
+  AppendHeader(&out, "bot_shield_connection_request_limit_total", "counter",
+               "Client connections ended after max_requests_per_connection.");
+  AppendSample(&out, "bot_shield_connection_request_limit_total", "",
+               connection_request_limits.Get());
+
+  AppendHeader(&out, "bot_shield_h2_client_resets_total", "counter",
+               "RST_STREAM frames received from HTTP/2 clients.");
+  AppendSample(&out, "bot_shield_h2_client_resets_total", "",
+               h2_client_resets.Get());
 
   AppendHeader(&out, "bot_shield_routes_total", "counter",
                "Routing decisions for TLS connections.");
@@ -157,6 +176,25 @@ std::string Metrics::RenderPrometheus() const {
                challenges_passed.Get());
   AppendSample(&out, "bot_shield_challenges_total", R"(result="failed")",
                challenges_failed.Get());
+
+  AppendHeader(&out, "bot_shield_challenge_endpoint_limited_total", "counter",
+               "Requests to /__bs/* refused by challenge.endpoint_rate.");
+  AppendSample(&out, "bot_shield_challenge_endpoint_limited_total", "",
+               challenge_endpoint_limited.Get());
+
+  AppendHeader(&out, "bot_shield_attack_hosts", "gauge",
+               "Under-attack entries (hosts, or * for all) in effect.");
+  AppendSample(&out, "bot_shield_attack_hosts", "", attack_hosts.Get());
+
+  AppendHeader(&out, "bot_shield_attack_auto_activations_total", "counter",
+               "Hosts put under attack by attack.auto_rps.");
+  AppendSample(&out, "bot_shield_attack_auto_activations_total", "",
+               attack_auto_activations.Get());
+
+  AppendHeader(&out, "bot_shield_attack_challenges_total", "counter",
+               "Challenges issued because the host was under attack.");
+  AppendSample(&out, "bot_shield_attack_challenges_total", "",
+               attack_challenges.Get());
 
   AppendHeader(&out, "bot_shield_tokens_valid_total", "counter",
                "Requests carrying a valid clearance token.");

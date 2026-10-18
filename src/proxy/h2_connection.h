@@ -50,6 +50,8 @@ class H2Connection : public std::enable_shared_from_this<H2Connection> {
   virtual void OnClosed() = 0;
   virtual bool HasOpenStreams() const = 0;
   virtual void OnBytesRead(std::span<const uint8_t> /*data*/) {}
+  // After nghttp2 has processed a chunk of input without a fatal error.
+  virtual void OnInputProcessed() {}
   virtual void OnBytesWritten(std::size_t /*size*/) {}
 
   // nghttp2 name/value pairs pointing into `headers` (kept alive by caller).

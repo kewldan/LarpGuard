@@ -86,6 +86,22 @@ bool ReadEndpoint(const YAML::Node& parent, std::string_view section,
   return true;
 }
 
+bool ReadFallbackRoute(const YAML::Node& parent, const char* key,
+                       FallbackRoute* out, std::string* error) {
+  const YAML::Node node = parent[key];
+  if (!node) return true;
+  const auto value = node.as<std::string>();
+  if (value == "reject") {
+    *out = FallbackRoute::kReject;
+  } else if (value == "passthrough") {
+    *out = FallbackRoute::kPassthrough;
+  } else {
+    *error = std::format("{}: expected reject or passthrough", key);
+    return false;
+  }
+  return true;
+}
+
 // An empty string disables the endpoint.
 bool ReadOptionalEndpoint(const YAML::Node& parent, std::string_view section,
                           const char* key, std::optional<Endpoint>* out,
@@ -149,8 +165,8 @@ bool ParseTraefik(const YAML::Node& node, Config* config, std::string* error) {
 
 bool ParseTimeouts(const YAML::Node& node, Config* config, std::string* error) {
   if (!CheckKeys(node, "timeouts",
-                 {"client_hello", "tls_handshake", "upstream_connect", "idle",
-                  "drain", "upstream_idle"},
+                 {"client_hello", "tls_handshake", "request_headers",
+                  "upstream_connect", "idle", "drain", "upstream_idle"},
                  error)) {
     return false;
   }
@@ -158,6 +174,8 @@ bool ParseTimeouts(const YAML::Node& node, Config* config, std::string* error) {
                       &config->client_hello_timeout, error) &&
          ReadDuration(node, "timeouts", "tls_handshake",
                       &config->tls_handshake_timeout, error) &&
+         ReadDuration(node, "timeouts", "request_headers",
+                      &config->request_headers_timeout, error) &&
          ReadDuration(node, "timeouts", "upstream_connect",
                       &config->upstream_connect_timeout, error) &&
          ReadDuration(node, "timeouts", "idle", &config->idle_timeout, error) &&
@@ -353,8 +371,10 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "traefik",
                   "passthrough_hosts",
                   "non_tls",
+                  "no_sni",
                   "timeouts",
                   "max_connections",
+                  "max_requests_per_connection",
                   "events",
                   "mode",
                   "policy",
@@ -364,6 +384,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "docker",
                   "admin",
                   "challenge",
+                  "attack",
                   "crawlers",
                   "fingerprints",
                   "metrics",
@@ -401,16 +422,9 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       config->passthrough_hosts.push_back(host);
     }
   }
-  if (root["non_tls"]) {
-    const auto value = root["non_tls"].as<std::string>();
-    if (value == "reject") {
-      config->non_tls = NonTlsAction::kReject;
-    } else if (value == "passthrough") {
-      config->non_tls = NonTlsAction::kPassthrough;
-    } else {
-      *error = "non_tls: expected reject or passthrough";
-      return false;
-    }
+  if (!ReadFallbackRoute(root, "non_tls", &config->non_tls, error) ||
+      !ReadFallbackRoute(root, "no_sni", &config->no_sni, error)) {
+    return false;
   }
   if (root["timeouts"] && !ParseTimeouts(root["timeouts"], config, error)) {
     return false;
@@ -422,6 +436,14 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       return false;
     }
     config->max_connections = static_cast<std::size_t>(value);
+  }
+  if (root["max_requests_per_connection"]) {
+    const auto value = root["max_requests_per_connection"].as<int64_t>();
+    if (value <= 0) {
+      *error = "max_requests_per_connection: expected a positive number";
+      return false;
+    }
+    config->max_requests_per_connection = static_cast<std::size_t>(value);
   }
   if (root["events"] && !ParseEvents(root["events"], config, error)) {
     return false;
@@ -463,9 +485,19 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     if (!ParseRateLimits(limits, config, error)) return false;
   }
   if (const YAML::Node limits = root["connection_limits"]) {
-    if (!CheckKeys(limits, "connection_limits",
-                   {"open_per_ip", "new_per_ip", "new_burst_per_ip"}, error)) {
+    if (!CheckKeys(
+            limits, "connection_limits",
+            {"open_per_ip", "new_per_ip", "new_burst_per_ip", "pending_per_ip"},
+            error)) {
       return false;
+    }
+    if (limits["pending_per_ip"]) {
+      const auto value = limits["pending_per_ip"].as<int64_t>();
+      if (value < 0) {
+        *error = "connection_limits.pending_per_ip: expected >= 0";
+        return false;
+      }
+      config->pending_connections_per_ip = static_cast<std::size_t>(value);
     }
     if (limits["open_per_ip"]) {
       const auto value = limits["open_per_ip"].as<int64_t>();
@@ -515,7 +547,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   }
   if (const YAML::Node challenge = root["challenge"]) {
     if (!CheckKeys(challenge, "challenge",
-                   {"keys_file", "token_ttl", "difficulty", "token_credit"},
+                   {"keys_file", "token_ttl", "difficulty", "token_credit",
+                    "endpoint_rate", "endpoint_burst"},
                    error) ||
         !ReadDuration(challenge, "challenge", "token_ttl",
                       &config->challenge_token_ttl, error)) {
@@ -549,6 +582,35 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       if (config->challenge_token_credit < 0 ||
           config->challenge_token_credit > 100) {
         *error = "challenge.token_credit: expected 0..100";
+        return false;
+      }
+    }
+    if (challenge["endpoint_rate"] &&
+        !ParseRate(challenge["endpoint_rate"].as<std::string>(),
+                   &config->challenge_endpoint_rate,
+                   &config->challenge_endpoint_period)) {
+      *error = "challenge.endpoint_rate: expected a rate like 30/m";
+      return false;
+    }
+    if (challenge["endpoint_burst"]) {
+      config->challenge_endpoint_burst =
+          challenge["endpoint_burst"].as<int64_t>();
+      if (config->challenge_endpoint_burst < 1) {
+        *error = "challenge.endpoint_burst: expected >= 1";
+        return false;
+      }
+    }
+  }
+  if (const YAML::Node attack = root["attack"]) {
+    if (!CheckKeys(attack, "attack", {"auto_rps", "auto_duration"}, error) ||
+        !ReadDuration(attack, "attack", "auto_duration",
+                      &config->attack_auto_duration, error)) {
+      return false;
+    }
+    if (attack["auto_rps"]) {
+      config->attack_auto_rps = attack["auto_rps"].as<int64_t>();
+      if (config->attack_auto_rps < 0) {
+        *error = "attack.auto_rps: expected >= 0 (0 = off)";
         return false;
       }
     }

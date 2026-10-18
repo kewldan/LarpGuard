@@ -43,10 +43,14 @@ struct RouteDecision {
 
 // Decides, from the ClientHello alone, whether a connection is terminated
 // here or handed to Traefik as is. Anything we cannot serve correctly goes to
-// Traefik, so adding the gateway never breaks a site.
+// Traefik, so adding the gateway never breaks a site. The exception is a
+// ClientHello without SNI (by default): Traefik routes such a connection by
+// its Host header, so passing it through would let any client reach a
+// protected site past every check here.
 class Classifier {
  public:
-  Classifier(std::vector<std::string> passthrough_hosts, NonTlsAction non_tls);
+  Classifier(std::vector<std::string> passthrough_hosts, FallbackRoute non_tls,
+             FallbackRoute no_sni = FallbackRoute::kReject);
 
   RouteDecision Classify(ParseStatus status, const ClientHello& hello,
                          const CertSnapshot& certificates) const;
@@ -55,7 +59,8 @@ class Classifier {
   bool IsPassthroughHost(std::string_view host) const;
 
   std::vector<std::string> passthrough_hosts_;
-  NonTlsAction non_tls_;
+  FallbackRoute non_tls_;
+  FallbackRoute no_sni_;
 };
 
 }  // namespace bot_shield

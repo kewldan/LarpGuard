@@ -1,0 +1,26 @@
+# Traefik dynamic configuration (file provider) for running behind
+# bot-shield. Loaded by providers.file in deploy/traefik.yml.
+#
+# Connections bot-shield cannot terminate (no certificate for the SNI,
+# passthrough hosts, ACME TLS-ALPN-01) reach Traefik as raw TLS. Traefik
+# routes HTTPS by the Host header, not the SNI, so without the options below
+# a client could reach a protected site past every bot-shield check
+# (checked on Traefik v3.5):
+#   curl -k --connect-to grpc.example.com:443:<ip>:443 \
+#        -H 'Host: shop.example.com' https://grpc.example.com/
+tls:
+  options:
+    # sniStrict: no handshake without SNI or with an SNI Traefik has no
+    # certificate for (bot-shield rejects missing SNI as well, see no_sni).
+    default:
+      sniStrict: true
+      minVersion: VersionTLS12
+    # Same settings under another name, for the routers of passthrough
+    # hosts (passthrough_hosts and botshield.passthrough labels):
+    #   traefik.http.routers.<router>.tls.options=passthrough@file
+    # When the SNI and the Host header belong to routers with different TLS
+    # options, Traefik answers 421 Misdirected Request, so the SNI of a
+    # passthrough host can no longer carry requests for a protected one.
+    passthrough:
+      sniStrict: true
+      minVersion: VersionTLS12

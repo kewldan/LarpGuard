@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/server.h"
@@ -114,6 +115,8 @@ class Gateway {
   RateLimitSet rate_limits_;
   RateLimitStore rate_limit_store_;
   ConnectionCounter connection_counter_;
+  ConnectionCounter pending_counter_;
+  AttackMode attack_;
   std::vector<std::unique_ptr<Worker>> workers_;
 };
 

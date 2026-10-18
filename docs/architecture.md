@@ -1,6 +1,6 @@
 # bot-shield: архитектура
 
-Статус: черновик v0.1 · 2026-10-17
+Статус: черновик v0.1 · 2026-10-18
 
 bot-shield — self-hosted шлюз для фильтрации ботов, скрепинга и прочей
 автоматизации. Основной метод — отпечатки клиента на уровнях TCP, TLS, HTTP и
@@ -100,6 +100,10 @@ JS и проверка их согласованности с тем, кем к�
    только если тот пришёл, поэтому оба вида соединений живут на одном
    entrypoint (проверено на Traefik v3.5). Пример — `deploy/traefik.yml`.
 3. Сертификаты, ACME-резолверы, роутеры, middleware и лейблы остаются как есть.
+   Добавляются TLS-опции из `deploy/traefik-tls.yml` (`sniStrict` и
+   отдельная опция `passthrough@file` для роутеров passthrough-хостов) и
+   редирект `web` → HTTPS — иначе passthrough-соединения и порт 80 обходят
+   проверки шлюза (раздел 11.1).
 
 Что делает bot-shield:
 
@@ -111,7 +115,9 @@ JS и проверка их согласованности с тем, кем к�
   (TLS-ALPN-01) отдаёт Traefik на уровне L4.
 - Для SNI, которого нет в `acme.json`, делает L4 passthrough только с
   IP-лимитами. Новый сайт не сломается до появления сертификата, а после
-  перечитывания `acme.json` сразу попадёт под защиту.
+  перечитывания `acme.json` сразу попадёт под защиту. ClientHello без SNI по
+  умолчанию отклоняется (`no_sni: reject`): Traefik маршрутизирует HTTPS по
+  `Host`, и такое соединение дошло бы до защищённого сайта мимо проверок.
 - Слушает docker socket (read-only), как и Traefik, и берёт политики из лейблов
   `botshield.*` (раздел 9).
 
@@ -542,9 +548,16 @@ rate_limits:
   скорость новых (`new_per_ip`, `new_burst_per_ip`) — проверяются сразу
   после `accept`, до TLS (самой дорогой части). По умолчанию выключены:
   за общим NAT много честных клиентов делят один IP.
-- Таймауты: хендшейк 5 с, заголовки 10 с, idle 60 с, минимальная скорость тела.
-- Лимиты H2: `MAX_CONCURRENT_STREAMS`, защита от rapid reset и flood
-  SETTINGS/PING/CONTINUATION.
+- `pending_per_ip` ✅ (по умолчанию 128): соединения с IP, которые ещё не
+  дошли до заголовков первого запроса (ClientHello, хендшейк, заголовки).
+- Таймауты ✅: ClientHello 5 с, хендшейк 10 с, заголовки запроса 10 с
+  (`timeouts.request_headers`), idle 300 с. Минимальная скорость тела —
+  позже.
+- Лимиты H2 ✅: `MAX_CONCURRENT_STREAMS` 100, rapid reset, CONTINUATION,
+  SETTINGS/PING flood; `max_requests_per_connection` для HTTP/1.1 и HTTP/2.
+- `/__bs/*` ✅ — свой лимит по IP (`challenge.endpoint_rate`).
+
+Подробности и что шлюз не защищает — раздел 11.1.
 
 ---
 
@@ -710,6 +723,138 @@ would_action`; с M3 — поля rate limit; ASN/страна — с IP-баз�
 - **Несколько узлов** (когда понадобится): два инстанса bot-shield + Traefik за
   keepalived/VRRP, состояние лимитов через Valkey, ключи токенов общие.
 
+### 11.1. Защита самого шлюза под нагрузкой
+
+Шлюз фильтрует ботов и HTTP-флуд (L7). Он сам — сетевой сервис на одном
+хосте, поэтому у него есть пределы, и часть защиты лежит за его пределами.
+
+**Что шлюз не защищает.** Объёмные атаки L3/L4 — UDP/ICMP-флуд,
+амплификация (DNS, NTP, memcached), SYN-флуд на гигабиты, забивание канала —
+до процесса не доходят или упираются в канал и ядро раньше него. Это задача
+провайдера или scrubbing-сервиса (anycast-фильтрация, BGP-переключение на
+чистку). Ниже — то, что можно сделать на самом хосте, чтобы шлюз пережил
+атаку поменьше и не стал слабым местом.
+
+**L4: обход проверок через passthrough** (проверено на Traefik v3.5).
+Passthrough отдаёт Traefik TLS как есть, а Traefik выбирает роутер по
+`Host`, а не по SNI. Без мер ниже `curl -k` с SNI неизвестного хоста или
+passthrough-хоста и `Host: <защищённый>` получал ответ защищённого сайта:
+
+| Запрос (SNI → Host)                | Traefik по умолчанию | С мерами        |
+|------------------------------------|----------------------|-----------------|
+| без SNI → `shop`                   | 200                  | шлюз: reject; Traefik: handshake failure |
+| `unknown.test` → `shop`            | 200                  | Traefik: handshake failure (`sniStrict`) |
+| `grpc` (passthrough) → `shop`      | 200                  | Traefik: 421 Misdirected Request |
+
+Меры: `no_sni: reject` в шлюзе (по умолчанию); в Traefik
+`tls.options.default.sniStrict: true` и отдельная одинаковая по содержанию
+опция `passthrough` на роутерах passthrough-хостов
+(`traefik.http.routers.<r>.tls.options=passthrough@file`) — при разных
+TLS-опциях у SNI и `Host` Traefik отвечает 421. Порт 80 проксируется в
+Traefik без проверок, поэтому на `web` остаётся только редирект на HTTPS
+(ACME HTTP-01 обрабатывается раньше редиректа). Всё это — в
+`deploy/traefik.yml` и `deploy/traefik-tls.yml`.
+
+**Медленные клиенты (slowloris).** До первого запроса соединение держит
+слот в `pending_per_ip` и ограничено тайм-аутами ClientHello, хендшейка и
+`request_headers`; заголовки каждого следующего запроса — тоже
+`request_headers` от первого байта (HTTP/1.1) или от начала блока
+HEADERS/CONTINUATION (HTTP/2). Простаивать между запросами keep-alive
+соединение может до `idle`. Метрики:
+`request_header_timeouts_total`, `connections_rejected_total{reason="pending_per_ip"}`.
+
+**HTTP/2.** nghttp2 1.69 с явно заданными лимитами: rapid reset
+(CVE-2023-44487) — корзина на 200 RST_STREAM с пополнением 33/с, после неё
+GOAWAY; не больше 8 CONTINUATION на блок заголовков (CVE-2024-27316);
+1000 ожидающих SETTINGS/PING ACK; 32 параметра в SETTINGS; «glitch»-лимит
+nghttp2 по умолчанию. `max_requests_per_connection` (1000) закрывает
+соединение (HTTP/1.1 — `Connection: close`, HTTP/2 — GOAWAY), чтобы
+атакующий снова проходил лимиты соединений. RST от клиентов видны в
+`h2_client_resets_total`.
+
+**Служебные пути.** `/__bs/challenge` и `/__bs/verify` отвечает сам шлюз,
+поэтому `rate_limits` их не видят; у них свой лимит по IP
+(`challenge.endpoint_rate`, 30/мин, burst 10).
+
+**Режим «под атакой».** `POST /attack {"host": "<host>|*", "ttl": "1h"}`
+в admin API включает челлендж для всех клиентов хоста без валидного токена
+`__bs`, независимо от скора и даже на shadow-хостах; правила и списки
+`allow` и проверенные краулеры проходят. `attack.auto_rps` включает режим
+автоматически, если RPS хоста держится выше порога ~10 с, на
+`attack.auto_duration`. Состояние — в памяти, на перезапуск не переживает.
+Метрики: `attack_hosts`, `attack_auto_activations_total`,
+`attack_challenges_total`.
+
+**Хост: sysctl.** Рекомендуемые значения (`/etc/sysctl.d/90-bot-shield.conf`):
+
+```ini
+# SYN cookies при переполнении очереди SYN: соединения не теряются,
+# очередь не забивается SYN-флудом.
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 65535
+# Очередь accept; шлюз слушает с backlog 4096, ядро обрежет до somaxconn.
+net.core.somaxconn = 65535
+net.core.netdev_max_backlog = 65535
+# Меньше повторов SYN-ACK — полуоткрытые соединения живут меньше.
+net.ipv4.tcp_synack_retries = 2
+# Быстрее освобождать ресурсы закрытых соединений.
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.ip_local_port_range = 1024 65535
+# Таблица conntrack: если nftables хранит состояние, её переполнение
+# роняет новые соединения.
+net.netfilter.nf_conntrack_max = 1048576
+fs.file-max = 2097152
+```
+
+Плюс `LimitNOFILE=1048576` для процесса (`max_connections` по умолчанию
+100 000). При `tcp_syncookies` ядро не сохраняет опции SYN, поэтому
+отпечаток TCP у соединений, принятых по cookie, может быть неполным.
+
+**Хост: nftables.** Лимит новых соединений по IP в ядре дешевле, чем в
+шлюзе (отбрасывается ещё SYN), и работает до `accept`. Пороги — с запасом
+на NAT:
+
+```nft
+table inet bot_shield {
+  set flood {
+    type ipv4_addr; flags dynamic, timeout; timeout 1m; size 262144;
+  }
+  set flood6 {
+    type ipv6_addr; flags dynamic, timeout; timeout 1m; size 262144;
+  }
+  chain input {
+    type filter hook input priority filter; policy accept;
+    tcp dport { 80, 443 } ct state new \
+      add @flood { ip saddr limit rate over 50/second burst 200 packets } drop
+    tcp dport { 80, 443 } ct state new \
+      add @flood6 { ip6 saddr and ffff:ffff:ffff:ffff:: limit rate over 50/second burst 200 packets } drop
+    # Одновременных соединений с адреса.
+    tcp dport { 80, 443 } ct state new meter conns { ip saddr ct count over 512 } drop
+  }
+}
+```
+
+IPv6 ограничивается по /64: у одного клиента обычно вся подсеть. Эти
+правила дополняют `connection_limits` шлюза, а не заменяют: шлюз видит
+TLS и HTTP и может быть точнее.
+
+**План: XDP-фильтр (будущий ADR-016).** Когда SYN-флуд или поток мусорных
+пакетов начнёт упираться в CPU ядра раньше, чем в канал, — фильтр XDP на
+сетевом интерфейсе до стека TCP:
+
+- блок-листы (CIDR) из admin API и автоматических решений шлюза — в
+  eBPF-map, которую шлюз обновляет сам;
+- SYN-cookie в XDP (`bpf_tcp_raw_gen_syncookie_ipv4`, ядро ≥ 6.0 —
+  проверить на целевом) и лимит SYN по префиксу;
+- сброс пакетов на :443/:80, которые не TCP, и фрагментов;
+- fail-open: программа снимается, если шлюз не обновлял map дольше N
+  секунд, — как watchdog из ADR-012.
+
+Открытые вопросы для ADR: драйверы сетевой карты с native XDP на целевом
+хосте (иначе generic XDP почти не выигрывает у nftables), загрузчик
+(libbpf в процессе шлюза или отдельный сервис с `CAP_BPF`), как сохранить
+сырой SYN для отпечатка TCP при SYN-cookie в XDP.
+
 ---
 
 ## 12. Наблюдаемость и эксплуатация
@@ -730,6 +875,7 @@ would_action`; с M3 — поля rate limit; ASN/страна — с IP-баз�
   | `DELETE /lists/<id>`           | удалить запись                                                 |
   | `GET /decisions?limit=&host=&class=` | последние решения (кольцевой буфер `admin.decisions`, в памяти) |
   | `GET /decisions/<request_id>`  | одно решение: сигналы, правила, действие, статус, длительность |
+  | `GET /attack`, `POST /attack`, `DELETE /attack/<host>` | режим «под атакой»: `host` (имя, `*.parent` или `*` — все), `ttl`; раздел 11.1 |
 
   Записи списков главнее правил и класса (allow побеждает block, allow
   обходит лимиты), совпадение видно в причинах как `list:<id>`; с
@@ -839,7 +985,8 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
 - `h1_server` — HTTP/1.x к клиенту на llhttp: keep-alive, pipelining по
   очереди, потоковые тела (Content-Length и chunked), `100-continue`,
   ответы с Content-Length / chunked (+ трейлеры) / до закрытия для 1.0,
-  лимит заголовков 64 КБ (431), дедлайн на заголовки 30 с.
+  лимит заголовков 64 КБ (431), дедлайн на заголовки (сейчас
+  `timeouts.request_headers`, 10 с).
 - WebSocket и другие Upgrade — отдельное HTTP/1.1-соединение к Traefik,
   после `101` — прозрачная пересылка.
 - `h2_upstream` + `upstream_pool` — пул HTTP/2 к Traefik на воркер, ключ —
@@ -928,6 +1075,27 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
   `verdicts_total{class="verified_bot"}`.
 
 Не сделано: IP-диапазоны краулеров, Web Bot Auth, лейбл `botshield.ai_crawlers`.
+
+### Статус: защита шлюза под нагрузкой
+
+По разбору поведения под L4/L7-стрессером (раздел 11.1):
+
+- `no_sni: reject` по умолчанию; `deploy/traefik-tls.yml` (`sniStrict`,
+  опция `passthrough`) и редирект `web` → HTTPS. Обход проверен до и после
+  на Traefik v3.5.
+- `timeouts.request_headers` для HTTP/1.1 и HTTP/2 (первый запрос и
+  незавершённые блоки заголовков), `connection_limits.pending_per_ip`.
+- Свой лимит для `/__bs/*` (`challenge.endpoint_rate`/`endpoint_burst`).
+- HTTP/2: явные лимиты nghttp2 (rapid reset 200/33 с⁻¹, 8 CONTINUATION,
+  SETTINGS/PING), `max_requests_per_connection`, метрика RST от клиентов.
+- Режим «под атакой» (`admin/attack`): admin API `/attack` и
+  автоматически по `attack.auto_rps`.
+- e2e: отказ без SNI, rapid reset → GOAWAY, режим «под атакой», лимит
+  `/__bs/*`, тайм-ауты заголовков (тишина, slowloris, открытый блок
+  HEADERS), лимит запросов на соединение, `pending_per_ip`.
+
+Не сделано: минимальная скорость тела запроса, XDP (план в 11.1),
+сохранение режима «под атакой» между перезапусками.
 
 ---
 

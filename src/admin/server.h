@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "config/config.h"
@@ -29,6 +30,7 @@ struct AdminContext {
   const RateLimitStore* rate_limit_store = nullptr;
   const RateLimitSet* rate_limits = nullptr;
   const Policy* policy = nullptr;
+  AttackMode* attack = nullptr;  // May be null.
   int64_t started_ms = 0;
   int workers = 0;
 };
@@ -43,6 +45,7 @@ struct AdminResponse {
 //   GET    /policy?host=<host>
 //   GET    /lists            POST /lists        DELETE /lists/<id>
 //   GET    /decisions?limit=&host=&class=       GET /decisions/<request id>
+//   GET    /attack           POST /attack       DELETE /attack/<host>
 AdminResponse HandleAdminRequest(std::string_view method,
                                  std::string_view target, std::string_view body,
                                  const AdminContext& context,

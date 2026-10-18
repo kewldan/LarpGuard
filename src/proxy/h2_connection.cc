@@ -110,6 +110,7 @@ asio::awaitable<void> H2Connection::ReadLoop() {
       Flush();
       break;
     }
+    OnInputProcessed();
     Flush();
     CloseIfDone();
   }

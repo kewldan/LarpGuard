@@ -12,6 +12,7 @@
 
 #include "fp/h2_fingerprint.h"
 #include "fp/http_request.h"
+#include "net/watchdog.h"
 #include "proxy/exchange.h"
 #include "proxy/h2_connection.h"
 #include "proxy/http_message.h"
@@ -57,6 +58,15 @@ class H2ServerConnection final : public H2Connection {
   bool HasOpenStreams() const override { return !streams_.empty(); }
   void OnBytesRead(std::span<const uint8_t> data) override;
   void OnBytesWritten(std::size_t size) override;
+  void OnInputProcessed() override;
+
+  // True until the first request's headers are complete, and while a later
+  // header block (HEADERS + CONTINUATION) is incomplete.
+  bool AwaitingHeaders() const {
+    return requests_ == 0 || header_block_stream_ != 0;
+  }
+  // Arms or disarms the request_headers deadline to match AwaitingHeaders().
+  void UpdateHeadersDeadline();
 
   Stream* FindStream(int32_t id);
   void OnRequestHeaders(Stream& stream, bool end_stream);
@@ -74,6 +84,9 @@ class H2ServerConnection final : public H2Connection {
   static int OnDataChunk(nghttp2_session* session, uint8_t flags,
                          int32_t stream_id, const uint8_t* data,
                          std::size_t size, void* user_data);
+  static int OnInvalidFrameRecv(nghttp2_session* session,
+                                const nghttp2_frame* frame, int error_code,
+                                void* user_data);
   static int OnStreamClose(nghttp2_session* session, int32_t stream_id,
                            uint32_t error_code, void* user_data);
   static nghttp2_ssize ReadResponseData(nghttp2_session* session,
@@ -85,7 +98,13 @@ class H2ServerConnection final : public H2Connection {
   UpstreamPool* pool_;
   ClientInfo client_;
   ProxyHooks hooks_;
+  ProxySettings settings_;
   H2FingerprintBuilder fingerprint_;
+  // Requests accepted on this connection (max_requests_per_connection).
+  std::size_t requests_ = 0;
+  // Stream whose header block has begun but not ended; 0 if none.
+  int32_t header_block_stream_ = 0;
+  std::shared_ptr<Watchdog> headers_deadline_;
   std::map<int32_t, std::unique_ptr<Stream>> streams_;
 };
 
