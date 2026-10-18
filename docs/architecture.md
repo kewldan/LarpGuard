@@ -717,8 +717,20 @@ would_action`; с M3 — поля rate limit; ASN/страна — с IP-баз�
 
 ### 10.4. Петля улучшения
 
-1. Кластеризация по (`ja4`, `h2_fp`, `ja4h`, `ua_family`): новые кластеры с
-   высокой долей поведенческих аномалий попадают в кандидаты.
+1. Кластеризация по (`ja4`, `h2_fp`, `header_fp`) в ClickHouse:
+   `cluster_daily` (AggregatingMergeTree, заполняется materialized view из
+   `req`, проверенные краулеры исключены) хранит по дням запросы, клиентов,
+   хосты, долю запросов с сигналами `behavior_*`/`honeypot*`/`fake_crawler`,
+   долю класса bot, попадания в honeypot, топ причин и первое появление.
+   Параметризованное представление `cluster_candidates(days, min_requests,
+   min_anomaly)` отбирает кластеры, которых библиотека ещё не знает (нет
+   `known_automation:*`), с долей аномалий не ниже порога или с попаданиями
+   в honeypot. `tools/cluster_candidates.py` печатает их таблицей или
+   (`--yaml`) готовыми записями для `automation:` в
+   `deploy/fingerprints.yaml` с предложенным весом (80 при ≥ 60 % аномалий,
+   50 при ≥ 30 %, 30 — только honeypot: это может быть один клиент за общим
+   NAT). Проверено на ClickHouse 25.8 с синтетическими событиями: браузеры,
+   известная автоматизация и проверенный краулер отфильтрованы.
 2. Кандидаты разбираются вручную через UI и `admin/api`, затем попадают в
    библиотеку отпечатков или в правила.
 3. Обновление библиотеки — версионированный файл, который шлюз применяет
@@ -972,7 +984,7 @@ TLS и HTTP и может быть точнее.
 | M2 ✅ | HTTP-aware прокси с пулом HTTP/2 (ADR-015), библиотека отпечатков, проверки согласованности, скоринг, shadow/enforce по хостам, `X-Bot-*`, блок, правила (ADR-008). |
 | M3 ✅ | Rate limiter (local) и лимиты соединений на IP, политики через docker-лейблы, admin API (статус, политика хоста, оперативные списки, журнал решений). synced/strict через Valkey — когда появятся несколько узлов. |
 | M4 ✅ | JS-челлендж + PoW, токены, хорошие боты (rDNS) и политика AI-краулеров. Web Bot Auth и IP-диапазоны краулеров — позже. |
-| M5   | Поведенческие сигналы, honeypot, tarpit/decoy, офлайн-кластеризация, fail-open watchdog.            |
+| M5 ✅ | Поведенческие сигналы, honeypot, tarpit/decoy, офлайн-кластеризация, fail-open watchdog. Горячая перезагрузка библиотеки — с M6 (UI). |
 | M6   | UI, ONNX-модель, upstream HTTP/2 (gRPC), HTTP/3 на входе.                                            |
 
 
@@ -1131,6 +1143,8 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
 - Поведение и honeypot (5.4, 6.3): `behavior/BehaviorStore`, пять сигналов,
   пути-ловушки с метками адреса и отпечатка. Метрики
   `honeypot_hits_total`, `behavior_signals_total`.
+- Офлайн-кластеризация (10.4): `cluster_daily`, `cluster_candidates`,
+  `tools/cluster_candidates.py`.
 - Действия `tarpit` и `decoy` (6.2) в `policy.actions`, правилах и
   `crawlers.ai` (списки admin API — только allow/block). Метрики
   `tarpits_active`, `tarpits_total{result}`, `decoys_total`; колонка

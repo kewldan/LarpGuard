@@ -13,8 +13,9 @@ shadow/enforce, `X-Bot-*`) и правила на своём языке (ADR-008
 M3 готов: rate limiting (`src/ratelimit/`), docker-лейблы (`src/docker/`),
 admin API (`src/admin/`). M4 готов: JS-челлендж + PoW и токены
 (`src/challenge/`), проверка краулеров по rDNS и политика AI-краулеров
-(`src/crawler/`). Следующий этап — M5 (поведенческие сигналы, honeypot,
-tarpit/decoy).
+(`src/crawler/`). M5 готов: fail-open (`src/watchdog/`),
+поведение и honeypot (`src/behavior/`), tarpit/decoy (`src/action/`),
+кластеры в ClickHouse (`tools/cluster_candidates.py`). Следующий этап — M6.
 
 ## Команды
 
