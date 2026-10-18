@@ -10,6 +10,7 @@ add_library(bot_shield_core STATIC
   common/log.cc
   common/metrics.cc
   common/network.cc
+  common/systemd.cc
   common/url.cc
   config/config.cc
   crawler/crawlers.cc
@@ -47,10 +48,12 @@ add_library(bot_shield_core STATIC
   score/scorer.cc
   server/connection.cc
   server/gateway.cc
+  server/health.cc
   server/metrics_server.cc
   tls/acme_watcher.cc
   tls/cert_store.cc
   tls/client_hello.cc
+  watchdog/fail_open.cc
 )
 
 target_include_directories(bot_shield_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -82,3 +85,8 @@ target_link_libraries(bot-shield PRIVATE bot_shield_core)
 
 bot_shield_enable_tidy(bot_shield_core)
 bot_shield_enable_tidy(bot-shield)
+
+add_executable(bot-shield-watchdog watchdog/watchdog_main.cc)
+target_compile_options(bot-shield-watchdog PRIVATE -Wall -Wextra)
+target_link_libraries(bot-shield-watchdog PRIVATE bot_shield_core)
+bot_shield_enable_tidy(bot-shield-watchdog)

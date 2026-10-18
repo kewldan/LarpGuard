@@ -24,6 +24,7 @@
 #include "common/hash.h"
 #include "common/log.h"
 #include "common/metrics.h"
+#include "common/systemd.h"
 #include "common/version.h"
 #include "config/config.h"
 #include "crawler/verifier.h"
@@ -223,6 +224,29 @@ int Run(int argc, char** argv) {
   // Graceful shutdown: the first signal stops accepting and waits for open
   // connections up to the drain timeout; a second signal stops immediately.
   asio::io_context control;
+
+  // systemd: Type=notify readiness, and WatchdogSec= pings only while every
+  // worker loop beats, so systemd restarts a stuck gateway.
+  const std::optional<bot_shield::SystemdNotifier> systemd =
+      bot_shield::SystemdNotifier::FromEnvironment();
+  if (systemd) systemd->Notify("READY=1");
+  asio::steady_timer watchdog_timer(control);
+  std::function<void()> ping_watchdog;
+  if (const auto interval = bot_shield::SystemdNotifier::WatchdogInterval();
+      systemd && interval) {
+    ping_watchdog = [&, interval = *interval] {
+      if (gateway.Healthy()) {
+        systemd->Notify("WATCHDOG=1");
+      } else {
+        bot_shield::log::Warn("worker stalled, not pinging systemd watchdog");
+      }
+      watchdog_timer.expires_after(interval);
+      watchdog_timer.async_wait([&](const std::error_code& ec) {
+        if (!ec) ping_watchdog();
+      });
+    };
+    ping_watchdog();
+  }
   asio::signal_set signals(control, SIGINT, SIGTERM);
   asio::steady_timer drain_timer(control);
   bool draining = false;
@@ -256,6 +280,7 @@ int Run(int argc, char** argv) {
           return;
         }
         draining = true;
+        if (systemd) systemd->Notify("STOPPING=1");
         Info("signal {}, draining {} connections (up to {} ms)", signal_number,
              bot_shield::GlobalMetrics().connections_active.Get(),
              config.drain_timeout.count());

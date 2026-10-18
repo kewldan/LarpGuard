@@ -101,9 +101,13 @@ build/src/bot-shield --config deploy/bot-shield.yaml --check-config
 
 - `bot-shield.yaml` — конфиг шлюза со всеми ключами и значениями по умолчанию;
 - `traefik.yml` — единственная правка в Traefik: entrypoint'ы переезжают на
-  loopback и получают `proxyProtocol.trustedIPs` и
+  :8443/:8080 и получают `proxyProtocol.trustedIPs` и
   `forwardedHeaders.trustedIPs`;
-- `docker-compose.yml` — Traefik и bot-shield в host network, опционально
+- `failopen/` — nftables-таблица, которая закрывает :8443/:8080 снаружи
+  (загружать при старте системы, без неё Traefik открыт в обход шлюза), и
+  правила fail-open для `bot-shield-watchdog`;
+- `systemd/` — units шлюза (`Type=notify`, `WatchdogSec`) и watchdog;
+- `docker-compose.yml` — Traefik, bot-shield и watchdog в host network, опционально
   NATS и ClickHouse для аналитики;
 - `clickhouse/schema.sql` — таблицы событий и агрегатов.
 

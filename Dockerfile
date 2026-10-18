@@ -10,13 +10,15 @@ COPY src src
 COPY tests tests
 RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DBOT_SHIELD_BUILD_TESTS=OFF \
- && cmake --build /build --target bot-shield \
- && strip /build/src/bot-shield
+ && cmake --build /build --target bot-shield bot-shield-watchdog \
+ && strip /build/src/bot-shield /build/src/bot-shield-watchdog
 
 FROM debian:trixie-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates nftables \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /build/src/bot-shield /usr/local/bin/bot-shield
+COPY --from=build /build/src/bot-shield-watchdog /usr/local/bin/bot-shield-watchdog
+COPY deploy/failopen /etc/bot-shield/failopen
 COPY deploy/bot-shield.yaml /etc/bot-shield/bot-shield.yaml
 ENTRYPOINT ["/usr/local/bin/bot-shield", "--config", "/etc/bot-shield/bot-shield.yaml"]

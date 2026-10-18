@@ -1205,6 +1205,49 @@ log_level: debug
     ]:
         checks.run(name, fn)
 
+    def fail_open_watchdog():
+        watchdog_binary = os.path.join(os.path.dirname(binary),
+                                       "bot-shield-watchdog")
+        state = os.path.join(workdir, "failopen-state")
+        textfile = os.path.join(workdir, "failopen.prom")
+        health = urllib.request.urlopen(metrics_url + "/health", timeout=2)
+        expect(health.status == 200, health.status)
+        watchdog = subprocess.Popen(
+            [watchdog_binary, "--health", f"127.0.0.1:{metrics_port}",
+             "--interval", "100ms", "--timeout", "300ms", "--fail-after", "3",
+             "--recover-after", "2",
+             "--on-fail", f"echo open > {state}",
+             "--on-recover", f"echo closed > {state}",
+             "--state-file", textfile],
+            stdout=log_file, stderr=subprocess.STDOUT)
+
+        def wait_state(expected):
+            for _ in range(100):
+                if (os.path.exists(state) and
+                        open(state).read().strip() == expected):
+                    return
+                time.sleep(0.05)
+            raise AssertionError(f"state is not {expected}")
+
+        try:
+            # Unknown at start: the first decision is applied.
+            wait_state("closed")
+            # A hung gateway (stopped process) fails open, then recovers.
+            process.send_signal(signal.SIGSTOP)
+            try:
+                wait_state("open")
+                expect("bot_shield_failopen_active 1" in open(textfile).read(),
+                       "textfile")
+            finally:
+                process.send_signal(signal.SIGCONT)
+            wait_state("closed")
+        finally:
+            watchdog.terminate()
+            expect(watchdog.wait(timeout=5) == 0, "watchdog exit code")
+
+    checks.run("fail-open watchdog: hang, redirect, recovery",
+               fail_open_watchdog)
+
     def graceful_shutdown():
         started = time.monotonic()
         process.send_signal(signal.SIGTERM)

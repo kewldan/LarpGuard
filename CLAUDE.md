@@ -65,7 +65,8 @@ ninja-build git python3 openssl`, исходники монтировать read
 - `src/tls/` — разбор ClientHello, хранилище сертификатов, опрос `acme.json`.
 - `src/net/` — классификатор маршрута, PROXY v2, `PrefixedStream`,
   `Watchdog`, сокетные опции.
-- `src/server/` — обработчики соединений, воркеры, `/metrics`.
+- `src/server/` — обработчики соединений, воркеры, `/metrics` и `/health`
+  (503, если `Heartbeats` воркера устарел).
   `ConnectionObserver` в `connection.cc` собирает отпечатки и шлёт события.
 - `src/fp/` — отпечатки и пассивные HTTP-разборщики. `src/fp/foxio/` —
   JA4T/JA4H под FoxIO License, только за `BOT_SHIELD_FOXIO`; код вне этой
@@ -92,6 +93,9 @@ ninja-build git python3 openssl`, исходники монтировать read
   (`decision_log`), режим «под атакой» (`attack`: челлендж всем без
   токена, admin API и `attack.auto_rps`). Новый эндпоинт — в
   `HandleAdminRequest` + тест в `admin_test.cc`.
+- `src/watchdog/` — `bot-shield-watchdog` (fail-open, ADR-012): опрос
+  `/health` и команды nftables из `deploy/failopen/`. `src/common/systemd` —
+  `sd_notify` без libsystemd.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в

@@ -7,6 +7,7 @@ add_executable(bot_shield_tests
   config_test.cc
   crawler_test.cc
   docker_test.cc
+  failopen_test.cc
   events_test.cc
   host_test.cc
   http_tap_test.cc

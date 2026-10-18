@@ -5,6 +5,7 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/local/stream_protocol.hpp>
 #include <asio/ssl/context.hpp>
+#include <asio/steady_timer.hpp>
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -29,6 +30,7 @@
 #include "score/rules.h"
 #include "score/scorer.h"
 #include "server/connection.h"
+#include "server/health.h"
 #include "tls/cert_store.h"
 
 namespace bot_shield {
@@ -48,11 +50,12 @@ class Worker {
               const std::optional<asio::ip::tcp::endpoint>& http,
               bool reuse_port, std::string* error);
   bool ListenMetrics(const asio::ip::tcp::endpoint& endpoint,
-                     std::string* error);
+                     const Heartbeats* heartbeats, std::string* error);
   bool ListenAdmin(const std::string& path, const AdminContext& admin,
                    std::string* error);
 
-  void Run();
+  // Runs the loop on its own thread, beating `heartbeats` from it.
+  void Run(Heartbeats* heartbeats);
   // Stops accepting; open connections keep running until they finish.
   void StopAccepting();
   // Stops the event loop, abandoning open connections.
@@ -70,6 +73,9 @@ class Worker {
   std::vector<std::unique_ptr<asio::ip::tcp::acceptor>> acceptors_;
   std::unique_ptr<asio::local::stream_protocol::acceptor> admin_acceptor_;
   std::unique_ptr<UpstreamPool> pool_;
+  // Heartbeat timer; cancelled when draining so the loop can finish.
+  asio::steady_timer heartbeat_timer_;
+  bool draining_ = false;
   std::thread thread_;
   std::atomic<bool> finished_{false};
 };
@@ -101,6 +107,8 @@ class Gateway {
   void Stop();
   void Join();
   bool finished() const;
+  // False when a worker loop is stalled (see Heartbeats).
+  bool Healthy() const;
   int worker_count() const { return static_cast<int>(workers_.size()); }
 
  private:
@@ -117,6 +125,7 @@ class Gateway {
   ConnectionCounter connection_counter_;
   ConnectionCounter pending_counter_;
   AttackMode attack_;
+  std::unique_ptr<Heartbeats> heartbeats_;
   std::vector<std::unique_ptr<Worker>> workers_;
 };
 

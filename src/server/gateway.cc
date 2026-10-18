@@ -24,12 +24,14 @@
 #include "config/config.h"
 #include "events/event_sink.h"
 #include "net/socket_options.h"
+#include "proxy/proxy_hooks.h"
 #include "proxy/upstream_pool.h"
 #include "ratelimit/gcra.h"
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
 #include "score/rules.h"
 #include "server/connection.h"
+#include "server/health.h"
 #include "server/metrics_server.h"
 #include "tls/cert_store.h"
 
@@ -201,7 +203,8 @@ Worker::Worker(int index, GatewayContext shared, const Config& config)
     : index_(index),
       io_context_(1),
       upstream_tls_(asio::ssl::context::tls_client),
-      context_(std::move(shared)) {
+      context_(std::move(shared)),
+      heartbeat_timer_(io_context_) {
   upstream_tls_.set_options(asio::ssl::context::no_tlsv1 |
                             asio::ssl::context::no_tlsv1_1);
   if (config.upstream_tls_verify) {
@@ -263,13 +266,15 @@ bool Worker::ListenAdmin(const std::string& path, const AdminContext& admin,
   return true;
 }
 
-bool Worker::ListenMetrics(const tcp::endpoint& endpoint, std::string* error) {
+bool Worker::ListenMetrics(const tcp::endpoint& endpoint,
+                           const Heartbeats* heartbeats, std::string* error) {
   auto acceptor = std::make_unique<tcp::acceptor>(io_context_);
   if (!OpenAcceptor(acceptor.get(), endpoint, /*reuse_port=*/false,
                     /*capture_syn=*/false, error)) {
     return false;
   }
-  asio::co_spawn(io_context_, ServeMetrics(*acceptor), LogUnhandled);
+  asio::co_spawn(io_context_, ServeMetrics(*acceptor, heartbeats),
+                 LogUnhandled);
   acceptors_.push_back(std::move(acceptor));
   return true;
 }
@@ -279,7 +284,18 @@ void Worker::StartAccepting(tcp::acceptor* acceptor, bool https) {
                  LogUnhandled);
 }
 
-void Worker::Run() {
+void Worker::Run(Heartbeats* heartbeats) {
+  asio::co_spawn(
+      io_context_,
+      [](Worker* self, Heartbeats* beats) -> asio::awaitable<void> {
+        while (!self->draining_) {
+          beats->Beat(self->index_, SteadyMillis());
+          self->heartbeat_timer_.expires_after(Heartbeats::kInterval);
+          co_await self->heartbeat_timer_.async_wait(
+              asio::as_tuple(asio::use_awaitable));
+        }
+      }(this, heartbeats),
+      LogUnhandled);
   thread_ = std::thread([this] {
     try {
       io_context_.run();
@@ -292,6 +308,8 @@ void Worker::Run() {
 
 void Worker::StopAccepting() {
   asio::post(io_context_, [this] {
+    draining_ = true;
+    heartbeat_timer_.cancel();
     for (auto& acceptor : acceptors_) {
       std::error_code ec;
       acceptor->close(ec);
@@ -386,10 +404,12 @@ bool Gateway::Start(std::string* error) {
     count = 1;
   }
 
+  heartbeats_ = std::make_unique<Heartbeats>(count, SteadyMillis());
   for (int i = 0; i < count; ++i) {
     auto worker = std::make_unique<Worker>(i, shared, config_);
     if (!worker->Listen(https, http, reuse_port, error)) return false;
-    if (i == 0 && metrics && !worker->ListenMetrics(*metrics, error)) {
+    if (i == 0 && metrics &&
+        !worker->ListenMetrics(*metrics, heartbeats_.get(), error)) {
       return false;
     }
     if (i == 0 && !config_.admin_socket.empty()) {
@@ -413,7 +433,7 @@ bool Gateway::Start(std::string* error) {
     }
     workers_.push_back(std::move(worker));
   }
-  for (auto& worker : workers_) worker->Run();
+  for (auto& worker : workers_) worker->Run(heartbeats_.get());
 
   log::Info("listening on https={} http={} metrics={} workers={}",
             FormatEndpoint(https), http ? FormatEndpoint(*http) : "off",
@@ -434,6 +454,10 @@ void Gateway::Stop() {
 
 void Gateway::Join() {
   for (auto& worker : workers_) worker->Join();
+}
+
+bool Gateway::Healthy() const {
+  return heartbeats_ == nullptr || heartbeats_->Stalled(SteadyMillis()) < 0;
 }
 
 bool Gateway::finished() const {

@@ -1,0 +1,25 @@
+[Unit]
+Description=bot-shield fail-open watchdog
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+ExecStartPre=/usr/sbin/nft -f /etc/bot-shield/failopen/bot-shield.nft
+ExecStart=/usr/local/bin/bot-shield-watchdog \
+  --health 127.0.0.1:9900 --interval 1s --timeout 2s \
+  --fail-after 3 --recover-after 5 \
+  --on-fail "/usr/sbin/nft -f /etc/bot-shield/failopen/failopen-on.nft" \
+  --on-recover "/usr/sbin/nft -f /etc/bot-shield/failopen/failopen-off.nft" \
+  --state-file /var/lib/node_exporter/textfile/bot_shield_failopen.prom
+Restart=always
+RestartSec=1
+# nft needs CAP_NET_ADMIN; nothing else.
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=-/var/lib/node_exporter/textfile
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

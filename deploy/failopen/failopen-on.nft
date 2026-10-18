@@ -1,0 +1,5 @@
+#!/usr/sbin/nft -f
+# bot-shield is down: new connections to :443/:80 go straight to Traefik.
+flush chain inet bot_shield_failopen prerouting
+add rule inet bot_shield_failopen prerouting tcp dport 443 redirect to :8443
+add rule inet bot_shield_failopen prerouting tcp dport 80 redirect to :8080

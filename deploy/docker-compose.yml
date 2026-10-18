@@ -1,5 +1,7 @@
 # Example: Traefik and bot-shield on one host. Both use host networking so
-# bot-shield sees real client SYNs and Traefik is reachable on loopback.
+# bot-shield sees real client SYNs and reaches Traefik on loopback. Traefik
+# listens on :8443/:8080; the watchdog's nftables table closes them from
+# outside and redirects :443/:80 to them while bot-shield is down.
 services:
   traefik:
     image: traefik:v3.5
@@ -30,6 +32,24 @@ services:
       - /run/bot-shield:/run/bot-shield
       - bot-shield-state:/var/lib/bot-shield
     depends_on: [traefik, nats]
+
+  # Fail-open (docs/architecture.md, section 11). Needs NET_ADMIN on the
+  # host network namespace for nftables.
+  bot-shield-watchdog:
+    build: ..
+    network_mode: host
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        nft -f /etc/bot-shield/failopen/bot-shield.nft &&
+        exec bot-shield-watchdog --health 127.0.0.1:9900
+        --on-fail 'nft -f /etc/bot-shield/failopen/failopen-on.nft'
+        --on-recover 'nft -f /etc/bot-shield/failopen/failopen-off.nft'
 
   # Analytics pipeline (optional): bot-shield -> NATS -> ClickHouse.
   # Enable with events.nats: "nats://127.0.0.1:4222" in bot-shield.yaml.

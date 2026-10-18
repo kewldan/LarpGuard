@@ -1,13 +1,15 @@
 # Traefik static configuration changes for running behind bot-shield.
-# The entrypoints move to loopback, plain HTTP is redirected to HTTPS and the
+# The entrypoints move to ports 8080/8443, plain HTTP is redirected to HTTPS
+# and the
 # TLS options in traefik-tls.yml are loaded. Routers, middlewares,
 # certificate resolvers and container labels stay as they are, except that
 # routers of passthrough hosts get tls.options=passthrough@file.
 
 entryPoints:
   web:
-    # Was ":80".
-    address: "127.0.0.1:8080"
+    # Was ":80". All addresses, so the fail-open redirect reaches it; the
+    # nftables table in failopen/bot-shield.nft keeps it closed from outside.
+    address: ":8080"
     proxyProtocol:
       trustedIPs:
         - "127.0.0.1/32"
@@ -20,8 +22,8 @@ entryPoints:
           to: ":443"
           scheme: https
   websecure:
-    # Was ":443".
-    address: "127.0.0.1:8443"
+    # Was ":443". See "web" (fail-open, nftables).
+    address: ":8443"
     # Passed-through TLS arrives with a PROXY v2 header; Traefik uses it when
     # present and accepts connections without it.
     proxyProtocol:

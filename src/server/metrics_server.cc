@@ -18,6 +18,7 @@
 #include "common/log.h"
 #include "common/metrics.h"
 #include "net/watchdog.h"
+#include "server/health.h"
 
 namespace bot_shield {
 namespace {
@@ -36,7 +37,8 @@ std::string Response(std::string_view status, std::string_view content_type,
       status, content_type, body.size(), body);
 }
 
-asio::awaitable<void> HandleRequest(tcp::socket socket) {
+asio::awaitable<void> HandleRequest(tcp::socket socket,
+                                    const Heartbeats* heartbeats) {
   auto executor = co_await asio::this_coro::executor;
   ScopedWatchdog deadline(executor, kRequestTimeout, [&socket] {
     std::error_code ec;
@@ -55,7 +57,17 @@ asio::awaitable<void> HandleRequest(tcp::socket socket) {
     response = Response("200 OK", "text/plain; version=0.0.4",
                         GlobalMetrics().RenderPrometheus());
   } else if (line.starts_with("GET /health ")) {
-    response = Response("200 OK", "text/plain", "ok\n");
+    const int stalled =
+        heartbeats == nullptr
+            ? -1
+            : heartbeats->Stalled(
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now().time_since_epoch())
+                      .count());
+    response = stalled < 0
+                   ? Response("200 OK", "text/plain", "ok\n")
+                   : Response("503 Service Unavailable", "text/plain",
+                              std::format("worker {} stalled\n", stalled));
   } else {
     response = Response("404 Not Found", "text/plain", "not found\n");
   }
@@ -64,7 +76,8 @@ asio::awaitable<void> HandleRequest(tcp::socket socket) {
 
 }  // namespace
 
-asio::awaitable<void> ServeMetrics(tcp::acceptor& acceptor) {
+asio::awaitable<void> ServeMetrics(tcp::acceptor& acceptor,
+                                   const Heartbeats* heartbeats) {
   auto executor = co_await asio::this_coro::executor;
   while (true) {
     auto [ec, socket] = co_await acceptor.async_accept(kUse);
@@ -73,7 +86,8 @@ asio::awaitable<void> ServeMetrics(tcp::acceptor& acceptor) {
       log::Warn("metrics: accept failed: {}", ec.message());
       continue;
     }
-    asio::co_spawn(executor, HandleRequest(std::move(socket)), asio::detached);
+    asio::co_spawn(executor, HandleRequest(std::move(socket), heartbeats),
+                   asio::detached);
   }
 }
 

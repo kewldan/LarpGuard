@@ -1,0 +1,26 @@
+#!/usr/sbin/nft -f
+# Fail-open base rules (docs/architecture.md, section 11). Load at boot
+# (include from /etc/nftables.conf); bot-shield-watchdog reloads it on start.
+#
+# Traefik listens on :8443/:8080 on all addresses so a redirect can reach it
+# over IPv4 and IPv6. From outside only redirected connections get there:
+# without this table Traefik would be reachable around bot-shield.
+
+# Idempotent reload: create, drop, define again.
+table inet bot_shield_failopen
+delete table inet bot_shield_failopen
+
+table inet bot_shield_failopen {
+  # Empty while bot-shield is healthy. failopen-on.nft adds the redirects,
+  # failopen-off.nft removes them; established connections keep their path.
+  chain prerouting {
+    type nat hook prerouting priority dstnat; policy accept;
+  }
+
+  chain input {
+    type filter hook input priority filter; policy accept;
+    tcp dport { 8080, 8443 } iifname "lo" accept
+    tcp dport { 8080, 8443 } ct status dnat accept
+    tcp dport { 8080, 8443 } drop
+  }
+}

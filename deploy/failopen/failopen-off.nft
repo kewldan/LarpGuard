@@ -1,0 +1,3 @@
+#!/usr/sbin/nft -f
+# bot-shield is healthy: new connections go through it again.
+flush chain inet bot_shield_failopen prerouting
