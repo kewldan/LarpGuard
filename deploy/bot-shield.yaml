@@ -155,7 +155,7 @@ connection_limits:
 # from the Docker Engine API. "" disables. Policies in this file (policy.hosts)
 # take precedence over labels.
 docker:
-  socket: /var/run/docker.sock
+  socket: /var/run/docker.sock   # Not a default: off unless set.
   poll_interval: 5s
 
 # Behaviour over a window per client (TLS fingerprint + network + host),
@@ -264,9 +264,9 @@ attack:
 # GET /decisions[?limit=&host=&class=], GET /decisions/<request id>,
 # GET|POST /attack, DELETE /attack/<host>.
 admin:
-  socket: /run/bot-shield/admin.sock
+  socket: /run/bot-shield/admin.sock   # Not a default: off unless set.
   # Operational allow/block lists survive restarts here ("" = memory only).
-  state_file: /var/lib/bot-shield/lists.json
+  state_file: /var/lib/bot-shield/lists.json   # Not a default.
   # Recent decisions kept in memory for GET /decisions.
   decisions: 10000
 
