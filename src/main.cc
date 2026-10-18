@@ -20,6 +20,8 @@
 #include "common/log.h"
 #include "common/metrics.h"
 #include "config/config.h"
+#include "docker/labels.h"
+#include "docker/watcher.h"
 #include "events/events.h"
 #include "events/nats_publisher.h"
 #include "fp/library.h"
@@ -153,8 +155,18 @@ int Run(int argc, char** argv) {
       library.version(), library.profile_count(), library.automation().size(),
       config.policy.enforce ? "enforce" : "shadow");
 
+  bot_shield::LabelStore labels;
+  std::unique_ptr<bot_shield::DockerWatcher> docker;
+  if (!config.docker_socket.empty()) {
+    docker = std::make_unique<bot_shield::DockerWatcher>(
+        config.docker_socket, config.docker_poll_interval, &labels);
+    docker->PollNow();
+    docker->Start();
+  }
+
   bot_shield::Gateway gateway(config, &certificates, publisher.get(),
-                              &event_settings, &library);
+                              &event_settings, &library,
+                              docker ? &labels : nullptr);
   if (!gateway.Start(&error)) {
     Error("startup: {}", error);
     return 1;
@@ -210,6 +222,7 @@ int Run(int argc, char** argv) {
   control.run();
   gateway.Join();
   if (publisher) publisher->Stop();
+  if (docker) docker->Stop();
   watcher.Stop();
   Info("stopped");
   return 0;

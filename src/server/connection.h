@@ -7,6 +7,7 @@
 #include <string>
 
 #include "config/config.h"
+#include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "net/classifier.h"
@@ -41,6 +42,8 @@ struct GatewayContext {
   // Request rate limits and their shared state (all workers).
   const RateLimitSet* rate_limits = nullptr;
   RateLimitStore* rate_limit_store = nullptr;
+  // Policies from docker labels; null when Docker is not used.
+  const LabelStore* labels = nullptr;
   // Per-IP connection limits at accept time (shared).
   ConnectionCounter* connection_counter = nullptr;
   // Analytics events; null when disabled.

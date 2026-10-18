@@ -286,11 +286,12 @@ bool ParsePolicy(const YAML::Node& node, Config* config, std::string* error) {
         *error = std::format("policy.hosts: invalid host '{}'", host);
         return false;
       }
-      bool enforce = false;
-      if (!ParseMode(item.second, "policy.hosts", &enforce, error)) {
+      HostMode mode = HostMode::kShadow;
+      if (!ParseHostMode(item.second.as<std::string>(), &mode)) {
+        *error = "policy.hosts: expected shadow, enforce or off";
         return false;
       }
-      policy.host_modes.emplace_back(host, enforce);
+      policy.host_modes.emplace_back(host, mode);
     }
   }
   return true;
@@ -346,7 +347,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                  {"listen", "workers", "traefik", "passthrough_hosts",
                   "non_tls", "timeouts", "max_connections", "events", "mode",
                   "policy", "rules", "rate_limits", "connection_limits",
-                  "fingerprints", "metrics", "log_level"},
+                  "docker", "fingerprints", "metrics", "log_level"},
                  error)) {
     return false;
   }
@@ -470,6 +471,17 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
         *error = "connection_limits.new_burst_per_ip: expected >= 1";
         return false;
       }
+    }
+  }
+  if (const YAML::Node docker = root["docker"]) {
+    if (!CheckKeys(docker, "docker", {"socket", "poll_interval"}, error) ||
+        !ReadDuration(docker, "docker", "poll_interval",
+                      &config->docker_poll_interval, error)) {
+      return false;
+    }
+    if (docker["socket"]) {
+      config->docker_socket =
+          docker["socket"].IsNull() ? "" : docker["socket"].as<std::string>();
     }
   }
   if (const YAML::Node fingerprints = root["fingerprints"]) {

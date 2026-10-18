@@ -4,6 +4,9 @@ add_library(bot_shield_core STATIC
   common/log.cc
   common/metrics.cc
   config/config.cc
+  docker/client.cc
+  docker/labels.cc
+  docker/watcher.cc
   events/events.cc
   events/nats_publisher.cc
   fp/h1_tap.cc

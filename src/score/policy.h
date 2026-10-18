@@ -17,6 +17,13 @@ enum class Action { kAllow, kBlock };
 std::string_view ActionName(Action action);
 bool ParseAction(std::string_view text, Action* action);
 
+// How the gateway treats a host: verdicts only (shadow), verdicts carried
+// out (enforce), or plain proxying without verdicts and limits (off).
+enum class HostMode { kShadow, kEnforce, kOff };
+
+std::string_view HostModeName(HostMode mode);
+bool ParseHostMode(std::string_view text, HostMode* mode);
+
 struct PolicySettings {
   // Shadow mode computes verdicts but never acts on them.
   bool enforce = false;
@@ -25,8 +32,8 @@ struct PolicySettings {
   Action suspicious_action = Action::kAllow;
   Action bot_action = Action::kBlock;
   int block_status = 403;
-  // Per-host mode overrides: exact names or "*.parent" -> enforce?
-  std::vector<std::pair<std::string, bool>> host_modes;
+  // Per-host mode overrides: exact names or "*.parent".
+  std::vector<std::pair<std::string, HostMode>> host_modes;
 };
 
 struct PolicyDecision {
@@ -41,12 +48,24 @@ class Policy {
  public:
   explicit Policy(PolicySettings settings) : settings_(std::move(settings)) {}
 
-  // `host` is normalized (lowercase, no port). `override_action` (from an
-  // allow/block rule) replaces the action of the verdict's class.
+  // Mode of `host` (normalized, no port): configured host overrides win,
+  // then `label_mode` (docker labels), then the global mode.
+  HostMode ModeFor(std::string_view host,
+                   std::optional<HostMode> label_mode = std::nullopt) const;
+
+  // `override_action` (from an allow/block rule) replaces the action of the
+  // verdict's class; `mode` decides whether it is carried out.
+  PolicyDecision Decide(
+      const Verdict& verdict, HostMode mode,
+      std::optional<Action> override_action = std::nullopt) const;
   PolicyDecision Decide(
       const Verdict& verdict, std::string_view host,
-      std::optional<Action> override_action = std::nullopt) const;
-  bool EnforcedFor(std::string_view host) const;
+      std::optional<Action> override_action = std::nullopt) const {
+    return Decide(verdict, ModeFor(host), override_action);
+  }
+  bool EnforcedFor(std::string_view host) const {
+    return ModeFor(host) == HostMode::kEnforce;
+  }
   int block_status() const { return settings_.block_status; }
 
  private:

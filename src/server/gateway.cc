@@ -21,6 +21,7 @@
 #include "common/log.h"
 #include "common/metrics.h"
 #include "config/config.h"
+#include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "fp/library.h"
@@ -295,7 +296,7 @@ void Worker::Join() {
 
 Gateway::Gateway(const Config& config, const CertStore* certificates,
                  EventSink* events, const EventSettings* event_settings,
-                 const FingerprintLibrary* library)
+                 const FingerprintLibrary* library, const LabelStore* labels)
     : config_(config),
       certificates_(certificates),
       events_(events),
@@ -303,7 +304,8 @@ Gateway::Gateway(const Config& config, const CertStore* certificates,
       classifier_(config.passthrough_hosts, config.non_tls),
       scorer_(library, config.policy.suspicious_threshold,
               config.policy.bot_threshold),
-      policy_(config.policy) {}
+      policy_(config.policy),
+      labels_(labels) {}
 
 Gateway::~Gateway() {
   Stop();
@@ -322,6 +324,7 @@ bool Gateway::Start(std::string* error) {
   shared.scorer = &scorer_;
   shared.policy = &policy_;
   shared.rules = &rules_;
+  shared.labels = labels_;
   shared.rate_limits = &rate_limits_;
   shared.rate_limit_store = &rate_limit_store_;
   shared.connection_counter = &connection_counter_;

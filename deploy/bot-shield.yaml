@@ -123,6 +123,13 @@ connection_limits:
   new_per_ip: ""
   new_burst_per_ip: 1
 
+# botshield.* labels on containers (mode, passthrough, rate limits) read
+# from the Docker Engine API. "" disables. Policies in this file (policy.hosts)
+# take precedence over labels.
+docker:
+  socket: /var/run/docker.sock
+  poll_interval: 5s
+
 fingerprints:
   # Fingerprint library; "" = built in (same as deploy/fingerprints.yaml).
   library: ""

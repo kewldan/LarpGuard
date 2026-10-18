@@ -251,8 +251,10 @@ weights: {}
 TEST(PolicyTest, ShadowAndEnforceWithHostOverrides) {
   PolicySettings settings;
   settings.enforce = false;
-  settings.host_modes = {
-      {"shop.test", true}, {"*.api.test", true}, {"open.api.test", false}};
+  settings.host_modes = {{"shop.test", HostMode::kEnforce},
+                         {"*.api.test", HostMode::kEnforce},
+                         {"open.api.test", HostMode::kShadow},
+                         {"raw.test", HostMode::kOff}};
   const Policy policy(settings);
 
   Verdict bot;
@@ -269,6 +271,12 @@ TEST(PolicyTest, ShadowAndEnforceWithHostOverrides) {
 
   EXPECT_TRUE(policy.EnforcedFor("v1.api.test"));
   EXPECT_FALSE(policy.EnforcedFor("open.api.test"));  // Exact wins.
+  EXPECT_EQ(policy.ModeFor("raw.test"), HostMode::kOff);
+  // Labels apply where the configuration says nothing about the host.
+  EXPECT_EQ(policy.ModeFor("blog.test", HostMode::kEnforce),
+            HostMode::kEnforce);
+  EXPECT_EQ(policy.ModeFor("open.api.test", HostMode::kEnforce),
+            HostMode::kShadow);
 
   Verdict suspicious;
   suspicious.bot_class = BotClass::kSuspicious;

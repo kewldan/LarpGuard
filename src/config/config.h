@@ -86,6 +86,9 @@ struct Config {
   int64_t new_connections_per_ip = 0;
   std::chrono::milliseconds new_connections_period{1000};
   int64_t new_connections_burst = 1;
+  // Docker Engine socket for botshield.* label policies; empty disables.
+  std::string docker_socket;
+  std::chrono::milliseconds docker_poll_interval{5000};
   // Fingerprint library file; empty means the built-in one.
   std::string fingerprint_library;
 

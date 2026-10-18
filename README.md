@@ -28,6 +28,8 @@ User-Agent со стеком клиента (TLS, HTTP/2, TCP); в режиме 
 - Вердикты: библиотека отпечатков `deploy/fingerprints.yaml` (встроена),
   скоринг с причинами, `mode: shadow|enforce` и `policy.hosts`, правила
   `allow` / `block` / `score` на своём языке условий (раздел 6.1 архитектуры).
+- Политики через docker-лейблы `botshield.*`: режим (shadow/enforce/off),
+  passthrough и лимиты для хостов контейнера, без перезапуска.
 - Rate limiting: GCRA с составными ключами (IP, подсеть, отпечаток, API-ключ,
   cookie), фильтрами по хостам/путям/методам/классу, `429` с `Retry-After`;
   лимиты соединений на IP до TLS.

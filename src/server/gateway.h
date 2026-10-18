@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "config/config.h"
+#include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "fp/library.h"
@@ -70,7 +71,7 @@ class Gateway {
   // `events` may be null (events disabled); both must outlive the gateway.
   Gateway(const Config& config, const CertStore* certificates,
           EventSink* events, const EventSettings* event_settings,
-          const FingerprintLibrary* library);
+          const FingerprintLibrary* library, const LabelStore* labels);
   ~Gateway();
 
   Gateway(const Gateway&) = delete;
@@ -92,6 +93,7 @@ class Gateway {
   Scorer scorer_;
   Policy policy_;
   RuleSet rules_;
+  const LabelStore* labels_;
   RateLimitSet rate_limits_;
   RateLimitStore rate_limit_store_;
   ConnectionCounter connection_counter_;

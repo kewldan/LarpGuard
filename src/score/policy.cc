@@ -29,20 +29,45 @@ bool ParseAction(std::string_view text, Action* action) {
   return true;
 }
 
-bool Policy::EnforcedFor(std::string_view host) const {
-  // Exact names win over wildcards, wildcards over the global mode.
-  for (const auto& [pattern, enforce] : settings_.host_modes) {
-    if (pattern == host) return enforce;
+std::string_view HostModeName(HostMode mode) {
+  switch (mode) {
+    case HostMode::kShadow:
+      return "shadow";
+    case HostMode::kEnforce:
+      return "enforce";
+    case HostMode::kOff:
+      return "off";
   }
-  for (const auto& [pattern, enforce] : settings_.host_modes) {
-    if (pattern.starts_with("*.") && HostMatches(pattern, host)) {
-      return enforce;
-    }
-  }
-  return settings_.enforce;
+  return "?";
 }
 
-PolicyDecision Policy::Decide(const Verdict& verdict, std::string_view host,
+bool ParseHostMode(std::string_view text, HostMode* mode) {
+  if (text == "shadow") {
+    *mode = HostMode::kShadow;
+  } else if (text == "enforce") {
+    *mode = HostMode::kEnforce;
+  } else if (text == "off") {
+    *mode = HostMode::kOff;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+HostMode Policy::ModeFor(std::string_view host,
+                         std::optional<HostMode> label_mode) const {
+  // Exact names win over wildcards, configuration over labels.
+  for (const auto& [pattern, mode] : settings_.host_modes) {
+    if (pattern == host) return mode;
+  }
+  for (const auto& [pattern, mode] : settings_.host_modes) {
+    if (pattern.starts_with("*.") && HostMatches(pattern, host)) return mode;
+  }
+  if (label_mode) return *label_mode;
+  return settings_.enforce ? HostMode::kEnforce : HostMode::kShadow;
+}
+
+PolicyDecision Policy::Decide(const Verdict& verdict, HostMode mode,
                               std::optional<Action> override_action) const {
   PolicyDecision decision;
   switch (verdict.bot_class) {
@@ -57,7 +82,7 @@ PolicyDecision Policy::Decide(const Verdict& verdict, std::string_view host,
       break;
   }
   if (override_action) decision.would_action = *override_action;
-  decision.enforce = EnforcedFor(host);
+  decision.enforce = mode == HostMode::kEnforce;
   decision.action = decision.enforce ? decision.would_action : Action::kAllow;
   return decision;
 }

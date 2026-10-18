@@ -31,6 +31,7 @@
 #include "common/log.h"
 #include "common/metrics.h"
 #include "config/config.h"
+#include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "fp/h1_tap.h"
@@ -200,6 +201,13 @@ class ConnectionObserver {
   // X-Bot-* headers and, when enforcing, answer a block ourselves.
   void OnProxyRequest(Exchange& exchange) const {
     if (context_.scorer == nullptr || context_.policy == nullptr) return;
+    const std::string host = HostOnly(exchange.request.authority);
+    const std::shared_ptr<const LabelPolicies> labels =
+        context_.labels != nullptr ? context_.labels->snapshot() : nullptr;
+    const HostMode mode = context_.policy->ModeFor(
+        host, labels ? labels->ModeFor(host) : std::nullopt);
+    // "off": plain proxying, no verdicts and no limits.
+    if (mode == HostMode::kOff) return;
     const HttpRequest& request = exchange.observed;
     std::string pseudo;
     for (const std::string& name : request.pseudo_header_order) {
@@ -216,13 +224,12 @@ class ConnectionObserver {
     input.header_fp = header_fp;
     input.tcp_initial_ttl = record_.tcp_initial_ttl;
     Verdict verdict = context_.scorer->Score(input);
-    const std::string host = HostOnly(exchange.request.authority);
     std::optional<Action> override_action;
     if (context_.rules != nullptr && !context_.rules->empty()) {
       override_action = ApplyRules(exchange, input, host, &verdict);
     }
     const PolicyDecision decision =
-        context_.policy->Decide(verdict, host, override_action);
+        context_.policy->Decide(verdict, mode, override_action);
 
     exchange.score = verdict.score;
     exchange.bot_class = BotClassName(verdict.bot_class);
@@ -252,7 +259,7 @@ class ConnectionObserver {
     headers.emplace_back("x-bot-score", std::to_string(verdict.score));
     headers.emplace_back("x-bot-class", exchange.bot_class);
     headers.emplace_back("x-bot-reasons", reasons.empty() ? "-" : reasons);
-    headers.emplace_back("x-bot-mode", decision.enforce ? "enforce" : "shadow");
+    headers.emplace_back("x-bot-mode", HostModeName(mode));
 
     if (decision.action == Action::kBlock) {
       metrics.requests_blocked.Inc();
@@ -265,18 +272,19 @@ class ConnectionObserver {
     }
     // An allow rule (monitoring, partners) also bypasses rate limits.
     if (override_action != Action::kAllow) {
-      CheckRateLimits(exchange, verdict, host, decision);
+      CheckRateLimits(exchange, verdict, host, decision, labels.get());
     }
   }
 
   // Counts the request against the matching rate limits. Over a limit:
   // 429 when the host is enforced, otherwise only recorded.
   void CheckRateLimits(Exchange& exchange, const Verdict& verdict,
-                       std::string_view host,
-                       const PolicyDecision& decision) const {
-    if (context_.rate_limits == nullptr || context_.rate_limits->empty()) {
-      return;
-    }
+                       std::string_view host, const PolicyDecision& decision,
+                       const LabelPolicies* labels) const {
+    const bool configured =
+        context_.rate_limits != nullptr && !context_.rate_limits->empty();
+    const bool labelled = labels != nullptr && !labels->rate_limits().empty();
+    if (!configured && !labelled) return;
     const std::string_view path_and_query = exchange.request.path;
     RateLimitRequest request;
     request.request = &exchange.observed;
@@ -287,8 +295,18 @@ class ConnectionObserver {
     request.bot_class = BotClassName(verdict.bot_class);
     request.ja4 = record_.ja4;
     request.h2_fingerprint = exchange.h2_fingerprint;
-    const std::optional<RateLimitHit> hit = context_.rate_limits->Check(
-        request, context_.rate_limit_store, SteadyNanos());
+    const int64_t now = SteadyNanos();
+    std::optional<RateLimitHit> hit;
+    if (configured) {
+      hit =
+          context_.rate_limits->Check(request, context_.rate_limit_store, now);
+    }
+    if (labelled) {
+      // Label limits count the request too; the first refusal is reported.
+      std::optional<RateLimitHit> label_hit =
+          labels->rate_limits().Check(request, context_.rate_limit_store, now);
+      if (!hit) hit = std::move(label_hit);
+    }
     if (!hit) return;
 
     exchange.rate_limit = hit->name;
@@ -685,6 +703,10 @@ asio::awaitable<void> HandleHttpsConnection(tcp::socket socket,
 
   RouteDecision decision = context.classifier->Classify(
       status, hello, *context.certificates->snapshot());
+  if (decision.route == Route::kTerminate && context.labels != nullptr &&
+      context.labels->snapshot()->IsPassthrough(hello.server_name)) {
+    decision = {Route::kPassthrough, RouteReason::kPassthroughPolicy, nullptr};
+  }
   CountRoute(decision);
   if (status == ParseStatus::kOk) observer.OnClientHello(hello);
   observer.OnRoute(RouteName(decision.route), RouteReasonName(decision.reason));

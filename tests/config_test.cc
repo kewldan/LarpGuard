@@ -157,7 +157,7 @@ fingerprints:
   EXPECT_EQ(config.policy.block_status, 429);
   ASSERT_EQ(config.policy.host_modes.size(), 2u);
   EXPECT_EQ(config.policy.host_modes[0],
-            (std::pair<std::string, bool>{"shop.test", false}));
+            (std::pair<std::string, HostMode>{"shop.test", HostMode::kShadow}));
   EXPECT_EQ(config.fingerprint_library, "/etc/bot-shield/fingerprints.yaml");
 
   Config bad;
@@ -235,6 +235,21 @@ connection_limits:
       ParseConfig("connection_limits: {new_per_ip: fast}\n", &config, &error));
   EXPECT_FALSE(
       ParseConfig("connection_limits: {open_per_ip: -1}\n", &config, &error));
+}
+
+TEST(ConfigTest, ParsesDocker) {
+  Config config;
+  std::string error;
+  EXPECT_TRUE(config.docker_socket.empty());  // Off by default.
+  ASSERT_TRUE(
+      ParseConfig("docker: {socket: /var/run/docker.sock, poll_interval: 2s}\n",
+                  &config, &error))
+      << error;
+  EXPECT_EQ(config.docker_socket, "/var/run/docker.sock");
+  EXPECT_EQ(config.docker_poll_interval, std::chrono::seconds(2));
+  EXPECT_FALSE(ParseConfig("docker: {sock: x}\n", &config, &error));
+  ASSERT_TRUE(ParseConfig("policy: {hosts: {a.test: off}}\n", &config, &error));
+  EXPECT_EQ(config.policy.host_modes[0].second, HostMode::kOff);
 }
 
 TEST(ConfigTest, RejectsUnknownKeys) {

@@ -10,7 +10,8 @@ Self-hosted шлюз фильтрации ботов перед Traefik. Осн�
 TCP/JA4/HTTP2/заголовков, события в NATS → ClickHouse). Следующий этап — M2:
 HTTP-aware прокси (ADR-015), вердикты (библиотека отпечатков, скоринг,
 shadow/enforce, `X-Bot-*`) и правила на своём языке (ADR-008) сделаны.
-M3: rate limiting сделан (`src/ratelimit/`), дальше docker-лейблы и admin API.
+M3: rate limiting (`src/ratelimit/`) и docker-лейблы (`src/docker/`) сделаны,
+дальше admin API.
 
 ## Команды
 
@@ -80,6 +81,9 @@ ninja-build git python3 openssl`, исходники монтировать read
   хранилище (`store`: состояние не делить по воркерам — лимит умножится),
   описание лимитов и ключей (`limits`). Лимиты проверяются после вердикта
   в `ConnectionObserver::CheckRateLimits`, лимиты соединений — в `accept`.
+- `src/docker/` — клиент Docker API по unix-сокету (`client`), разбор
+  лейблов `botshield.*` в снапшот `LabelPolicies` (`labels`), опрос
+  (`watcher`). Приоритет режима: `policy.hosts` в YAML → лейблы → `mode`.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в

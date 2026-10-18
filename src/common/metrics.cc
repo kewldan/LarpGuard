@@ -127,6 +127,15 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_rate_limited_total", R"(mode="shadow")",
                rate_limited_shadow.Get());
 
+  AppendHeader(&out, "bot_shield_docker_polls_failed_total", "counter",
+               "Failed reads of the Docker API.");
+  AppendSample(&out, "bot_shield_docker_polls_failed_total", "",
+               docker_polls_failed.Get());
+
+  AppendHeader(&out, "bot_shield_label_hosts", "gauge",
+               "Hosts configured by docker labels.");
+  AppendSample(&out, "bot_shield_label_hosts", "", label_hosts.Get());
+
   AppendHeader(&out, "bot_shield_rules_matched_total", "counter",
                "Rule matches (score, allow and block rules).");
   AppendSample(&out, "bot_shield_rules_matched_total", "", rules_matched.Get());

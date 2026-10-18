@@ -13,6 +13,8 @@ Usage: run_e2e.py path/to/bot-shield [path/to/bot_shield_fake_upstream]
 
 import base64
 import http.client
+import http.server
+import socketserver
 import json
 import os
 import shutil
@@ -137,6 +139,45 @@ class FakeNats:
             return [json.dumps(event) for _, event in self.events]
 
 
+class FakeDocker:
+    """Docker Engine API on a unix socket serving /containers/json."""
+
+    def __init__(self, path, containers):
+        self.path = path
+        self.containers = containers
+        docker = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 (http.server API)
+                body = json.dumps(docker.containers).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        class Server(socketserver.ThreadingMixIn,
+                     socketserver.UnixStreamServer):
+            daemon_threads = True
+
+            def get_request(self):
+                request, _ = super().get_request()
+                return request, ("docker", 0)
+
+        if os.path.exists(path):
+            os.remove(path)
+        self.server = Server(path, Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+def docker_container(name, labels):
+    return {"Id": name + "-0123456789", "Names": ["/" + name],
+            "Labels": labels, "State": "running"}
+
+
 def parse_reply(reply):
     return dict(item.split("=", 1) for item in reply.strip().split(" "))
 
@@ -253,7 +294,7 @@ def main():
     gw_c = make_cert(workdir, "gw-c", ["c.test"])
     upstream = make_cert(workdir, "upstream",
                          ["a.test", "b.test", "c.test", "grpc.a.test",
-                          "noh2.test", "x.w.test", "www.a.test"])
+                          "noh2.test", "x.w.test", "y.w.test", "www.a.test"])
     acme_path = os.path.join(workdir, "acme.json")
     write_atomic(acme_path, acme_json([(*gw_a, "a.test"), (*gw_w, "*.w.test")]))
 
@@ -262,6 +303,19 @@ def main():
         [fake, str(tls_port), str(plain_port), *upstream])
     wait_port(tls_port)
     nats = FakeNats()
+    docker = FakeDocker(
+        os.path.join(tempfile.gettempdir(), f"bs-docker-{os.getpid()}.sock"),
+        [docker_container("labelled", {
+            "traefik.http.routers.labelled.rule": "Host(`x.w.test`)",
+            "botshield.mode": "enforce",
+            "botshield.ratelimit.burst": "rate=2/m path=/labels/limited*"}),
+         docker_container("passthru", {"botshield.hosts": "y.w.test",
+                                       "botshield.passthrough": "true"}),
+         docker_container("override", {"botshield.hosts": "www.a.test",
+                                       "botshield.mode": "shadow"}),
+         docker_container("offhost", {"botshield.hosts": "z.w.test",
+                                      "botshield.mode": "off"}),
+         docker_container("unrelated", {"traefik.enable": "true"})])
 
     https_port, http_port, metrics_port = free_port(), free_port(), free_port()
     config_path = os.path.join(workdir, "bot-shield.yaml")
@@ -304,6 +358,9 @@ events:
   nats: nats://127.0.0.1:{nats.port}
   subject_prefix: e2e.events
   ip_salt: e2e-salt
+docker:
+  socket: {docker.path}
+  poll_interval: 200ms
 metrics:
   listen: 127.0.0.1:{metrics_port}
 log_level: debug
@@ -519,6 +576,41 @@ log_level: debug
             status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/api/x")
             expect(status == 200, status)
 
+    def docker_labels():
+        # botshield.mode=enforce from labels.
+        status, _, _ = h1_get(https_port, "x.w.test", ca_w, "/labels",
+                              f"User-Agent: {chrome_ua}\r\n".encode())
+        expect(status == 403, status)
+        # botshield.ratelimit.* scoped to the container's hosts.
+        statuses = [h1_get(https_port, "x.w.test", ca_w, "/labels/limited")[0]
+                    for _ in range(3)]
+        expect(statuses == [200, 200, 429], statuses)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("rate_limit") == "labelled/burst")
+        expect(event["status"] == 429, event)
+        # botshield.passthrough=true: TLS goes to Traefik untouched.
+        fields, _, _ = line_request(https_port, "y.w.test", ca_up)
+        expect(fields["sni"] == "y.w.test", fields)
+        # botshield.mode=off: plain proxying, no verdict headers.
+        out = os.path.join(workdir, "out")
+        status, _ = curl(https_port, "z.w.test", ca_w, "/off", out)
+        expect(status == 200, status)
+        expect("x-bot-score" not in json.load(open(out))["headers"], "off")
+        # YAML policy.hosts beats the label (www.a.test stays enforced).
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/yaml-wins",
+                              f"User-Agent: {chrome_ua}\r\n".encode())
+        expect(status == 403, status)
+        # Label changes apply without a restart.
+        docker.containers[0]["Labels"]["botshield.mode"] = "shadow"
+        deadline = time.monotonic() + 5
+        while True:
+            status, _, _ = h1_get(https_port, "x.w.test", ca_w, "/relabelled",
+                                  f"User-Agent: {chrome_ua}\r\n".encode())
+            if status == 200:
+                break
+            expect(time.monotonic() < deadline, "label change not applied")
+            time.sleep(0.1)
+
     # --- Proxy over HTTP/2 (curl) -------------------------------------------
 
     def h2_requests():
@@ -699,6 +791,7 @@ log_level: debug
         expect(values['bot_shield_blocks_total{mode="shadow"}'] >= 1,
                "shadow blocks")
         expect(values["bot_shield_rules_matched_total"] >= 3, "rule matches")
+        expect(values["bot_shield_label_hosts"] == 4, "label hosts")
         expect(values['bot_shield_rate_limited_total{mode="enforce"}'] >= 2,
                "rate limited")
         expect(values['bot_shield_rate_limited_total{mode="shadow"}'] >= 2,
@@ -723,6 +816,8 @@ log_level: debug
          enforce_blocks_spoofed_browser),
         ("rules: allow and block override verdicts", rules_override_verdicts),
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
+        ("docker labels: mode, limits, passthrough, off, precedence, reload",
+         docker_labels),
         ("wildcard certificate", wildcard_certificate),
         ("passthrough unknown host with PROXY v2", passthrough_unknown_host),
         ("passthrough acme-tls/1", passthrough_acme_tls_alpn),

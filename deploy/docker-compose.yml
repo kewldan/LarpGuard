@@ -23,6 +23,8 @@ services:
     volumes:
       - ./bot-shield.yaml:/etc/bot-shield/bot-shield.yaml:ro
       - traefik-acme:/traefik:ro
+      # botshield.* labels; read-only, like Traefik's docker provider.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on: [traefik, nats]
 
   # Analytics pipeline (optional): bot-shield -> NATS -> ClickHouse.

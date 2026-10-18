@@ -507,39 +507,53 @@ rate_limits:
 
 ### 9.1. Источники
 
-1. `bot-shield.yaml` — глобальные настройки, именованные политики, списки,
-   правила CEL.
-2. Docker-лейблы `botshield.*` на контейнерах — выбор политики и оверрайды
-   по хосту.
-3. `admin/api` — оперативные allow/deny с TTL, хранятся в Valkey или локальном
-   файле.
+1. `bot-shield.yaml` — глобальные настройки, режимы, пороги, правила,
+   лимиты.
+2. Docker-лейблы `botshield.*` на контейнерах — режим, passthrough и лимиты
+   для хостов контейнера ✅.
+3. `admin/api` — оперативные allow/deny с TTL (M3, дальше).
 
-Слияние: YAML-дефолт → политика из лейблов → оверрайды YAML по хосту →
-оперативные списки. Результат — неизменяемый снапшот, который атомарно
-подменяется у воркеров (RCU).
+Приоритет режима хоста: `policy.hosts` из YAML (точное имя, затем
+`*.parent`) → лейблы → глобальный `mode`. Явная запись в YAML всегда
+главнее: так можно зафиксировать хост, не трогая контейнер. Лимиты из
+лейблов действуют вместе с лимитами из YAML. Лейблы собираются в
+неизменяемый снапшот, который атомарно подменяется (как сертификаты).
 
 ### 9.2. Привязка лейблов к хостам
 
 Хосты контейнера определяются так:
 
 1. `botshield.hosts=a.example.com,b.example.com`, если задан явно;
-2. иначе разбором `Host(...)` и `HostSNI(...)` из
-   `traefik.http.routers.*.rule` того же контейнера;
-3. хосты, не найденные ни так, ни так, получают `default`.
+2. иначе разбором `Host(...)` (с любыми кавычками, несколько хостов и
+   `||`) из всех `traefik.http.routers.*.rule` того же контейнера.
+
+Контейнеры без лейблов `botshield.*` не затрагиваются. Если два контейнера
+претендуют на один хост, побеждает первый по имени, остальные получают
+предупреждение в логе. Ошибочный лейбл пропускается с предупреждением и не
+влияет на остальные.
+
+Шлюз опрашивает `GET /containers/json` через unix-сокет Docker
+(`docker.socket`, по умолчанию выключено; `docker.poll_interval`, 5 с) и
+пересобирает политики только при изменении ответа. Если Docker недоступен,
+остаются последние известные политики.
 
 ### 9.3. Схема лейблов
 
 ```yaml
 labels:
-  botshield.policy: strict              # default | relaxed | strict | api | passthrough | off
-  botshield.mode: enforce               # shadow | enforce
-  botshield.ratelimit.default: "60/m burst=30 key=fp"
-  botshield.ratelimit.api: "path=/api/* 20/s burst=40 key=session,ip_prefix"
-  botshield.ratelimit.login: "path=/login 5/m key=ip mode=strict"
-  botshield.challenge.paths: "/search*,/catalog/*"
-  botshield.ai_crawlers: block          # allow | block
-  botshield.honeypot.paths: "/wp-login.php,/.env"
+  botshield.hosts: "shop.example.com,www.shop.example.com"  # опционально
+  botshield.mode: enforce               # shadow | enforce | off
+  botshield.passthrough: "false"        # true: не терминировать TLS
+  # botshield.ratelimit.<имя>: rate=<n>/<s|m|h|d> [burst=<n>] [key=...]
+  #                            [path=<glob,...>] [methods=...] [classes=...]
+  botshield.ratelimit.api: "rate=20/s burst=40 key=ip,header:x-api-key path=/api/*"
+  botshield.ratelimit.login: "rate=5/m key=ip path=/login methods=POST"
 ```
+
+`off` — только проксирование: без скоринга, правил, лимитов и заголовков
+`X-Bot-*` (события пишутся). Лимит из лейбла называется
+`<контейнер>/<имя>` и действует только на хостах контейнера. Позже:
+`challenge.paths`, `ai_crawlers`, `honeypot.paths` (M4–M5).
 
 ### 9.4. Фрагмент `bot-shield.yaml`
 
@@ -694,7 +708,7 @@ would_action`; с M3 — поля rate limit; ASN/страна — с IP-баз�
 | M0 ✅ | Каркас: CMake, event loop, listener, L4-классификатор, passthrough, `acme.json` loader, TLS-терминация с TLS-туннелем в Traefik (ADR-013), PROXY v2, метрики, graceful shutdown. Шлюз прозрачен. |
 | M1 ✅ | Пассивные отпечатки (TCP, JA4, H2, порядок заголовков; JA4T/JA4H опционально), события в NATS, ClickHouse-схема. `X-Bot-*` и shadow-решения перенесены в M2 (нужен HTTP-aware прокси, ADR-013). |
 | M2 ✅ | HTTP-aware прокси с пулом HTTP/2 (ADR-015), библиотека отпечатков, проверки согласованности, скоринг, shadow/enforce по хостам, `X-Bot-*`, блок, правила (ADR-008). |
-| M3 ⏳ | ✅ Rate limiter (local) и лимиты соединений на IP. Дальше: docker-лейблы, `admin/api`; synced/strict через Valkey — при нескольких узлах. |
+| M3 ⏳ | ✅ Rate limiter (local) и лимиты соединений на IP. ✅ Политики через docker-лейблы. Дальше: `admin/api`; synced/strict через Valkey — при нескольких узлах. |
 | M4   | JS-челлендж + PoW, токены, хорошие боты (rDNS, Web Bot Auth).                                       |
 | M5   | Поведенческие сигналы, honeypot, tarpit/decoy, офлайн-кластеризация, fail-open watchdog.            |
 | M6   | UI, ONNX-модель, upstream HTTP/2 (gRPC), HTTP/3 на входе.                                            |
