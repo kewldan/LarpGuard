@@ -47,10 +47,13 @@ struct PolicySettings {
   int block_status = 403;
   // Per-host mode overrides: exact names or "*.parent".
   std::vector<std::pair<std::string, HostMode>> host_modes;
+  // Overrides from the admin API (POST /policy, the console); not part of
+  // the configuration file. They beat host_modes and labels.
+  std::vector<std::pair<std::string, HostMode>> console_modes;
 };
 
-// A host's mode and where it came from: "policy.hosts", "labels" or
-// "mode" (the global setting).
+// A host's mode and where it came from: "console", "policy.hosts",
+// "labels" or "mode" (the global setting).
 struct ModeResolution {
   HostMode mode = HostMode::kShadow;
   std::string_view source;
@@ -78,6 +81,7 @@ class Policy {
       std::string_view host,
       std::optional<HostMode> label_mode = std::nullopt) const;
   bool global_enforce() const { return settings_.enforce; }
+  const PolicySettings& settings() const { return settings_; }
 
   // `override_action` (from an allow/block rule) replaces the action of the
   // verdict's class; `mode` decides whether it is carried out.

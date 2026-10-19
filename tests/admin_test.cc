@@ -15,9 +15,12 @@
 #include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
+#include "admin/modes.h"
 #include "admin/server.h"
 #include "common/network.h"
 #include "config/config.h"
+#include "events/events.h"
+#include "net/asn.h"
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
 #include "score/policy.h"
@@ -265,6 +268,8 @@ class AdminServerTest : public ::testing::Test {
   RateLimitStore store_;
   VerdictStore verdicts_;
   AttackMode attack_{0, 600};
+  ModeOverrides modes_{""};
+  AsnStore asn_;
   AdminContext context_;
 };
 
@@ -306,7 +311,139 @@ TEST_F(AdminServerTest, Policy) {
   response = Call("GET", "/policy?host=grpc.test");
   EXPECT_EQ(response.body["route"], "passthrough (policy)");
   EXPECT_EQ(response.body["mode_source"], "mode");
-  EXPECT_EQ(Call("GET", "/policy").status, 400);
+}
+
+TEST_F(AdminServerTest, PolicyOverview) {
+  const AdminResponse response = Call("GET", "/policy");
+  ASSERT_EQ(response.status, 200);
+  EXPECT_EQ(response.body["default"], "shadow");
+  ASSERT_EQ(response.body["policy_hosts"].size(), 1u);
+  EXPECT_EQ(response.body["policy_hosts"][0]["host"], "shop.test");
+  EXPECT_EQ(response.body["policy_hosts"][0]["mode"], "enforce");
+  EXPECT_TRUE(response.body["console"].empty());
+  EXPECT_TRUE(response.body["labels"].empty());
+  EXPECT_EQ(response.body["passthrough_hosts"][0], "grpc.test");
+}
+
+TEST_F(AdminServerTest, ConsoleModes) {
+  EXPECT_EQ(
+      Call("POST", "/policy", R"({"host":"shop.test","mode":"off"})").status,
+      404);  // No store yet.
+  context_.modes = &modes_;
+  context_.publish_modes = [this] {
+    verdicts_.set(WithConsoleModes(*verdicts_.snapshot(), modes_.Entries()));
+  };
+  AdminResponse response =
+      Call("POST", "/policy", R"({"host":"Shop.Test","mode":"shadow"})");
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(response.body["host"], "shop.test");
+  // The console beats policy.hosts (enforce) and applies at once.
+  response = Call("GET", "/policy?host=shop.test");
+  EXPECT_EQ(response.body["mode"], "shadow");
+  EXPECT_EQ(response.body["mode_source"], "console");
+  EXPECT_EQ(Call("GET", "/policy").body["console"][0]["mode"], "shadow");
+  EXPECT_EQ(Call("GET", "/status").body["verdicts_generation"], 2);
+
+  ASSERT_EQ(Call("POST", "/policy", R"({"host":"*.api.test","mode":"enforce"})")
+                .status,
+            200);
+  EXPECT_EQ(Call("GET", "/policy?host=v1.api.test").body["mode_source"],
+            "console");
+  EXPECT_EQ(Call("POST", "/policy", R"({"host":"a b","mode":"off"})").status,
+            400);
+  EXPECT_EQ(
+      Call("POST", "/policy", R"({"host":"a.test","mode":"loud"})").status,
+      400);
+  EXPECT_EQ(Call("POST", "/policy", "[]").status, 400);
+  EXPECT_EQ(Call("PUT", "/policy").status, 405);
+
+  EXPECT_EQ(Call("DELETE", "/policy/shop.test").status, 200);
+  response = Call("GET", "/policy?host=shop.test");
+  EXPECT_EQ(response.body["mode"], "enforce");
+  EXPECT_EQ(response.body["mode_source"], "policy.hosts");
+  EXPECT_EQ(Call("DELETE", "/policy/shop.test").status, 404);
+}
+
+TEST_F(AdminServerTest, ConfigView) {
+  const AdminResponse response = Call("GET", "/config");
+  ASSERT_EQ(response.status, 200);
+  const nlohmann::json& body = response.body;
+  EXPECT_EQ(body["generation"], 1);
+  EXPECT_GT(body["built_at_ms"].get<int64_t>(), 0);
+  EXPECT_EQ(body["policy"]["suspicious_threshold"], 30);
+  EXPECT_EQ(body["policy"]["bot_threshold"], 70);
+  EXPECT_EQ(body["policy"]["bot_action"], "block");
+  EXPECT_EQ(body["rate_limits"][0]["name"], "login");
+  EXPECT_EQ(body["rate_limits"][0]["period_ms"], 60000);
+  EXPECT_EQ(body["rate_limits"][0]["key"][0], "ip");
+  EXPECT_TRUE(body["throttle"].is_null());
+  EXPECT_FALSE(body["library"]["weights"].empty());
+  EXPECT_TRUE(body["library"]["automation"].is_array());
+  EXPECT_FALSE(body["crawlers"]["catalog"].empty());
+  EXPECT_FALSE(body["model"]["loaded"]);
+  // No secrets or paths.
+  EXPECT_FALSE(body.contains("captcha_secret_file"));
+  EXPECT_FALSE(body["captcha"].contains("site_key"));
+  EXPECT_EQ(Call("POST", "/config").status, 405);
+}
+
+TEST_F(AdminServerTest, RulesTest) {
+  AdminResponse response = Call(
+      "POST", "/rules/test", R"({"when":"score > 40 and\n  hosst == \"a\""})");
+  ASSERT_EQ(response.status, 422);
+  EXPECT_NE(response.body["error"].get<std::string>().find("unknown name"),
+            std::string::npos);
+  EXPECT_EQ(response.body["column"], 18);
+
+  response = Call("POST", "/rules/test", R"({"when":"score > 40"})");
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(response.body["evaluated"], 0);
+  EXPECT_EQ(response.body["references"], nlohmann::json::array({"score"}));
+
+  response = Call(
+      "POST", "/rules/test",
+      R"({"when":"score > 40 and ua_tool == \"curl\" and )"
+      R"(cidr(\"203.0.113.0/24\") and \"ua_tls_mismatch\" in reasons",)"
+      R"("samples":[)"
+      R"({"score":80,"user_agent":"curl/8.7.1","ip_prefix":"203.0.113.0/24",)"
+      R"("reasons":["ua_tls_mismatch"]},)"
+      R"({"score":80,"user_agent":"curl/8.7.1","ip_prefix":"198.51.100.0/24",)"
+      R"("reasons":["ua_tls_mismatch"]},)"
+      R"({"score":10,"user_agent":"curl/8.7.1","ip_prefix":"203.0.113.0/24"},)"
+      R"({"score":90,"user_agent":"Mozilla/5.0","ip_prefix":"203.0.113.0/24",)"
+      R"("reasons":["ua_tls_mismatch"]}]})");
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(response.body["evaluated"], 4);
+  EXPECT_EQ(response.body["matched"], nlohmann::json::array({0}));
+
+  EXPECT_EQ(Call("POST", "/rules/test",
+                 R"({"when":"true","samples":[{"score":"x"}]})")
+                .status,
+            400);
+  EXPECT_EQ(Call("POST", "/rules/test", R"({"samples":[]})").status, 400);
+  EXPECT_EQ(Call("POST", "/rules/test", "nope").status, 400);
+  EXPECT_EQ(Call("GET", "/rules/test").status, 405);
+}
+
+TEST_F(AdminServerTest, AsnNames) {
+  AdminResponse response = Call("GET", "/asn?numbers=64500");
+  ASSERT_EQ(response.status, 200);
+  EXPECT_FALSE(response.body["loaded"]);
+  auto database = std::make_shared<AsnDatabase>();
+  std::string error;
+  ASSERT_TRUE(AsnDatabase::Parse(
+      "5.0.0.0\t5.0.0.255\t64500\tDE\tEXAMPLE-HOSTING GmbH\n", database.get(),
+      &error))
+      << error;
+  asn_.set(database);
+  context_.asn = &asn_;
+  response = Call("GET", "/asn?numbers=64500,64511");
+  ASSERT_EQ(response.status, 200);
+  EXPECT_TRUE(response.body["loaded"]);
+  ASSERT_EQ(response.body["asns"].size(), 1u);
+  EXPECT_EQ(response.body["asns"][0]["org"], "EXAMPLE-HOSTING GmbH");
+  EXPECT_EQ(response.body["asns"][0]["hosting"], true);
+  EXPECT_EQ(Call("GET", "/asn?numbers=AS1").status, 400);
 }
 
 TEST_F(AdminServerTest, ListsCrud) {
@@ -350,6 +487,26 @@ TEST_F(AdminServerTest, Decisions) {
   EXPECT_EQ(Call("GET", "/decisions?limit=x").status, 400);
 }
 
+TEST_F(AdminServerTest, DecisionsCarryPrefixAndEventHash) {
+  EventSettings events;
+  events.ip_salt = "salt";
+  context_.event_settings = &events;
+  DecisionRecord record;
+  record.request_id = "inst-1-2";
+  record.ip = "203.0.113.77";
+  decisions_.Add(record);
+  const AdminResponse response = Call("GET", "/decisions/inst-1-2");
+  ASSERT_EQ(response.status, 200);
+  EXPECT_EQ(response.body["ip_prefix"], "203.0.113.0/24");
+  EXPECT_EQ(response.body["ip_hash"],
+            IpHash(asio::ip::make_address("203.0.113.77"), "salt"));
+  record.request_id = "inst-1-3";
+  record.ip = "2001:db8:4f:1::9";
+  decisions_.Add(record);
+  EXPECT_EQ(Call("GET", "/decisions?limit=1").body["decisions"][0]["ip_prefix"],
+            "2001:db8:4f::/48");
+}
+
 TEST_F(AdminServerTest, AttackMode) {
   AdminResponse response =
       Call("POST", "/attack", R"({"host":"Shop.Test","ttl":"1h"})");
@@ -377,6 +534,40 @@ TEST_F(AdminServerTest, AttackMode) {
   EXPECT_EQ(Call("PUT", "/attack").status, 405);
 }
 
+TEST(ModeOverridesTest, PersistsAndValidates) {
+  const std::string path =
+      (std::filesystem::temp_directory_path() / "bs_modes_test.json").string();
+  std::filesystem::remove(path);
+  std::string error;
+  {
+    ModeOverrides modes(path);
+    ASSERT_TRUE(modes.Load(&error)) << error;  // Missing file: empty.
+    EXPECT_TRUE(modes.Entries().empty());
+    ASSERT_TRUE(modes.Set("Shop.Test", HostMode::kEnforce, &error)) << error;
+    ASSERT_TRUE(modes.Set("*.api.test", HostMode::kOff, &error)) << error;
+    ASSERT_TRUE(modes.Set("shop.test", HostMode::kShadow, &error)) << error;
+    EXPECT_FALSE(modes.Set("bad host", HostMode::kOff, &error));
+    EXPECT_FALSE(modes.Remove("none.test", &error));
+  }
+  {
+    ModeOverrides modes(path);
+    ASSERT_TRUE(modes.Load(&error)) << error;
+    const auto entries = modes.Entries();
+    ASSERT_EQ(entries.size(), 2u);
+    EXPECT_EQ(entries[0].first, "*.api.test");  // JSON object order.
+    EXPECT_EQ(entries[0].second, HostMode::kOff);
+    EXPECT_EQ(entries[1].first, "shop.test");
+    EXPECT_EQ(entries[1].second, HostMode::kShadow);
+    ASSERT_TRUE(modes.Remove("shop.test", &error)) << error;
+  }
+  {
+    std::ofstream(path) << R"({"shop.test": "loud"})";
+    ModeOverrides modes(path);
+    EXPECT_FALSE(modes.Load(&error));
+  }
+  std::filesystem::remove(path);
+}
+
 TEST(AdminConfigTest, Parses) {
   Config config;
   std::string error;
@@ -387,6 +578,11 @@ TEST(AdminConfigTest, Parses) {
       << error;
   EXPECT_EQ(config.admin_socket, "/run/bs.sock");
   EXPECT_EQ(config.admin_state_file, "/var/lib/bs/lists.json");
+  EXPECT_TRUE(config.admin_modes_file.empty());
+  ASSERT_TRUE(ParseConfig("admin: {modes_file: /var/lib/bs/modes.json}\n",
+                          &config, &error))
+      << error;
+  EXPECT_EQ(config.admin_modes_file, "/var/lib/bs/modes.json");
   EXPECT_EQ(config.admin_decisions, 500u);
   EXPECT_FALSE(ParseConfig("admin: {port: 1}\n", &config, &error));
   EXPECT_FALSE(ParseConfig("admin: {decisions: -1}\n", &config, &error));

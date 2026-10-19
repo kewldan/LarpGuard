@@ -31,6 +31,8 @@ class AsnDatabase {
   static bool Parse(std::string_view tsv, AsnDatabase* out, std::string* error);
 
   std::optional<AsnInfo> Lookup(const asio::ip::address& address) const;
+  // The AS with this number, if any range belongs to it.
+  std::optional<AsnInfo> Find(uint32_t asn) const;
   std::size_t size() const { return v4_.size() + v6_.size(); }
 
  private:
@@ -54,6 +56,8 @@ class AsnDatabase {
   AsnInfo Info(uint32_t index) const;
 
   std::vector<As> ases_;
+  // Indexes into ases_ ordered by AS number, for Find().
+  std::vector<uint32_t> by_number_;
   std::vector<V4Range> v4_;
   std::vector<V6Range> v6_;
 };

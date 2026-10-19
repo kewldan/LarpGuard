@@ -76,14 +76,22 @@ bool ParseHostMode(std::string_view text, HostMode* mode) {
 
 ModeResolution Policy::ResolveMode(std::string_view host,
                                    std::optional<HostMode> label_mode) const {
-  // Exact names win over wildcards, configuration over labels.
-  for (const auto& [pattern, mode] : settings_.host_modes) {
-    if (pattern == host) return {mode, "policy.hosts"};
-  }
-  for (const auto& [pattern, mode] : settings_.host_modes) {
-    if (pattern.starts_with("*.") && HostMatches(pattern, host)) {
-      return {mode, "policy.hosts"};
+  // The console beats the configuration, which beats labels; within each,
+  // exact names win over wildcards.
+  const auto find = [host](const auto& modes) -> std::optional<HostMode> {
+    for (const auto& [pattern, mode] : modes) {
+      if (pattern == host) return mode;
     }
+    for (const auto& [pattern, mode] : modes) {
+      if (pattern.starts_with("*.") && HostMatches(pattern, host)) return mode;
+    }
+    return std::nullopt;
+  };
+  if (const auto mode = find(settings_.console_modes)) {
+    return {*mode, "console"};
+  }
+  if (const auto mode = find(settings_.host_modes)) {
+    return {*mode, "policy.hosts"};
   }
   if (label_mode) return {*label_mode, "labels"};
   return {settings_.enforce ? HostMode::kEnforce : HostMode::kShadow, "mode"};

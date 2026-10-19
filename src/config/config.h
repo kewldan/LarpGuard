@@ -208,6 +208,9 @@ struct Config {
   std::string admin_socket;
   // Operational lists survive restarts in this JSON file; empty: memory.
   std::string admin_state_file;
+  // Host modes set through the admin API (the console) survive restarts in
+  // this JSON file; empty: memory.
+  std::string admin_modes_file;
   // Recent decisions kept for GET /decisions.
   std::size_t admin_decisions = 10000;
   // Docker Engine socket for botshield.* label policies; empty disables.

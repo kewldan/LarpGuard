@@ -1,10 +1,12 @@
 #include "server/verdicts.h"
 
+#include <chrono>
 #include <format>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "config/config.h"
 #include "fp/library.h"
@@ -57,8 +59,22 @@ bool VerdictSet::Build(const Config& config,
     }
     set->model = std::move(model);
   }
+  set->config = std::make_shared<const Config>(config);
+  set->built_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
   *out = std::move(set);
   return true;
+}
+
+std::shared_ptr<const VerdictSet> WithConsoleModes(
+    const VerdictSet& verdicts,
+    std::vector<std::pair<std::string, HostMode>> console_modes) {
+  auto copy = std::make_shared<VerdictSet>(verdicts);
+  PolicySettings settings = verdicts.policy->settings();
+  settings.console_modes = std::move(console_modes);
+  copy->policy = std::make_shared<const Policy>(std::move(settings));
+  return copy;
 }
 
 std::shared_ptr<const VerdictSet> VerdictStore::snapshot() const {

@@ -2,18 +2,24 @@
 #define BOT_SHIELD_ADMIN_SERVER_H_
 
 #include <asio/awaitable.hpp>
+#include <asio/io_context.hpp>
 #include <asio/local/stream_protocol.hpp>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
+#include "admin/modes.h"
 #include "config/config.h"
 #include "docker/labels.h"
+#include "events/events.h"
+#include "net/asn.h"
 #include "ratelimit/store.h"
 #include "server/verdicts.h"
 #include "tls/cert_store.h"
@@ -33,6 +39,13 @@ struct AdminContext {
   // Re-reads the configuration (POST /reload); null: not available.
   std::function<bool(std::string* summary)> reload;
   AttackMode* attack = nullptr;  // May be null.
+  // Salt of ip_hash in events, so decisions carry the same hash; may be null.
+  const EventSettings* event_settings = nullptr;
+  // Host modes from POST /policy; null: not available. `publish_modes`
+  // rebuilds the verdict set with them (serialized with reloads).
+  ModeOverrides* modes = nullptr;
+  std::function<void()> publish_modes;
+  const AsnStore* asn = nullptr;  // May be null.
   int64_t started_ms = 0;
   int workers = 0;
 };
@@ -44,10 +57,14 @@ struct AdminResponse {
 
 // Routes one request (exposed for tests):
 //   GET    /status
-//   GET    /policy?host=<host>
+//   GET    /config           (the verdict set in effect, without secrets)
+//   GET    /policy[?host=<host>]
+//   POST   /policy           DELETE /policy/<host>   (console host modes)
 //   GET    /lists            POST /lists        DELETE /lists/<id>
 //   GET    /decisions?limit=&host=&class=       GET /decisions/<request id>
 //   GET    /attack           POST /attack       DELETE /attack/<host>
+//   POST   /rules/test       (a condition on sample events)
+//   GET    /asn?numbers=<n>,<n>
 //   POST   /reload           (rules, limits, policy, library, model)
 AdminResponse HandleAdminRequest(std::string_view method,
                                  std::string_view target, std::string_view body,
@@ -62,6 +79,31 @@ bool OpenAdminSocket(asio::local::stream_protocol::acceptor* acceptor,
 asio::awaitable<void> ServeAdmin(
     asio::local::stream_protocol::acceptor& acceptor,
     const AdminContext& context);
+
+// The admin API on its own thread and event loop, off the workers: some
+// requests (POST /rules/test) do real CPU work. Everything AdminContext
+// points to is thread-safe already, since workers use it concurrently.
+class AdminServer {
+ public:
+  AdminServer() = default;
+  ~AdminServer();
+
+  AdminServer(const AdminServer&) = delete;
+  AdminServer& operator=(const AdminServer&) = delete;
+
+  // Binds `path` and starts serving; `context` must outlive the server.
+  bool Start(const std::string& path, const AdminContext* context,
+             std::string* error);
+  // Closes the socket; requests in progress finish.
+  void StopAccepting();
+  void Stop();
+  void Join();
+
+ private:
+  asio::io_context io_context_;
+  std::unique_ptr<asio::local::stream_protocol::acceptor> acceptor_;
+  std::thread thread_;
+};
 
 }  // namespace bot_shield
 

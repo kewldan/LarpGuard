@@ -7,7 +7,10 @@
 #include <asio/as_tuple.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
+#include <asio/io_context.hpp>
+#include <asio/ip/address.hpp>
 #include <asio/local/stream_protocol.hpp>
+#include <asio/post.hpp>
 #include <asio/read.hpp>
 #include <asio/read_until.hpp>
 #include <asio/this_coro.hpp>
@@ -19,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <format>
 #include <functional>
 #include <memory>
@@ -27,22 +31,33 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
+#include "admin/modes.h"
 #include "common/host.h"
 #include "common/log.h"
 #include "common/metrics.h"
 #include "common/url.h"
 #include "common/version.h"
 #include "config/config.h"
+#include "crawler/crawlers.h"
 #include "docker/labels.h"
+#include "events/events.h"
+#include "fp/http_request.h"
+#include "fp/library.h"
+#include "fp/user_agent.h"
+#include "net/asn.h"
 #include "net/watchdog.h"
 #include "proxy/http_message.h"
+#include "ratelimit/limits.h"
 #include "score/policy.h"
+#include "score/rules.h"
+#include "server/verdicts.h"
 
 namespace bot_shield {
 namespace {
@@ -50,7 +65,11 @@ namespace {
 using asio::local::stream_protocol;
 
 constexpr auto kUse = asio::as_tuple(asio::use_awaitable);
-constexpr std::size_t kMaxRequest = std::size_t{64} * 1024;
+constexpr std::size_t kMaxHead = std::size_t{64} * 1024;
+// POST /rules/test carries up to kMaxSamples events.
+constexpr std::size_t kMaxBody = std::size_t{8} * 1024 * 1024;
+constexpr std::size_t kMaxSamples = 5000;
+constexpr std::size_t kMaxAsns = 200;
 constexpr auto kRequestTimeout = std::chrono::seconds(10);
 
 AdminResponse Error(int status, std::string_view message) {
@@ -117,6 +136,79 @@ AdminResponse HostPolicy(const AdminContext& context,
            {"route", route},
            {"certificate", certificate},
            {"rate_limits", limits}}};
+}
+
+nlohmann::json ModesJson(
+    const std::vector<std::pair<std::string, HostMode>>& modes) {
+  nlohmann::json json = nlohmann::json::array();
+  for (const auto& [host, mode] : modes) {
+    json.push_back({{"host", host}, {"mode", HostModeName(mode)}});
+  }
+  return json;
+}
+
+// GET /policy without a host: every host with a mode of its own, by source.
+AdminResponse PolicyOverview(const AdminContext& context) {
+  const auto verdicts = context.verdicts->snapshot();
+  const PolicySettings& settings = verdicts->policy->settings();
+  nlohmann::json labels = nlohmann::json::array();
+  if (const auto snapshot =
+          context.labels != nullptr ? context.labels->snapshot() : nullptr) {
+    for (const LabelHostPolicy& host : snapshot->hosts()) {
+      nlohmann::json entry = {{"host", host.host},
+                              {"container", host.container},
+                              {"passthrough", host.passthrough}};
+      if (host.mode) entry["mode"] = HostModeName(*host.mode);
+      labels.push_back(std::move(entry));
+    }
+  }
+  return {200,
+          {{"default", settings.enforce ? "enforce" : "shadow"},
+           {"console", ModesJson(settings.console_modes)},
+           {"policy_hosts", ModesJson(settings.host_modes)},
+           {"labels", labels},
+           {"passthrough_hosts", context.config->passthrough_hosts}}};
+}
+
+// POST /policy {"host": "<host>|*.<parent>", "mode": "shadow|enforce|off"}
+// and DELETE /policy/<host>: host modes from the console.
+AdminResponse ConsoleMode(std::string_view method, std::string_view rest,
+                          std::string_view body, const AdminContext& context) {
+  if (context.modes == nullptr || !context.publish_modes) {
+    return Error(404, "console host modes unavailable");
+  }
+  std::string error;
+  if (rest.empty() && method == "POST") {
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, false);
+    if (json.is_discarded() || !json.is_object()) {
+      return Error(400, "body must be a JSON object");
+    }
+    const auto host = json.find("host");
+    const auto mode_text = json.find("mode");
+    HostMode mode = HostMode::kShadow;
+    if (host == json.end() || !host->is_string() || mode_text == json.end() ||
+        !mode_text->is_string() ||
+        !ParseHostMode(mode_text->get<std::string>(), &mode)) {
+      return Error(
+          400, R"(expected {"host": "<host>", "mode": "shadow|enforce|off"})");
+    }
+    if (!context.modes->Set(host->get<std::string>(), mode, &error)) {
+      return Error(400, error);
+    }
+    context.publish_modes();
+    const std::string name = NormalizeHost(host->get<std::string>());
+    log::Warn("admin: host mode of {} set to {} (console)", name,
+              HostModeName(mode));
+    return {200, {{"host", name}, {"mode", HostModeName(mode)}}};
+  }
+  if (!rest.empty() && method == "DELETE") {
+    const std::string host = PercentDecode(rest.substr(1));
+    if (!context.modes->Remove(host, &error)) return Error(404, error);
+    context.publish_modes();
+    log::Info("admin: console host mode of {} removed", host);
+    return {200, {{"removed", NormalizeHost(host)}}};
+  }
+  return Error(405, "method not allowed");
 }
 
 AdminResponse Lists(std::string_view method, std::string_view rest,
@@ -231,12 +323,28 @@ AdminResponse Attack(std::string_view method, std::string_view rest,
   return Error(405, "method not allowed");
 }
 
+// A decision with the client's ip_prefix and ip_hash as in events, so a
+// consumer that must not see full addresses can drop "ip" and still join
+// the decision with events.
+nlohmann::json DecisionWithPrefix(const DecisionRecord& record,
+                                  const AdminContext& context) {
+  nlohmann::json json = DecisionToJson(record);
+  std::error_code ec;
+  const asio::ip::address address = asio::ip::make_address(record.ip, ec);
+  if (ec) return json;
+  json["ip_prefix"] = IpPrefix(address);
+  if (context.event_settings != nullptr) {
+    json["ip_hash"] = IpHash(address, context.event_settings->ip_salt);
+  }
+  return json;
+}
+
 AdminResponse Decisions(std::string_view rest, const QueryParams& params,
                         const AdminContext& context) {
   if (!rest.empty()) {
     const auto record = context.decisions->Find(rest.substr(1));
     if (!record) return Error(404, "unknown request id (log is bounded)");
-    return {200, DecisionToJson(*record)};
+    return {200, DecisionWithPrefix(*record, context)};
   }
   std::size_t limit = 50;
   if (const std::string text = QueryParam(params, "limit"); !text.empty()) {
@@ -250,9 +358,279 @@ AdminResponse Decisions(std::string_view rest, const QueryParams& params,
   for (const DecisionRecord& record : context.decisions->Recent(
            limit, NormalizeHost(QueryParam(params, "host")),
            QueryParam(params, "class"))) {
-    records.push_back(DecisionToJson(record));
+    records.push_back(DecisionWithPrefix(record, context));
   }
   return {200, {{"decisions", records}}};
+}
+
+int64_t Millis(std::chrono::milliseconds duration) { return duration.count(); }
+
+nlohmann::json LimitJson(const RateLimitSpec& spec) {
+  return {{"name", spec.name},       {"hosts", spec.hosts},
+          {"paths", spec.paths},     {"methods", spec.methods},
+          {"classes", spec.classes}, {"key", spec.key},
+          {"count", spec.count},     {"period_ms", Millis(spec.period)},
+          {"burst", spec.burst}};
+}
+
+// GET /config: what decides verdicts right now (the last successful load
+// or reload), without secrets or file paths.
+AdminResponse ConfigView(const AdminContext& context) {
+  const auto verdicts = context.verdicts->snapshot();
+  const Config& config = *verdicts->config;
+  const PolicySettings& policy = verdicts->policy->settings();
+  nlohmann::json rules = nlohmann::json::array();
+  for (const RuleSpec& rule : config.rules) {
+    nlohmann::json json = {
+        {"name", rule.name}, {"when", rule.when}, {"action", rule.action}};
+    if (rule.action == "score") json["score"] = rule.score;
+    rules.push_back(std::move(json));
+  }
+  nlohmann::json limits = nlohmann::json::array();
+  for (const RateLimitSpec& spec : config.rate_limits) {
+    limits.push_back(LimitJson(spec));
+  }
+  nlohmann::json crawlers = nlohmann::json::array();
+  for (const KnownCrawler& crawler : KnownCrawlers()) {
+    nlohmann::json json = {{"id", crawler.id}, {"ai", crawler.ai}};
+    json["domains"] = nlohmann::json::array();
+    for (const std::string_view domain : crawler.domains) {
+      json["domains"].push_back(domain);
+    }
+    json["ranges"] = nlohmann::json::array();
+    for (const std::string_view url : crawler.ranges) {
+      json["ranges"].push_back(url);
+    }
+    crawlers.push_back(std::move(json));
+  }
+  nlohmann::json automation = nlohmann::json::array();
+  for (const AutomationSignature& signature : verdicts->library->automation()) {
+    automation.push_back({{"id", signature.id},
+                          {"weight", signature.weight},
+                          {"ja4", signature.ja4},
+                          {"h2_fp", signature.h2_fingerprint},
+                          {"header_fp", signature.header_fp},
+                          {"user_agent", signature.user_agent}});
+  }
+  nlohmann::json weights = nlohmann::json::object();
+  for (const auto& [signal, weight] : verdicts->library->weights()) {
+    weights[signal] = weight;
+  }
+  return {200,
+          {{"generation", verdicts->generation},
+           {"built_at_ms", verdicts->built_at_ms},
+           {"policy",
+            {{"enforce", policy.enforce},
+             {"suspicious_threshold", policy.suspicious_threshold},
+             {"bot_threshold", policy.bot_threshold},
+             {"suspicious_action", ActionName(policy.suspicious_action)},
+             {"bot_action", ActionName(policy.bot_action)},
+             {"verified_bot_action", ActionName(policy.verified_bot_action)},
+             {"block_status", policy.block_status}}},
+           {"rules", rules},
+           {"rate_limits", limits},
+           {"throttle", config.throttle ? LimitJson(*config.throttle)
+                                        : nlohmann::json(nullptr)},
+           {"honeypot_paths", verdicts->honeypot_paths},
+           {"crawlers",
+            {{"verify", config.crawlers_verify},
+             {"ip_ranges", config.crawlers_ip_ranges},
+             {"ai_action",
+              verdicts->ai_crawler_action
+                  ? nlohmann::json(ActionName(*verdicts->ai_crawler_action))
+                  : nlohmann::json(nullptr)},
+             {"catalog", crawlers}}},
+           {"web_bot_auth",
+            {{"enabled", config.web_bot_auth_enabled},
+             {"trusted", verdicts->trusted_agents}}},
+           {"challenge",
+            {{"suspicious_difficulty", config.challenge_suspicious_difficulty},
+             {"bot_difficulty", config.challenge_bot_difficulty},
+             {"token_ttl_ms", Millis(config.challenge_token_ttl)},
+             {"token_credit", config.challenge_token_credit}}},
+           {"captcha",
+            {{"provider", config.captcha_provider},
+             {"escalate", config.captcha_escalate},
+             {"rounds", config.captcha_rounds}}},
+           {"attack",
+            {{"auto_rps", config.attack_auto_rps},
+             {"auto_duration_ms", Millis(config.attack_auto_duration)}}},
+           {"library",
+            {{"version", verdicts->library->version()},
+             {"profiles", verdicts->library->profile_count()},
+             {"weights", weights},
+             {"automation", automation}}},
+           {"model",
+            {{"loaded", verdicts->model != nullptr},
+             {"threshold", verdicts->model_threshold}}}}};
+}
+
+std::string JsonString(const nlohmann::json& json, std::string_view key) {
+  const auto it = json.find(key);
+  return it != json.end() && it->is_string() ? it->get<std::string>() : "";
+}
+
+// One sample of POST /rules/test: a request event (bot_shield.req row).
+struct RuleSample {
+  HttpRequest request;
+  std::string host, path, sni, alpn, ja4, h2_fp, pseudo_order, header_fp,
+      tcp_fp, bot_class, signed_agent;
+  std::vector<std::string> reasons;
+  UserAgent ua;
+  int64_t score = 0;
+  int64_t asn = 0;
+  asio::ip::address ip;
+};
+
+bool ParseSample(const nlohmann::json& json, RuleSample* sample) {
+  if (!json.is_object()) return false;
+  sample->request.method = JsonString(json, "method");
+  sample->request.version = JsonString(json, "http_version");
+  const std::string user_agent = JsonString(json, "user_agent");
+  if (!user_agent.empty()) {
+    sample->request.headers.emplace_back("user-agent", user_agent);
+  }
+  sample->ua = ParseUserAgent(user_agent);
+  sample->host = NormalizeHost(JsonString(json, "host"));
+  sample->path = JsonString(json, "path");
+  sample->sni = JsonString(json, "sni");
+  sample->alpn = JsonString(json, "alpn");
+  sample->ja4 = JsonString(json, "ja4");
+  sample->h2_fp = JsonString(json, "h2_fp");
+  sample->pseudo_order = JsonString(json, "pseudo_order");
+  sample->header_fp = JsonString(json, "header_fp");
+  sample->tcp_fp = JsonString(json, "tcp_fp");
+  sample->bot_class = JsonString(json, "class");
+  sample->signed_agent = JsonString(json, "signed_agent");
+  if (const auto it = json.find("score"); it != json.end()) {
+    if (!it->is_number_integer()) return false;
+    sample->score = it->get<int64_t>();
+  }
+  if (const auto it = json.find("asn"); it != json.end()) {
+    if (!it->is_number_integer()) return false;
+    sample->asn = it->get<int64_t>();
+  }
+  if (const auto it = json.find("reasons"); it != json.end()) {
+    if (!it->is_array()) return false;
+    for (const nlohmann::json& reason : *it) {
+      if (!reason.is_string()) return false;
+      sample->reasons.push_back(reason.get<std::string>());
+    }
+  }
+  // Events carry a prefix, not the address: cidr() sees its network.
+  const std::string prefix = JsonString(json, "ip_prefix");
+  std::error_code ec;
+  sample->ip = asio::ip::make_address(prefix.substr(0, prefix.find('/')), ec);
+  return true;
+}
+
+// POST /rules/test {"when": "<condition>", "samples": [<req event>, ...]}:
+// compiles the condition like a rule in the configuration and evaluates it
+// on the samples. 422 with the column on a compile error.
+AdminResponse RulesTest(std::string_view body, const AdminContext& context) {
+  const nlohmann::json json = nlohmann::json::parse(body, nullptr, false);
+  if (json.is_discarded() || !json.is_object()) {
+    return Error(400, "body must be a JSON object");
+  }
+  const auto when = json.find("when");
+  if (when == json.end() || !when->is_string()) {
+    return Error(400, R"(expected {"when": "<condition>", "samples": [...]})");
+  }
+  const auto samples = json.find("samples");
+  if (samples != json.end() &&
+      (!samples->is_array() || samples->size() > kMaxSamples)) {
+    return Error(
+        400, std::format("samples: an array of up to {} events", kMaxSamples));
+  }
+  std::string error;
+  const auto condition = Condition::Compile(when->get<std::string>(), &error);
+  if (!condition) {
+    AdminResponse response = Error(422, error);
+    int column = 0;
+    if (error.starts_with("col ")) {
+      std::from_chars(error.data() + 4, error.data() + error.size(), column);
+    }
+    response.body["column"] = column;
+    return response;
+  }
+  const auto asn = context.asn != nullptr ? context.asn->snapshot() : nullptr;
+  nlohmann::json matched = nlohmann::json::array();
+  std::size_t evaluated = 0;
+  if (samples != json.end()) {
+    for (std::size_t i = 0; i < samples->size(); ++i) {
+      RuleSample sample;
+      if (!ParseSample((*samples)[i], &sample)) {
+        return Error(400, std::format("samples[{}]: bad event", i));
+      }
+      RuleContext rule;
+      rule.request = &sample.request;
+      rule.ip = sample.ip;
+      rule.host = sample.host;
+      rule.path = sample.path;
+      rule.sni = sample.sni;
+      rule.alpn = sample.alpn;
+      rule.ja4 = sample.ja4;
+      rule.h2_fingerprint = sample.h2_fp;
+      rule.pseudo_order = sample.pseudo_order;
+      rule.header_fp = sample.header_fp;
+      rule.tcp_fingerprint = sample.tcp_fp;
+      rule.ua_family = sample.ua.family;
+      rule.ua_engine = sample.ua.engine;
+      rule.ua_os = sample.ua.os;
+      rule.ua_tool = sample.ua.tool;
+      rule.score = sample.score;
+      rule.bot_class = sample.bot_class;
+      rule.reasons = &sample.reasons;
+      rule.asn = sample.asn;
+      rule.signed_agent = sample.signed_agent;
+      if (asn && sample.asn > 0) {
+        if (const auto info = asn->Find(static_cast<uint32_t>(sample.asn))) {
+          rule.asn_org = info->org;
+          rule.asn_country = info->country;
+          rule.asn_hosting = info->hosting;
+        }
+      }
+      if (condition->Evaluate(rule)) matched.push_back(i);
+      ++evaluated;
+    }
+  }
+  return {200,
+          {{"references", condition->References()},
+           {"evaluated", evaluated},
+           {"matched", matched}}};
+}
+
+// GET /asn?numbers=13335,64500: names from the gateway's ASN database.
+AdminResponse AsnNames(const QueryParams& params, const AdminContext& context) {
+  const auto database =
+      context.asn != nullptr ? context.asn->snapshot() : nullptr;
+  nlohmann::json asns = nlohmann::json::array();
+  const std::string list = QueryParam(params, "numbers");
+  std::string_view numbers = list;
+  std::size_t count = 0;
+  while (!numbers.empty()) {
+    const std::size_t comma = numbers.find(',');
+    const std::string_view item = numbers.substr(0, comma);
+    numbers.remove_prefix(comma == std::string_view::npos ? numbers.size()
+                                                          : comma + 1);
+    uint32_t number = 0;
+    const auto [ptr, ec] =
+        std::from_chars(item.data(), item.data() + item.size(), number);
+    if (ec != std::errc() || ptr != item.data() + item.size()) {
+      return Error(400, "numbers: comma-separated AS numbers");
+    }
+    if (++count > kMaxAsns) {
+      return Error(400, std::format("numbers: at most {}", kMaxAsns));
+    }
+    if (!database) continue;
+    if (const auto info = database->Find(number)) {
+      asns.push_back({{"asn", info->asn},
+                      {"org", info->org},
+                      {"country", info->country},
+                      {"hosting", info->hosting}});
+    }
+  }
+  return {200, {{"loaded", database != nullptr}, {"asns", asns}}};
 }
 
 asio::awaitable<void> HandleConnection(stream_protocol::socket socket,
@@ -264,7 +642,7 @@ asio::awaitable<void> HandleConnection(stream_protocol::socket socket,
   });
   std::string data;
   auto [ec, head_size] = co_await asio::async_read_until(
-      socket, asio::dynamic_buffer(data, kMaxRequest), "\r\n\r\n", kUse);
+      socket, asio::dynamic_buffer(data, kMaxHead), "\r\n\r\n", kUse);
   if (ec) co_return;
 
   const std::string_view head = std::string_view(data).substr(0, head_size);
@@ -285,7 +663,7 @@ asio::awaitable<void> HandleConnection(stream_protocol::socket socket,
                       content_length);
     }
   }
-  if (content_length > kMaxRequest) co_return;
+  if (content_length > kMaxBody) co_return;
   if (data.size() < head_size + content_length) {
     const std::size_t missing = head_size + content_length - data.size();
     std::string rest(missing, '\0');
@@ -334,9 +712,24 @@ AdminResponse HandleAdminRequest(std::string_view method,
     if (method != "GET") return Error(405, "method not allowed");
     return Status(context, now_seconds);
   }
-  if (path == "/policy") {
+  if (path == "/config") {
     if (method != "GET") return Error(405, "method not allowed");
-    return HostPolicy(context, QueryParam(params, "host"));
+    return ConfigView(context);
+  }
+  if (path == "/policy" && method == "GET") {
+    const std::string host = QueryParam(params, "host");
+    return host.empty() ? PolicyOverview(context) : HostPolicy(context, host);
+  }
+  if (path == "/policy" || path.starts_with("/policy/")) {
+    return ConsoleMode(method, path.substr(7), body, context);
+  }
+  if (path == "/rules/test") {
+    if (method != "POST") return Error(405, "method not allowed");
+    return RulesTest(body, context);
+  }
+  if (path == "/asn") {
+    if (method != "GET") return Error(405, "method not allowed");
+    return AsnNames(params, context);
   }
   if (path == "/reload") {
     if (method != "POST") return Error(405, "method not allowed");
@@ -389,6 +782,49 @@ asio::awaitable<void> ServeAdmin(stream_protocol::acceptor& acceptor,
     asio::co_spawn(executor, HandleConnection(std::move(socket), context),
                    asio::detached);
   }
+}
+
+AdminServer::~AdminServer() {
+  Stop();
+  Join();
+}
+
+bool AdminServer::Start(const std::string& path, const AdminContext* context,
+                        std::string* error) {
+  acceptor_ = std::make_unique<stream_protocol::acceptor>(io_context_);
+  if (!OpenAdminSocket(acceptor_.get(), path, error)) return false;
+  asio::co_spawn(io_context_, ServeAdmin(*acceptor_, *context),
+                 [](const std::exception_ptr& failure) {
+                   if (!failure) return;
+                   try {
+                     std::rethrow_exception(failure);
+                   } catch (const std::exception& e) {
+                     log::Error("admin API stopped: {}", e.what());
+                   }
+                 });
+  thread_ = std::thread([this] {
+    try {
+      io_context_.run();
+    } catch (const std::exception& e) {
+      log::Error("admin API stopped: {}", e.what());
+    }
+  });
+  log::Info("admin API on {}", path);
+  return true;
+}
+
+void AdminServer::StopAccepting() {
+  if (!acceptor_) return;
+  asio::post(io_context_, [this] {
+    std::error_code ec;
+    acceptor_->close(ec);
+  });
+}
+
+void AdminServer::Stop() { io_context_.stop(); }
+
+void AdminServer::Join() {
+  if (thread_.joinable()) thread_.join();
 }
 
 }  // namespace bot_shield

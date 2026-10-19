@@ -17,6 +17,7 @@
 #include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
+#include "admin/modes.h"
 #include "admin/server.h"
 #include "challenge/captcha.h"
 #include "challenge/challenger.h"
@@ -60,8 +61,6 @@ class Worker {
               bool reuse_port, std::string* error);
   bool ListenMetrics(const asio::ip::tcp::endpoint& endpoint,
                      const Heartbeats* heartbeats, std::string* error);
-  bool ListenAdmin(const std::string& path, const AdminContext& admin,
-                   std::string* error);
 
   // Runs the loop on its own thread, beating `heartbeats` from it.
   void Run(Heartbeats* heartbeats);
@@ -80,7 +79,6 @@ class Worker {
   asio::ssl::context upstream_tls_;
   GatewayContext context_;
   std::vector<std::unique_ptr<asio::ip::tcp::acceptor>> acceptors_;
-  std::unique_ptr<asio::local::stream_protocol::acceptor> admin_acceptor_;
   std::unique_ptr<UpstreamPool> pool_;
   // HTTP/3 listener (http3.enabled).
   std::unique_ptr<QuicServer> quic_;
@@ -98,6 +96,9 @@ struct GatewayServices {
   const VerdictStore* verdicts = nullptr;
   // POST /reload in the admin API; may be empty.
   std::function<bool(std::string* summary)> reload;
+  // Console host modes (POST /policy) and how to apply them; may be null.
+  ModeOverrides* modes = nullptr;
+  std::function<void()> publish_modes;
   const LabelStore* labels = nullptr;  // Null: Docker off.
   ListStore* lists = nullptr;
   DecisionLog* decisions = nullptr;
@@ -142,6 +143,8 @@ class Gateway {
   AttackMode attack_;
   std::unique_ptr<Heartbeats> heartbeats_;
   std::vector<std::unique_ptr<Worker>> workers_;
+  // After admin_ and the stores it points to: stopped and joined first.
+  std::unique_ptr<AdminServer> admin_server_;
 };
 
 // Resolves "host:port" to an address. Names are resolved once at startup.

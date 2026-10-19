@@ -31,6 +31,7 @@
 
 #include "admin/decision_log.h"
 #include "admin/lists.h"
+#include "admin/modes.h"
 #include "behavior/behavior.h"
 #include "challenge/captcha.h"
 #include "challenge/challenger.h"
@@ -217,6 +218,14 @@ int Run(int argc, char** argv) {
          config.events_subject_prefix);
   }
 
+  // Host modes set from the console (POST /policy); applied on top of
+  // every verdict set.
+  bot_shield::ModeOverrides modes(config.admin_modes_file);
+  if (!modes.Load(&error)) {
+    Error("admin: {}", error);
+    return 1;
+  }
+
   // Library, policy, rules, limits and model; replaced by SIGHUP and
   // POST /reload without a restart.
   bot_shield::VerdictStore verdicts;
@@ -226,7 +235,7 @@ int Run(int argc, char** argv) {
       Error("{}", error);
       return 1;
     }
-    verdicts.set(initial);
+    verdicts.set(bot_shield::WithConsoleModes(*initial, modes.Entries()));
   }
   Info("{}", VerdictSummary(*verdicts.snapshot(), config));
   std::mutex reload_mutex;
@@ -241,10 +250,17 @@ int Run(int argc, char** argv) {
       Error("reload failed, keeping the current configuration: {}", *summary);
       return false;
     }
-    verdicts.set(next);
+    verdicts.set(bot_shield::WithConsoleModes(*next, modes.Entries()));
     *summary = VerdictSummary(*verdicts.snapshot(), fresh);
     Info("reloaded: {}", *summary);
     return true;
+  };
+  // Applies changed console modes; serialized with reloads so neither
+  // publishes a set built from the other's stale snapshot.
+  const auto publish_modes = [&] {
+    const std::scoped_lock lock(reload_mutex);
+    verdicts.set(
+        bot_shield::WithConsoleModes(*verdicts.snapshot(), modes.Entries()));
   };
 
   bot_shield::LabelStore labels;
@@ -416,6 +432,8 @@ int Run(int argc, char** argv) {
   services.event_settings = &event_settings;
   services.verdicts = &verdicts;
   services.reload = reload;
+  services.modes = &modes;
+  services.publish_modes = publish_modes;
   services.labels = docker ? &labels : nullptr;
   services.lists = &lists;
   services.decisions = &decisions;

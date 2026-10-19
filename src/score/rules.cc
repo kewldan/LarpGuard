@@ -706,6 +706,34 @@ bool Condition::Evaluate(const RuleContext& context) const {
   return bot_shield::Evaluate(*root_, context).flag;
 }
 
+std::vector<std::string> Condition::References() const {
+  std::set<std::string> names;
+  const auto visit = [&names](const auto& self, const Node& node) -> void {
+    switch (node.kind) {
+      case NodeKind::kField:
+        for (const FieldInfo& info : kFields) {
+          if (info.field == node.field) names.emplace(info.name);
+        }
+        break;
+      case NodeKind::kHeader:
+        names.emplace("header()");
+        break;
+      case NodeKind::kHasHeader:
+        names.emplace("has_header()");
+        break;
+      case NodeKind::kCidr:
+        names.emplace("cidr()");
+        break;
+      default:
+        break;
+    }
+    if (node.left) self(self, *node.left);
+    if (node.right) self(self, *node.right);
+  };
+  visit(visit, *root_);
+  return {names.begin(), names.end()};
+}
+
 bool RuleSet::Compile(const std::vector<RuleSpec>& specs, RuleSet* rules,
                       std::string* error) {
   RuleSet out;

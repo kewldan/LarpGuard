@@ -334,13 +334,18 @@ attack:
 
 # Admin API (JSON over a unix socket, mode 0600; no TCP port):
 #   curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
-# GET /status, GET /policy?host=, GET|POST /lists, DELETE /lists/<id>,
-# GET /decisions[?limit=&host=&class=], GET /decisions/<request id>,
-# GET|POST /attack, DELETE /attack/<host>.
+# GET /status, GET /config, GET|POST /policy, DELETE /policy/<host>,
+# GET|POST /lists, DELETE /lists/<id>, GET /decisions[?limit=&host=&class=],
+# GET /decisions/<request id>, GET|POST /attack, DELETE /attack/<host>,
+# POST /rules/test, GET /asn?numbers=, POST /reload. The web console
+# (ui/, deploy/console.yaml) uses it.
 admin:
   socket: /run/bot-shield/admin.sock   # Not a default: off unless set.
   # Operational allow/block lists survive restarts here ("" = memory only).
   state_file: /var/lib/bot-shield/lists.json   # Not a default.
+  # Host modes set from the console (POST /policy) survive restarts here;
+  # they beat policy.hosts and labels ("" = memory only).
+  modes_file: /var/lib/bot-shield/modes.json   # Not a default.
   # Recent decisions kept in memory for GET /decisions.
   decisions: 10000
 

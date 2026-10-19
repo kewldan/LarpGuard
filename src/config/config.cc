@@ -794,7 +794,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     }
   }
   if (const YAML::Node admin = root["admin"]) {
-    if (!CheckKeys(admin, "admin", {"socket", "state_file", "decisions"},
+    if (!CheckKeys(admin, "admin",
+                   {"socket", "state_file", "modes_file", "decisions"},
                    error)) {
       return false;
     }
@@ -806,6 +807,11 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       config->admin_state_file = admin["state_file"].IsNull()
                                      ? ""
                                      : admin["state_file"].as<std::string>();
+    }
+    if (admin["modes_file"]) {
+      config->admin_modes_file = admin["modes_file"].IsNull()
+                                     ? ""
+                                     : admin["modes_file"].as<std::string>();
     }
     if (admin["decisions"]) {
       const auto value = admin["decisions"].as<int64_t>();

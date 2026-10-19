@@ -70,6 +70,24 @@ TEST(AsnTest, ParsesAndLooksUp) {
   EXPECT_FALSE(db.Lookup(Ip("2001:db9::1")));
 }
 
+TEST(AsnTest, FindsByNumber) {
+  AsnDatabase db;
+  std::string error;
+  ASSERT_TRUE(AsnDatabase::Parse(kTsv, &db, &error)) << error;
+  std::optional<AsnInfo> info = db.Find(64500);
+  ASSERT_TRUE(info);
+  EXPECT_EQ(info->org, "EXAMPLE-HOSTING GmbH");
+  EXPECT_EQ(info->country, "DE");
+  EXPECT_TRUE(info->hosting);
+  info = db.Find(13335);
+  ASSERT_TRUE(info);
+  EXPECT_EQ(info->org, "CLOUDFLARENET");
+  ASSERT_TRUE(db.Find(64501));
+  EXPECT_FALSE(db.Find(0));  // "Not routed" is not an AS.
+  EXPECT_FALSE(db.Find(1));
+  EXPECT_FALSE(db.Find(99999));
+}
+
 TEST(AsnTest, RejectsGarbage) {
   AsnDatabase db;
   std::string error;

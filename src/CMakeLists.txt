@@ -9,6 +9,7 @@ add_library(bot_shield_core STATIC
   admin/attack.cc
   admin/decision_log.cc
   admin/lists.cc
+  admin/modes.cc
   admin/server.cc
   common/compress.cc
   common/hash.cc

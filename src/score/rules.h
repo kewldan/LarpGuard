@@ -67,6 +67,10 @@ class Condition {
 
   bool Evaluate(const RuleContext& context) const;
 
+  // Fields and functions the condition reads ("score", "header()",
+  // "has_header()", "cidr()"), sorted, without duplicates.
+  std::vector<std::string> References() const;
+
  private:
   explicit Condition(std::unique_ptr<Node> root);
 

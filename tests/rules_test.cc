@@ -108,6 +108,18 @@ TEST_F(RulesTest, AsnAndSignedAgentFields) {
   EXPECT_FALSE(Condition::Compile("asn == \"16509\"", &error));
 }
 
+TEST_F(RulesTest, References) {
+  std::string error;
+  const auto condition = Condition::Compile(
+      R"(score > 40 and (host == "a" or has_header("x-a")) and )"
+      R"(not cidr("10.0.0.0/8") and header("x-b") == "" and score < 90)",
+      &error);
+  ASSERT_NE(condition, nullptr) << error;
+  EXPECT_EQ(condition->References(),
+            (std::vector<std::string>{"cidr()", "has_header()", "header()",
+                                      "host", "score"}));
+}
+
 TEST_F(RulesTest, StringEscapes) {
   context_.host = R"(a"b\c)";
   EXPECT_TRUE(Eval(R"(host == "a\"b\\c")"));

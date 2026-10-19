@@ -51,6 +51,9 @@ class FingerprintLibrary {
   }
   // Weight of a signal; 0 for unknown names.
   int Weight(std::string_view signal) const;
+  const std::map<std::string, int, std::less<>>& weights() const {
+    return weights_;
+  }
   const std::string& version() const { return version_; }
   std::size_t profile_count() const { return browsers_.size(); }
 

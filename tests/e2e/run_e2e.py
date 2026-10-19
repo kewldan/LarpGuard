@@ -583,6 +583,7 @@ def main():
     admin_socket = os.path.join(tempfile.gettempdir(),
                                 f"bs-admin-{os.getpid()}.sock")
     lists_file = os.path.join(workdir, "lists.json")
+    modes_file = os.path.join(workdir, "modes.json")
     config_path = os.path.join(workdir, "bot-shield.yaml")
     keys_path = os.path.join(workdir, "keys.json")
     model_path = os.path.join(workdir, "model.json")
@@ -723,6 +724,7 @@ challenge:
 admin:
   socket: {admin_socket}
   state_file: {lists_file}
+  modes_file: {modes_file}
   decisions: 1000
 metrics:
   listen: 127.0.0.1:{metrics_port}
@@ -1375,6 +1377,39 @@ log_level: debug
         event = nats.find("e2e.events.req",
                           lambda e: e.get("request_id") == request_id)
         expect(event["path_group"] == "/allowed", event)
+        # Decisions carry the event's prefix and hash, so a consumer that
+        # drops the full address can still join them.
+        expect(record["ip_prefix"] == event["ip_prefix"] == "127.0.0.0/24",
+               (record, event))
+        expect(record["ip_hash"] == event["ip_hash"], (record, event))
+
+        # Console host mode: beats policy.hosts at once, survives in its
+        # file, and removing it brings the configured mode back.
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
+        expect(status == 403, status)
+        status, body = admin_call(admin_socket, "POST", "/policy",
+                                  {"host": "www.a.test", "mode": "shadow"})
+        expect(status == 200, body)
+        _, body = admin_call(admin_socket, "GET", "/policy?host=www.a.test")
+        expect(body["mode"] == "shadow" and body["mode_source"] == "console",
+               body)
+        expect(json.load(open(modes_file)) == {"www.a.test": "shadow"},
+               "modes file")
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
+        expect(status == 200, status)
+        status, _ = admin_call(admin_socket, "DELETE", "/policy/www.a.test")
+        expect(status == 200, status)
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
+        expect(status == 403, status)
+
+        # The verdict set in effect and a rule checked on sample events.
+        status, body = admin_call(admin_socket, "GET", "/config")
+        expect(status == 200 and any(r["name"] == "admin"
+                                     for r in body["rules"]), body)
+        status, body = admin_call(admin_socket, "POST", "/rules/test", {
+            "when": 'path ~ "/admin*"',
+            "samples": [{"path": "/admin/x"}, {"path": "/home"}]})
+        expect(status == 200 and body["matched"] == [0], body)
 
     # --- Proxy over HTTP/2 (curl) -------------------------------------------
 
@@ -1774,7 +1809,8 @@ log_level: debug
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),
-        ("admin API: status, policy, lists, decisions", admin_api),
+        ("admin API: status, policy, lists, decisions, console modes",
+         admin_api),
         ("under attack: challenge without token, admin switch", under_attack),
         ("/__bs/* endpoints: own per-IP limit", challenge_endpoint_limit),
         ("ClientHello without SNI rejected", no_sni_rejected),

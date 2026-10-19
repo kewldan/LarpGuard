@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -215,6 +216,10 @@ bool AsnDatabase::Parse(std::string_view tsv, AsnDatabase* out,
   }
   std::ranges::sort(db.v4_, {}, &V4Range::start);
   std::ranges::sort(db.v6_, {}, &V6Range::start);
+  db.by_number_.resize(db.ases_.size());
+  std::iota(db.by_number_.begin(), db.by_number_.end(), uint32_t{0});
+  std::ranges::sort(db.by_number_, {},
+                    [&db](uint32_t index) { return db.ases_[index].asn; });
   *out = std::move(db);
   return true;
 }
@@ -222,6 +227,13 @@ bool AsnDatabase::Parse(std::string_view tsv, AsnDatabase* out,
 AsnInfo AsnDatabase::Info(uint32_t index) const {
   const As& as = ases_[index];
   return AsnInfo{as.asn, as.org, as.country, as.hosting};
+}
+
+std::optional<AsnInfo> AsnDatabase::Find(uint32_t asn) const {
+  const auto it = std::ranges::lower_bound(
+      by_number_, asn, {}, [this](uint32_t index) { return ases_[index].asn; });
+  if (it == by_number_.end() || ases_[*it].asn != asn) return std::nullopt;
+  return Info(*it);
 }
 
 std::optional<AsnInfo> AsnDatabase::Lookup(

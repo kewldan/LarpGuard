@@ -277,17 +277,6 @@ bool Worker::Listen(const tcp::endpoint& https,
   return true;
 }
 
-bool Worker::ListenAdmin(const std::string& path, const AdminContext& admin,
-                         std::string* error) {
-  admin_acceptor_ =
-      std::make_unique<asio::local::stream_protocol::acceptor>(io_context_);
-  if (!OpenAdminSocket(admin_acceptor_.get(), path, error)) return false;
-  asio::co_spawn(io_context_, ServeAdmin(*admin_acceptor_, admin),
-                 LogUnhandled);
-  log::Info("admin API on {}", path);
-  return true;
-}
-
 bool Worker::ListenMetrics(const tcp::endpoint& endpoint,
                            const Heartbeats* heartbeats, std::string* error) {
   auto acceptor = std::make_unique<tcp::acceptor>(io_context_);
@@ -337,10 +326,6 @@ void Worker::StopAccepting() {
     for (auto& acceptor : acceptors_) {
       std::error_code ec;
       acceptor->close(ec);
-    }
-    if (admin_acceptor_) {
-      std::error_code ec;
-      admin_acceptor_->close(ec);
     }
     // Pooled connections to Traefik would keep the loop alive otherwise.
     pool_->Drain();
@@ -435,28 +420,33 @@ bool Gateway::Start(std::string* error) {
         !worker->ListenMetrics(*metrics, heartbeats_.get(), error)) {
       return false;
     }
-    if (i == 0 && !config_.admin_socket.empty()) {
-      admin_.config = &config_;
-      admin_.certificates = certificates_;
-      admin_.labels = services_.labels;
-      admin_.lists = services_.lists;
-      admin_.decisions = services_.decisions;
-      admin_.rate_limit_store = &rate_limit_store_;
-      admin_.verdicts = services_.verdicts;
-      admin_.reload = services_.reload;
-      admin_.attack = &attack_;
-      admin_.started_ms =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::system_clock::now().time_since_epoch())
-              .count();
-      admin_.workers = count;
-      if (!worker->ListenAdmin(config_.admin_socket, admin_, error)) {
-        return false;
-      }
-    }
     workers_.push_back(std::move(worker));
   }
   for (auto& worker : workers_) worker->Run(heartbeats_.get());
+
+  if (!config_.admin_socket.empty()) {
+    admin_.config = &config_;
+    admin_.certificates = certificates_;
+    admin_.labels = services_.labels;
+    admin_.lists = services_.lists;
+    admin_.decisions = services_.decisions;
+    admin_.rate_limit_store = &rate_limit_store_;
+    admin_.verdicts = services_.verdicts;
+    admin_.reload = services_.reload;
+    admin_.attack = &attack_;
+    admin_.event_settings = services_.event_settings;
+    admin_.modes = services_.modes;
+    admin_.publish_modes = services_.publish_modes;
+    admin_.asn = services_.asn;
+    admin_.started_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+    admin_.workers = count;
+    admin_server_ = std::make_unique<AdminServer>();
+    if (!admin_server_->Start(config_.admin_socket, &admin_, error)) {
+      return false;
+    }
+  }
 
   log::Info("listening on https={} http={} metrics={} workers={}",
             FormatEndpoint(https), http ? FormatEndpoint(*http) : "off",
@@ -469,14 +459,17 @@ bool Gateway::Start(std::string* error) {
 
 void Gateway::StopAccepting() {
   for (auto& worker : workers_) worker->StopAccepting();
+  if (admin_server_) admin_server_->StopAccepting();
 }
 
 void Gateway::Stop() {
   for (auto& worker : workers_) worker->Stop();
+  if (admin_server_) admin_server_->Stop();
 }
 
 void Gateway::Join() {
   for (auto& worker : workers_) worker->Join();
+  if (admin_server_) admin_server_->Join();
 }
 
 bool Gateway::Healthy() const {
