@@ -53,10 +53,12 @@ bool WriteFileAtomically(const std::string& path, std::string_view data,
 
 }  // namespace
 
-bool FetchUrl(const std::string& url, std::size_t max_size, std::string* data,
+bool FetchUrl(const std::string& url, std::size_t max_size,
+              const std::stop_token& stop, std::string* data,
               std::string* error) {
   HttpClientRequest request;
   request.url = url;
+  request.stop = stop;
   request.max_body = max_size;
   request.timeout = std::chrono::seconds(120);
   HttpClientResponse response;
@@ -125,12 +127,12 @@ void DataRefresher::LoadCache(State* state) {
   log::Info("{}: loaded cached copy from {}", source.name, source.cache_file);
 }
 
-void DataRefresher::Download(State* state) {
+void DataRefresher::Download(State* state, const std::stop_token& stop) {
   const RefreshSource& source = state->source;
   std::string data;
   std::string error;
   const auto now = std::chrono::system_clock::now();
-  if (!source.fetch(source.url, source.max_size, &data, &error) ||
+  if (!source.fetch(source.url, source.max_size, stop, &data, &error) ||
       !source.apply(data, &error)) {
     log::Warn("{}: update failed, retrying in {}s: {}", source.name,
               source.retry.count(), error);
@@ -160,7 +162,7 @@ void DataRefresher::Run(const std::stop_token& stop) {
     const auto now = std::chrono::system_clock::now();
     for (State& state : states_) {
       if (stop.stop_requested()) return;
-      if (now_requested || state.due <= now) Download(&state);
+      if (now_requested || state.due <= now) Download(&state, stop);
     }
     // Wake at least hourly: clocks jump, and max() would overflow waits.
     auto next = std::chrono::system_clock::now() + std::chrono::hours(1);

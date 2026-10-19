@@ -284,10 +284,11 @@ int64_t MaxAge(std::string_view cache_control) {
   return seconds;
 }
 
-bool DefaultFetch(const std::string& url, std::string* body, int64_t* max_age,
-                  std::string* error) {
+bool DefaultFetch(const std::string& url, const std::stop_token& stop,
+                  std::string* body, int64_t* max_age, std::string* error) {
   HttpClientRequest request;
   request.url = url;
+  request.stop = stop;
   request.max_redirects = 0;  // The draft forbids following them.
   request.max_body = std::size_t{1} << 20;
   request.timeout = std::chrono::seconds(10);
@@ -475,7 +476,7 @@ void WebBotAuthVerifier::Run(const std::stop_token& stop) {
     const int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
                             std::chrono::system_clock::now().time_since_epoch())
                             .count();
-    if (fetch_(job.second, &body, &max_age, &error) &&
+    if (fetch_(job.second, stop, &body, &max_age, &error) &&
         ParseJwks(body, &directory.keys, &error)) {
       const int64_t ttl =
           max_age < 0

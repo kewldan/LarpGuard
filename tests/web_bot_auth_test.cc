@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -195,8 +196,8 @@ TEST(WebBotAuthTest, VerifierFetchesKeysInTheBackground) {
   WebBotAuthVerifier::Settings settings;
   settings.limits = LongLived();
   WebBotAuthVerifier verifier(
-      settings, [&](const std::string& url, std::string* body, int64_t* max_age,
-                    std::string* error) {
+      settings, [&](const std::string& url, const std::stop_token&,
+                    std::string* body, int64_t* max_age, std::string* error) {
         ++fetches;
         if (url !=
             "https://signature-agent.test/.well-known/"

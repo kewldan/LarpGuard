@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -28,6 +29,8 @@ struct HttpClientRequest {
   std::chrono::milliseconds timeout{20000};
   std::size_t max_body = std::size_t{64} << 20;
   int max_redirects = 3;
+  // Aborts the request (shutdown of the thread that made it).
+  std::stop_token stop;
 };
 
 struct HttpClientResponse {

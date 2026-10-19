@@ -149,5 +149,37 @@ TEST(ExchangeTest, CancelFromClientDropsClientHooks) {
   EXPECT_EQ(wakes, 0);
 }
 
+// Received body bytes go back to the upstream window however the exchange
+// ends: read, discarded by a cancel, or replaced by a local answer. A lost
+// credit starves the pooled upstream connection for every client.
+TEST(ExchangeTest, UnreadBodyCreditsTheUpstream) {
+  const std::vector<uint8_t> body(100, 'x');
+  {
+    Exchange exchange;
+    std::size_t credited = 0;
+    exchange.response_consumed = [&](std::size_t n) { credited += n; };
+    exchange.SetResponse(ProxyResponse{200, {}});
+    exchange.PushResponseBody(body);
+    std::vector<uint8_t> out(30);
+    EXPECT_EQ(exchange.ReadResponseBody(out), 30U);
+    EXPECT_EQ(credited, 30U);
+    exchange.CancelFromClient();
+    EXPECT_EQ(credited, 100U);
+  }
+  {
+    Exchange exchange;
+    std::size_t credited = 0;
+    exchange.response_consumed = [&](std::size_t n) { credited += n; };
+    exchange.SetResponse(ProxyResponse{200, {}});
+    exchange.PushResponseBody(body);
+    exchange.RespondLocally(502, "bad gateway\n");
+    EXPECT_EQ(credited, 100U);
+    // The local body is not upstream data.
+    std::vector<uint8_t> out(64);
+    EXPECT_GT(exchange.ReadResponseBody(out), 0U);
+    EXPECT_EQ(credited, 100U);
+  }
+}
+
 }  // namespace
 }  // namespace bot_shield

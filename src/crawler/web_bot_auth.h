@@ -88,8 +88,9 @@ struct WebBotAuthResult {
 // the first request of a new agent is kPending.
 class WebBotAuthVerifier {
  public:
-  using Fetch = std::function<bool(const std::string& url, std::string* body,
-                                   int64_t* max_age, std::string* error)>;
+  using Fetch = std::function<bool(
+      const std::string& url, const std::stop_token& stop, std::string* body,
+      int64_t* max_age, std::string* error)>;
 
   struct Settings {
     WebBotAuthLimits limits;

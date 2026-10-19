@@ -231,8 +231,10 @@ int H2UpstreamConnection::OnStreamClose(nghttp2_session* /*session*/,
   if (stream->exchange) {
     if (!stream->exchange->response_ended) stream->exchange->FailUpstream();
     stream->exchange->wake_upstream = nullptr;
-    stream->exchange->response_consumed = nullptr;
     stream->exchange->cancel_upstream = nullptr;
+    // response_consumed stays: the client may still be reading the buffered
+    // body (a slow HTTP/3 client), and those bytes must go back to the
+    // connection window, or the pooled connection starves for good.
   }
   self->streams_.erase(stream_id);
   return 0;

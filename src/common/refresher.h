@@ -29,7 +29,8 @@ struct RefreshSource {
   std::function<bool(std::string_view data, std::string* error)> apply;
   // Download function; HttpFetch by default (tests replace it).
   std::function<bool(const std::string& url, std::size_t max_size,
-                     std::string* data, std::string* error)>
+                     const std::stop_token& stop, std::string* data,
+                     std::string* error)>
       fetch;
 };
 
@@ -57,7 +58,7 @@ class DataRefresher {
 
   void Run(const std::stop_token& stop);
   void LoadCache(State* state);
-  void Download(State* state);
+  void Download(State* state, const std::stop_token& stop);
 
   std::mutex mutex_;
   std::condition_variable_any wake_;
@@ -69,7 +70,8 @@ class DataRefresher {
 };
 
 // Default `fetch`: HTTP GET with HttpFetch, 200 only.
-bool FetchUrl(const std::string& url, std::size_t max_size, std::string* data,
+bool FetchUrl(const std::string& url, std::size_t max_size,
+              const std::stop_token& stop, std::string* data,
               std::string* error);
 
 }  // namespace bot_shield

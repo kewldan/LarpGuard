@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 
@@ -101,8 +102,8 @@ TEST(RefresherTest, CachesAndRetries) {
   source.url = "https://example.invalid/data";
   source.cache_file = cache.string();
   source.retry = std::chrono::seconds(3600);
-  source.fetch = [&](const std::string&, std::size_t, std::string* data,
-                     std::string* error) {
+  source.fetch = [&](const std::string&, std::size_t, const std::stop_token&,
+                     std::string* data, std::string* error) {
     ++fetches;
     if (fail) {
       *error = "offline";

@@ -125,7 +125,7 @@ class Captcha {
   };
 
   void Run(const std::stop_token& stop);
-  Verdict Siteverify(const Job& job) const;
+  Verdict Siteverify(const Job& job, const std::stop_token& stop) const;
   // A nonce or provider token seen before (replays); records it.
   bool Used(const std::string& key, int64_t now_ms);
   std::string NewRound(const ClientBinding& binding,

@@ -295,8 +295,12 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
     remote_ = remote;
     ngtcp2_path path = Path();
     ngtcp2_pkt_info info{};
-    const int rv = ngtcp2_conn_read_pkt(conn_, &path, &info, data.data(),
-                                        data.size(), Now());
+    int rv = 0;
+    {
+      const CallbackScope scope(this);
+      rv = ngtcp2_conn_read_pkt(conn_, &path, &info, data.data(), data.size(),
+                                Now());
+    }
     if (rv != 0) {
       if (rv == NGTCP2_ERR_DRAINING || rv == NGTCP2_ERR_DROP_CONN) {
         Close(nullptr);
@@ -316,12 +320,46 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
     Flush();
   }
 
-  // Sends what is pending and rearms the timer.
+  // Sends what is pending and rearms the timer. Inside ngtcp2/nghttp3
+  // calls (a callback answering locally, waking a stream, ...) the write is
+  // deferred to the next turn of the loop: they must not be re-entered.
   void Flush() {
     if (closed_) return;
-    if (!WritePackets()) return;
+    if (callback_depth_ > 0) {
+      if (!flush_posted_) {
+        flush_posted_ = true;
+        asio::post(server_->io_context(), [weak = weak_from_this()] {
+          if (auto self = weak.lock()) {
+            self->flush_posted_ = false;
+            self->Flush();
+          }
+        });
+      }
+      return;
+    }
+    bool written = false;
+    {
+      const CallbackScope scope(this);
+      written = WritePackets();
+    }
+    if (!written) return;
     ArmTimer();
   }
+
+  // Marks a call into ngtcp2/nghttp3 (their callbacks may run inside it).
+  class CallbackScope {
+   public:
+    explicit CallbackScope(QuicConnection* connection)
+        : connection_(connection) {
+      ++connection_->callback_depth_;
+    }
+    ~CallbackScope() { --connection_->callback_depth_; }
+    CallbackScope(const CallbackScope&) = delete;
+    CallbackScope& operator=(const CallbackScope&) = delete;
+
+   private:
+    QuicConnection* connection_;
+  };
 
   // CONNECTION_CLOSE (when `error` is set), then forget the connection.
   void Close(const ngtcp2_ccerr* error) {
@@ -375,12 +413,19 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
   }
 
   bool WritePackets() {
-    std::array<uint8_t, kMaxPacket> buffer{};
+    // packet_ is a member: after NGTCP2_ERR_WRITE_MORE ngtcp2 finishes the
+    // packet in the same buffer on the next call, possibly in a later
+    // WritePackets (a stack buffer would be gone by then).
+    std::array<uint8_t, kMaxPacket>& buffer = packet_;
     ngtcp2_path_storage storage;
     ngtcp2_path_storage_zero(&storage);
     ngtcp2_pkt_info info{};
     const ngtcp2_tstamp now = Now();
-    for (int packets = 0; packets < 64; ++packets) {
+    // Up to 64 packets per turn; calls that only add stream data to the
+    // packet being built (WRITE_MORE, blocked streams) do not count, but
+    // are bounded too.
+    int packets = 0;
+    for (int calls = 0; packets < 64 && calls < 4096; ++calls) {
       int64_t stream_id = -1;
       int fin = 0;
       std::array<nghttp3_vec, 16> vec{};
@@ -433,6 +478,7 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
       }
       server_->Send(remote_,
                     std::span(buffer.data(), static_cast<std::size_t>(n)));
+      ++packets;
     }
     // More to send: continue on the next turn of the loop.
     asio::post(server_->io_context(), [weak = weak_from_this()] {
@@ -453,7 +499,11 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
       if (ec) return;
       auto self = weak.lock();
       if (!self || self->closed_) return;
-      const int rv = ngtcp2_conn_handle_expiry(self->conn_, Now());
+      int rv = 0;
+      {
+        const CallbackScope scope(self.get());
+        rv = ngtcp2_conn_handle_expiry(self->conn_, Now());
+      }
       if (rv != 0) {
         // Idle timeout or handshake timeout: nothing to say to the peer.
         self->Close(nullptr);
@@ -470,7 +520,10 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
     Close(&error);
   }
 
+  // Idempotent: called when the handshake completes, or earlier by the first
+  // stream data (a client's 1-RTT request can arrive before its Finished).
   bool SetupHttp3() {
+    if (h3_ != nullptr) return true;
     nghttp3_callbacks callbacks{};
     callbacks.acked_stream_data = &H3AckedStreamData;
     callbacks.stream_close = &H3StreamClose;
@@ -643,7 +696,9 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
                               const uint8_t* data, std::size_t length,
                               void* user_data, void* /*stream_user_data*/) {
     QuicConnection* self = Self(user_data);
-    if (self->h3_ == nullptr) return 0;
+    // Dropping the data here would lose the request for good: QUIC counts it
+    // as delivered.
+    if (!self->SetupHttp3()) return NGTCP2_ERR_CALLBACK_FAILURE;
     const nghttp3_ssize consumed = nghttp3_conn_read_stream2(
         self->h3_, stream_id, data, length,
         (flags & NGTCP2_STREAM_DATA_FLAG_FIN) != 0 ? 1 : 0, Now());
@@ -915,12 +970,18 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
   ngtcp2_conn* conn_ = nullptr;
   SSL* ssl_ = nullptr;
   nghttp3_conn* h3_ = nullptr;
+  // Packet being written (see WritePackets).
+  std::array<uint8_t, kMaxPacket> packet_{};
   ClientInfo client_;
   std::unique_ptr<QuicObserver> observer_;
   ProxyHooks hooks_;
   std::map<int64_t, std::unique_ptr<Stream>> streams_;
   std::vector<std::string> scids_;
   bool closed_ = false;
+  // Calls into ngtcp2/nghttp3 in progress (CallbackScope), and whether a
+  // deferred Flush is queued.
+  int callback_depth_ = 0;
+  bool flush_posted_ = false;
 };
 
 namespace {
@@ -1136,17 +1197,21 @@ void QuicServer::Unregister(std::string_view cid) {
 }
 
 void QuicServer::Remove(QuicConnection* connection) {
-  // Deferred: the connection may be inside one of its own callbacks.
-  asio::post(io_context_,
-             [this, alive = std::weak_ptr<int>(alive_), connection] {
-               if (alive.expired()) return;
-               std::erase_if(by_cid_, [connection](const auto& entry) {
-                 return entry.second.get() == connection;
-               });
-               if (connections_.erase(connection) > 0) {
-                 GlobalMetrics().quic_connections.Add(-1);
-               }
-             });
+  // Deferred: the connection may be inside one of its own callbacks. By
+  // weak pointer, not address: a second Remove of the same connection may
+  // run after a new connection got its address, and must not drop that one.
+  asio::post(io_context_, [this, alive = std::weak_ptr<int>(alive_),
+                           weak = connection->weak_from_this()] {
+    if (alive.expired()) return;
+    const std::shared_ptr<QuicConnection> target = weak.lock();
+    if (target == nullptr) return;
+    std::erase_if(by_cid_, [&target](const auto& entry) {
+      return entry.second == target;
+    });
+    if (connections_.erase(target.get()) > 0) {
+      GlobalMetrics().quic_connections.Add(-1);
+    }
+  });
 }
 
 }  // namespace bot_shield

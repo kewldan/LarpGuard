@@ -77,6 +77,11 @@ PARTITION BY toDate(ts)
 ORDER BY (sni, ts)
 TTL toDateTime(ts) + INTERVAL 14 DAY;
 
+-- Upgrades of existing installations, before the view that needs them (see
+-- the note at the req upgrades below).
+ALTER TABLE bot_shield.conn ADD COLUMN IF NOT EXISTS quic_fp LowCardinality(String);
+ALTER TABLE bot_shield.conn ADD COLUMN IF NOT EXISTS asn UInt32;
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS bot_shield.conn_mv TO bot_shield.conn AS
 SELECT fromUnixTimestamp64Milli(toInt64(ts_ms), 'UTC') AS ts, * EXCEPT ts_ms
 FROM bot_shield.conn_queue;
@@ -213,11 +218,9 @@ TTL toDateTime(ts) + INTERVAL 14 DAY;
 -- Upgrades of existing installations (no-ops on new ones). The NATS queue
 -- table cannot be altered: for new queue columns drop bot_shield.req_mv and
 -- bot_shield.req_queue and run this file again.
-ALTER TABLE bot_shield.conn ADD COLUMN IF NOT EXISTS quic_fp LowCardinality(String);
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS watermark String;
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS features Array(Float32);
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS model_score Nullable(Float32);
-ALTER TABLE bot_shield.conn ADD COLUMN IF NOT EXISTS asn UInt32;
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS client_fp String;
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS signed_agent LowCardinality(String);
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS asn UInt32;

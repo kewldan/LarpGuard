@@ -610,9 +610,11 @@ bool Captcha::VerifyWidget(std::string_view query, const ClientBinding& binding,
   return true;
 }
 
-Captcha::Verdict Captcha::Siteverify(const Job& job) const {
+Captcha::Verdict Captcha::Siteverify(const Job& job,
+                                     const std::stop_token& stop) const {
   Verdict verdict = job.verdict;
   HttpClientRequest request;
+  request.stop = stop;
   request.method = "POST";
   request.url = settings_.verify_url;
   request.max_redirects = 0;
@@ -674,7 +676,7 @@ void Captcha::Run(const std::stop_token& stop) {
       queue_.pop_front();
       ++running_;
     }
-    Verdict verdict = Siteverify(job);
+    Verdict verdict = Siteverify(job, stop);
     job.done(std::move(verdict));
     {
       const std::scoped_lock lock(mutex_);

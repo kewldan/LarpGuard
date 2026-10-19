@@ -63,6 +63,10 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
   // nothing goes to Traefik and the client waits for RespondLocally().
   void DeferLocalResponse();
 
+  // Drops the unread response body, giving its bytes back to the upstream
+  // flow-control window (they were received but will never be read).
+  void DiscardResponseBody();
+
   // --- Called by the upstream side -----------------------------------------
   std::size_t ReadRequestBody(std::span<uint8_t> out);
   // `ended`: the response has no body or trailers (HEADERS with

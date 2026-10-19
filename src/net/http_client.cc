@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <format>
 #include <mutex>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -335,10 +336,17 @@ bool HttpFetch(const HttpClientRequest& request, HttpClientResponse* response,
                      finished = true;
                      if (e && fetch_error.empty()) fetch_error = "failed";
                    });
-    const auto now = std::chrono::steady_clock::now();
-    if (now < deadline) io.run_for(deadline - now);
+    // In slices, so a stop request (shutdown) cuts the wait short.
+    while (!finished && !request.stop.stop_requested()) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= deadline) break;
+      io.run_for(std::min<std::chrono::steady_clock::duration>(
+          deadline - now, std::chrono::milliseconds(100)));
+    }
     if (!finished) {
-      *error = std::format("{}: timed out", url);
+      *error = std::format(
+          "{}: {}", url,
+          request.stop.stop_requested() ? "cancelled" : "timed out");
       return false;
     }
     if (!fetch_error.empty()) {

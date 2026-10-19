@@ -59,9 +59,17 @@ std::size_t Exchange::ReadResponseBody(std::span<uint8_t> out) {
   return n;
 }
 
+void Exchange::DiscardResponseBody() {
+  if (!response_body.empty() && response_consumed) {
+    response_consumed(response_body.size());
+  }
+  response_body = BodyQueue{};
+}
+
 void Exchange::CancelFromClient() {
   if (client_cancelled) return;
   client_cancelled = true;
+  DiscardResponseBody();
   wake_client = nullptr;
   request_consumed = nullptr;
   if (cancel_upstream) cancel_upstream();
@@ -76,7 +84,9 @@ void Exchange::RespondLocally(int status, std::string_view body,
   response.headers.insert(response.headers.end(), extra_headers.begin(),
                           extra_headers.end());
   response_started = true;
-  response_body = BodyQueue{};
+  DiscardResponseBody();
+  // The body is ours from here: reading it must not credit the upstream.
+  response_consumed = nullptr;
   response_body.Push(
       std::span(reinterpret_cast<const uint8_t*>(body.data()), body.size()));
   response_ended = true;
@@ -94,7 +104,8 @@ void Exchange::StartLocalStream(int status, std::size_t content_length,
   response.headers.insert(response.headers.end(), extra_headers.begin(),
                           extra_headers.end());
   response_started = true;
-  response_body = BodyQueue{};
+  DiscardResponseBody();
+  response_consumed = nullptr;
   response_ended = false;
   upstream_failed = false;
   if (cancel_upstream) cancel_upstream();
