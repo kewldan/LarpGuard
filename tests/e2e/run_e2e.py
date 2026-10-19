@@ -1652,7 +1652,9 @@ log_level: debug
         # burst 10), not the request rate limits.
         statuses = [h1_get(https_port, "a.test", ca_a,
                            "/__bs/challenge?r=%2F")[0] for _ in range(15)]
-        expect(statuses[0] == 200 and statuses[-1] == 429, statuses)
+        # The budget refills (one per 2 s): a slow (sanitizer) build may see
+        # a 200 again at the end; earlier checks may have used some of it.
+        expect(statuses[0] == 200 and 429 in statuses, statuses)
         status, _, _ = h1_get(https_port, "a.test", ca_a, "/after-bs")
         expect(status == 200, status)
 
