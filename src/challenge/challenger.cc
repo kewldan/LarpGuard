@@ -1,5 +1,7 @@
 #include "challenge/challenger.h"
 
+#include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -7,7 +9,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "challenge/scripts.h"
 #include "challenge/token.h"
 #include "common/hash.h"
 #include "common/url.h"
@@ -17,111 +21,117 @@
 namespace bot_shield {
 namespace {
 
-// The page runs this script with N (nonce), D (difficulty) prepended. It
-// collects a few browser signals, finds a counter whose SHA-256 has D
-// leading zero bits (pure JS SHA-256: much faster than WebCrypto for many
-// tiny inputs) and goes to /__bs/verify. No external resources.
-constexpr std::string_view kScript = R"js(
-function sha256(m) {
-  var K = sha256.K, i;
-  if (!K) {
-    K = sha256.K = []; sha256.H = [];
-    var frac = function (x) { return ((x - Math.floor(x)) * 4294967296) | 0; };
-    for (var p = 2, n = 0; n < 64; p++) {
-      var prime = true;
-      for (var f = 2; f * f <= p; f++) if (p % f === 0) { prime = false; break; }
-      if (!prime) continue;
-      if (n < 8) sha256.H[n] = frac(Math.pow(p, 1 / 2));
-      K[n++] = frac(Math.pow(p, 1 / 3));
-    }
-  }
-  var H = sha256.H.slice(), l = m.length, bl = ((l + 9 + 63) >> 6) << 6;
-  var w = new Uint8Array(bl), W = new Array(64), bits = l * 8;
-  w.set(m); w[l] = 0x80;
-  w[bl - 4] = (bits >>> 24) & 255; w[bl - 3] = (bits >>> 16) & 255;
-  w[bl - 2] = (bits >>> 8) & 255; w[bl - 1] = bits & 255;
-  for (var o = 0; o < bl; o += 64) {
-    for (i = 0; i < 16; i++) {
-      W[i] = (w[o + 4 * i] << 24) | (w[o + 4 * i + 1] << 16) |
-             (w[o + 4 * i + 2] << 8) | w[o + 4 * i + 3];
-    }
-    for (i = 16; i < 64; i++) {
-      var x = W[i - 15], y = W[i - 2];
-      var s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
-      var s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
-      W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
-    }
-    var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f2 = H[5], g = H[6], h = H[7];
-    for (i = 0; i < 64; i++) {
-      var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
-      var t1 = (h + S1 + ((e & f2) ^ (~e & g)) + K[i] + W[i]) | 0;
-      var S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
-      var t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
-      h = g; g = f2; f2 = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
-    }
-    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0;
-    H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0; H[5] = (H[5] + f2) | 0;
-    H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
-  }
-  var out = new Uint8Array(32);
-  for (i = 0; i < 8; i++) {
-    out[4 * i] = H[i] >>> 24; out[4 * i + 1] = (H[i] >>> 16) & 255;
-    out[4 * i + 2] = (H[i] >>> 8) & 255; out[4 * i + 3] = H[i] & 255;
+std::string Lower(std::string_view text) {
+  std::string out(text);
+  for (char& c : out) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   }
   return out;
 }
-function zeroBits(hash) {
-  for (var bits = 0, i = 0; i < hash.length; i++) {
-    if (hash[i] === 0) { bits += 8; continue; }
-    for (var v = hash[i]; (v & 0x80) === 0; v <<= 1) bits++;
-    break;
-  }
-  return bits;
-}
-function solve() {
-  var prefix = new TextEncoder().encode(N + ":");
-  for (var counter = 0; ; counter++) {
-    var digits = String(counter), input = new Uint8Array(prefix.length + digits.length);
-    input.set(prefix);
-    for (var j = 0; j < digits.length; j++) input[prefix.length + j] = digits.charCodeAt(j);
-    if (zeroBits(sha256(input)) >= D) return counter;
-  }
-}
-function signals() {
-  var n = navigator, uad = n.userAgentData;
-  return {
-    wd: !!n.webdriver,
-    lang: (n.languages || []).length,
-    hc: n.hardwareConcurrency || 0,
-    plat: n.platform || "",
-    brands: uad && uad.brands ? uad.brands.map(function (b) { return b.brand; }) : [],
-    tz: (function () { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return ""; } })(),
-    sw: (typeof screen !== "undefined" && screen.width) || 0,
-    ph: !!(window.callPhantom || window._phantom || window.__nightmare)
-  };
-}
-function b64url(text) {
-  return btoa(unescape(encodeURIComponent(text)))
-      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-var started = Date.now(), counter = solve(), s = signals();
-s.ms = Date.now() - started;
-location.replace("/__bs/verify?n=" + encodeURIComponent(N) + "&c=" + counter +
-                 "&s=" + b64url(JSON.stringify(s)));
-)js";
 
-std::string HtmlPage(std::string_view title, std::string_view body) {
-  return std::format(
-      "<!doctype html><html><head><meta charset=\"utf-8\">"
-      "<meta name=\"robots\" content=\"noindex\">"
-      "<meta name=\"viewport\" content=\"width=device-width\">"
-      "<title>{}</title><style>body{{font:16px system-ui,sans-serif;"
-      "display:flex;align-items:center;justify-content:center;height:100vh;"
-      "margin:0;color:#333}}</style></head><body>{}</body></html>",
-      title, body);
+int IntField(const nlohmann::json& object, const char* key, int fallback) {
+  const auto it = object.find(key);
+  return it != object.end() && it->is_number_integer() ? it->get<int>()
+                                                       : fallback;
 }
+
+std::string StringField(const nlohmann::json& object, const char* key) {
+  const auto it = object.find(key);
+  return it != object.end() && it->is_string() ? it->get<std::string>()
+                                               : std::string();
+}
+
+bool BoolField(const nlohmann::json& object, const char* key) {
+  const auto it = object.find(key);
+  return it != object.end() &&
+         ((it->is_boolean() && it->get<bool>()) ||
+          (it->is_number_integer() && it->get<int>() != 0));
+}
+
+// Renderers of headless and virtual machines (no GPU).
+constexpr std::array<std::string_view, 8> kSoftwareRenderers = {
+    "swiftshader",    "llvmpipe",     "softpipe",   "lavapipe",
+    "mesa offscreen", "basic render", "virtualbox", "vmware"};
 
 }  // namespace
+
+SignalCheck CheckSignals(const nlohmann::json& signals,
+                         std::string_view user_agent) {
+  SignalCheck check;
+  if (!signals.is_object()) {
+    check.fatal = "signals";
+    return check;
+  }
+  // Fatal: the browser says it is automated.
+  if (BoolField(signals, "wd")) {
+    check.fatal = "webdriver";
+  } else if (BoolField(signals, "ph")) {
+    check.fatal = "automation_globals";
+  } else if (const auto brands = signals.find("brands");
+             brands != signals.end() && brands->is_array()) {
+    for (const auto& brand : *brands) {
+      if (brand.is_string() &&
+          brand.get<std::string>().find("Headless") != std::string::npos) {
+        check.fatal = "headless";
+      }
+    }
+  }
+  // Suspicious: driven over the DevTools protocol, or spoofed.
+  const std::string ua_hash = StringField(signals, "ua");
+  if (BoolField(signals, "cdp")) {
+    check.suspicious = "cdp";
+  } else if (IntField(signals, "wm", 0) > 0) {
+    check.suspicious = "worker_mismatch";
+  } else if (!ua_hash.empty() && ua_hash != Sha256Hex(user_agent, 16)) {
+    check.suspicious = "ua_mismatch";
+  } else if (IntField(signals, "nt", 0) > 0) {
+    check.suspicious = "tampered_natives";
+  } else if (IntField(signals, "lang", 1) == 0) {
+    check.suspicious = "no_languages";
+  }
+  // Soft: unusual environments.
+  const std::string renderer = Lower(StringField(signals, "glr"));
+  for (const std::string_view software : kSoftwareRenderers) {
+    if (renderer.find(software) != std::string::npos) {
+      check.soft.emplace_back("software_renderer");
+      break;
+    }
+  }
+  if (const auto screen = signals.find("sc");
+      screen != signals.end() && screen->is_array() && screen->size() >= 8) {
+    const auto at = [&screen](std::size_t i) {
+      return (*screen)[i].is_number_integer() ? (*screen)[i].get<int>() : -1;
+    };
+    if (at(0) == 0 || at(1) == 0 || at(6) == 0 || at(7) == 0) {
+      check.soft.emplace_back("headless_screen");
+    }
+  }
+  if (signals.contains("cv")) {
+    if (StringField(signals, "cv").empty()) {
+      check.soft.emplace_back("canvas_blocked");
+    } else if (IntField(signals, "cvn", 0) != 0) {
+      check.soft.emplace_back("canvas_noise");
+    }
+  }
+  const bool desktop =
+      user_agent.find("Windows NT") != std::string_view::npos ||
+      user_agent.find("Macintosh") != std::string_view::npos;
+  if (desktop && IntField(signals, "fn", -1) == 0) {
+    check.soft.emplace_back("no_fonts");
+  }
+  if (desktop && user_agent.find("Chrome/") != std::string_view::npos &&
+      IntField(signals, "pl", -1) == 0) {
+    check.soft.emplace_back("no_plugins");
+  }
+  if (signals.contains("cv")) {
+    check.client_fp = Sha256Hex(
+        std::format("{}|{}|{}|{}|{}", StringField(signals, "cv"), renderer,
+                    StringField(signals, "glp"), StringField(signals, "au"),
+                    StringField(signals, "fm")),
+        16);
+  }
+  return check;
+}
 
 bool IsNavigation(const HttpRequest& request) {
   if (request.method != "GET" && request.method != "HEAD") return false;
@@ -130,10 +140,25 @@ bool IsNavigation(const HttpRequest& request) {
   return request.Header("accept").find("text/html") != std::string_view::npos;
 }
 
+std::string GatewayPage(std::string_view title, std::string_view body) {
+  return std::format(
+      "<!doctype html><html><head><meta charset=\"utf-8\">"
+      "<meta name=\"robots\" content=\"noindex\">"
+      "<meta name=\"viewport\" content=\"width=device-width\">"
+      "<title>{}</title><style>body{{font:16px system-ui,sans-serif;"
+      "display:flex;align-items:center;justify-content:center;"
+      "min-height:100vh;margin:0;color:#333;background:#fafafa}}"
+      "main{{max-width:340px;padding:24px;text-align:center}}"
+      "img{{max-width:100%;border-radius:6px;user-select:none}}"
+      "#bs-p{{cursor:crosshair;touch-action:manipulation}}"
+      "small{{color:#777}}</style></head><body><main>{}</main></body></html>",
+      title, body);
+}
+
 std::string ChallengeFailedPage() {
-  return HtmlPage("Access denied",
-                  "<p>We could not verify your browser. Enable JavaScript "
-                  "and cookies, then reload the page.</p>");
+  return GatewayPage("Access denied",
+                     "<p>We could not verify your browser. Enable JavaScript "
+                     "and cookies, then reload the page.</p>");
 }
 
 int Challenger::DifficultyFor(BotClass bot_class) const {
@@ -151,16 +176,17 @@ std::string Challenger::Page(const ClientBinding& binding, int difficulty,
       IsSafeReturnPath(return_path) ? std::string(return_path) : "/";
   const std::string nonce = IssueNonce(settings_.keys, claims);
   // The nonce only holds [A-Za-z0-9._-]; it is safe inside a JS string.
-  return HtmlPage(
+  return GatewayPage(
       "Checking your browser",
       std::format("<noscript>JavaScript is required to continue.</noscript>"
                   "<p>Checking your browser&hellip;</p><script>"
-                  "(function(){{var N=\"{}\",D={};{}}})();</script>",
-                  nonce, difficulty, kScript));
+                  "(function(){{var N=\"{}\",D={};{}{}{}}})();</script>",
+                  nonce, difficulty, CryptoJs(), ProbesJs(), ChallengeJs()));
 }
 
 Challenger::Result Challenger::Verify(std::string_view query,
                                       const ClientBinding& binding,
+                                      std::string_view user_agent,
                                       int64_t now) const {
   Result result;
   const QueryParams params = ParseQuery(query);
@@ -188,47 +214,39 @@ Challenger::Result Challenger::Verify(std::string_view query,
       Base64UrlDecode(QueryParam(params, "s"), &signals_text)
           ? nlohmann::json::parse(signals_text, nullptr, false)
           : nlohmann::json();
-  if (!signals.is_object()) {
-    result.reason = "signals";
+  const SignalCheck check = CheckSignals(signals, user_agent);
+  result.client_fp = check.client_fp;
+  if (!check.fatal.empty()) {
+    result.reason = check.fatal;
     return result;
   }
-  if (signals.value("wd", false)) {
-    result.reason = "webdriver";
+  if (!check.suspicious.empty()) {
+    result.reason = check.suspicious;
+    result.escalate = true;
     return result;
   }
-  if (signals.value("ph", false)) {
-    result.reason = "automation_globals";
-    return result;
-  }
-  if (const auto brands = signals.find("brands");
-      brands != signals.end() && brands->is_array()) {
-    for (const auto& brand : *brands) {
-      if (brand.is_string() &&
-          brand.get<std::string>().find("Headless") != std::string::npos) {
-        result.reason = "headless";
-        return result;
-      }
-    }
-  }
-  if (signals.value("lang", 0) == 0) {
-    result.reason = "no_languages";
-    return result;
-  }
+  result.passed = true;
+  result.soft = check.soft;
+  result.escalate = !check.soft.empty();
+  result.set_cookie = ClearanceCookie(binding, kTokenLevelJs, now);
+  return result;
+}
 
+std::string Challenger::ClearanceCookie(const ClientBinding& binding, int level,
+                                        int64_t now) const {
   TokenClaims token;
   token.issued = now;
   token.expires = now + settings_.token_ttl.count();
   token.binding = binding;
-  result.passed = true;
-  result.set_cookie = std::format(
+  token.level = level;
+  return std::format(
       "{}={}; Path=/; Max-Age={}; HttpOnly; Secure; SameSite=Lax", kCookieName,
       IssueToken(settings_.keys, token), settings_.token_ttl.count());
-  return result;
 }
 
-std::optional<std::string> Challenger::SessionId(const HttpRequest& request,
-                                                 const ClientBinding& binding,
-                                                 int64_t now) const {
+std::optional<Clearance> Challenger::FindClearance(const HttpRequest& request,
+                                                   const ClientBinding& binding,
+                                                   int64_t now) const {
   for (const auto& [name, value] : request.headers) {
     if (name != "cookie") continue;
     std::string_view rest = value;
@@ -243,7 +261,7 @@ std::optional<std::string> Challenger::SessionId(const HttpRequest& request,
         const std::string_view token = field.substr(equals + 1);
         if (VerifyToken(settings_.keys, token, now, &claims) &&
             claims.binding == binding) {
-          return Sha256Hex(token, 16);
+          return Clearance{Sha256Hex(token, 16), claims.level};
         }
       }
       if (end == std::string_view::npos) break;

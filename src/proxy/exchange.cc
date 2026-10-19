@@ -101,6 +101,11 @@ void Exchange::StartLocalStream(int status, std::size_t content_length,
   if (wake_client) wake_client();
 }
 
+void Exchange::DeferLocalResponse() {
+  local = true;
+  if (cancel_upstream) cancel_upstream();
+}
+
 void Exchange::PushLocalBody(std::string_view data) {
   response_body.Push(
       std::span(reinterpret_cast<const uint8_t*>(data.data()), data.size()));

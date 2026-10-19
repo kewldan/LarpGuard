@@ -297,17 +297,33 @@ TTL уменьшается и часть картины искажается.
 
 ### 5.3. Активные сигналы (JS-челлендж)
 
-Собирает скрипт челленджа (раздел 7):
+Собирает скрипт челленджа (раздел 7, `challenge/scripts.cc`), проверяет
+`CheckSignals` (`challenge/challenger.cc`):
 
-- `navigator.*`: `webdriver`, `plugins`, `languages`, `hardwareConcurrency`,
-  `deviceMemory`, `userAgentData` (сверка с заголовками).
-- Отпечатки canvas, WebGL (vendor и renderer), audio, список шрифтов, метрики
-  экрана. Каждый хешируется на клиенте и отправляется хешем.
-- Маркеры автоматизации: следы CDP (`Runtime.enable`-побочки), Playwright,
-  Puppeteer, `chrome.runtime` в headless, расхождение между main thread и
-  Worker (`navigator` в Worker vs в окне).
-- Тайминги: время выполнения PoW против заявленного `hardwareConcurrency`,
-  джиттер `performance.now()`.
+- `navigator.*`: `webdriver`, `languages`, `hardwareConcurrency`,
+  `platform`, `userAgentData.brands`, плагины, `maxTouchPoints`; хеш
+  `navigator.userAgent` сверяется с заголовком `User-Agent`.
+- Отпечатки canvas (два рендера: разница — шум антифингерпринта), WebGL
+  (vendor и renderer через `WEBGL_debug_renderer_info`, число расширений,
+  хеш лимитов), audio (`OfflineAudioContext` + компрессор), шрифты (ширина
+  текста против базовых семейств, 24 шрифта), метрики экрана и окна.
+  Сырые значения не уходят: только короткие хеши, строка рендерера и
+  счётчики; хеш canvas + WebGL + audio + шрифтов — `client_fp` в событии.
+- Маркеры автоматизации: следы CDP (`console.debug` объекта с геттером
+  `stack`: его читает только сериализация DevTools-протокола — Puppeteer,
+  Playwright), глобалы ChromeDriver, Selenium, Playwright, PhantomJS,
+  подменённые нативные функции (`toString` геттеров `Navigator`, свои
+  свойства на объекте `navigator`), расхождение `navigator` в Worker и в
+  окне.
+- Тайминг PoW (`ms`).
+
+Находки делятся на три уровня:
+
+| Уровень | Сигналы | Без капчи | С капчей (`captcha.escalate`) |
+|---|---|---|---|
+| фатальный | `webdriver`, `automation_globals`, `headless` | отказ | отказ |
+| подозрительный | `cdp`, `worker_mismatch`, `ua_mismatch`, `tampered_natives`, `no_languages` | отказ | капча |
+| мягкий | `software_renderer` (SwiftShader, llvmpipe, ВМ), `headless_screen`, `canvas_noise`, `canvas_blocked`, `no_fonts` и `no_plugins` у десктопов | токен, причины `challenge:soft:*` | капча |
 
 ### 5.4. Поведенческие сигналы
 
@@ -358,9 +374,27 @@ TTL уменьшается и часть картины искажается.
   (`default` — оценивать как всех, `allow`, `challenge`, `block`). Правила и
   списки главнее. Индексацию поисковиками можно оставить, а сбор данных для
   моделей — запретить.
-- Позже: опубликованные IP-диапазоны (OpenAI, DuckDuckGo и др.), Web Bot Auth
-  (HTTP Message Signatures), mTLS для партнёров. Свой мониторинг — правилом
-  `allow` по CIDR или заголовку.
+- Опубликованные IP-диапазоны (`crawler/ranges`, `crawlers.ip_ranges`):
+  Google (4 списка), Bing, Apple, DuckDuckGo, OpenAI (GPTBot, OAI-SearchBot,
+  ChatGPT-User), Perplexity, Mistral — JSON одного формата
+  (`{"prefixes": [{"ipv4Prefix": ...}]}`), качаются фоном раз в сутки
+  (`DataRefresher`, кеш в `data_dir`). Адрес в диапазонах — `verified_bot`
+  сразу, без rDNS; вне диапазонов у краулера без rDNS-доменов —
+  `fake_crawler`, у остальных решает rDNS.
+- Web Bot Auth (`crawler/web_bot_auth`,
+  draft-ietf-webbotauth-httpsig-protocol): бот подписывает запрос HTTP
+  Message Signatures (RFC 9421, `tag="web-bot-auth"`, Ed25519), в
+  `Signature-Agent` (словарь или старая строка) — где его ключи. Шлюз
+  собирает signature base, ключи (JWKS по well-known URI каталога или
+  `jwks_uri`, без редиректов) качает фоном и кеширует по паре (URL,
+  keyid), как требует драфт. Валидная подпись агента из
+  `web_bot_auth.trusted` — класс `verified_bot` и причина
+  `verified_agent:<host>`; от остальных — `signed_agent:<host>` (поле
+  правил `signed_agent`); неверная — сигнал `web_bot_auth_invalid` (40).
+  Подписи живут не дольше `max_validity` (24 ч), иначе это переигрываемый
+  токен. Проверено на тест-векторах драфта.
+- Позже: mTLS для партнёров. Свой мониторинг — правилом `allow` по CIDR или
+  заголовку.
 
 ---
 
@@ -396,7 +430,9 @@ TTL уменьшается и часть картины искажается.
    `or`, `not`, скобки. Поля: `host`, `method`, `path` (без query),
    `http_version`, `sni`, `alpn`, `ja4`, `h2_fp`, `pseudo_order`,
    `header_fp`, `tcp_fp`, `user_agent`, `ua_family`, `ua_engine`, `ua_os`,
-   `ua_tool`, `score`, `class`, `reasons`. Функции: `header("name")`,
+   `ua_tool`, `score`, `class`, `reasons`, `asn` (целое), `asn_org`,
+   `asn_country`, `asn_hosting` (bool), `signed_agent`. Функции:
+   `header("name")`,
    `has_header("name")`, `cidr("net/len")`. Типы проверяются при загрузке
    конфига (`--check-config`), совпадения попадают в причины как
    `rule:<name>`.
@@ -435,6 +471,7 @@ TTL уменьшается и часть картины искажается.
 | `allow`     | проксировать, добавить `X-Bot-Score`, `X-Bot-Class`, `X-Bot-Reasons`             |
 | `tag`       | как `allow`, но явно для shadow mode (решение пишется в событие как «would_X»)   |
 | `throttle`  | запрос проходит, но на него действует отдельный лимит `throttle` (`rate`, `burst`, `key`; по умолчанию ключ `ip_prefix`+`ja4`), сверх него — 429 с `rate_limit: throttle`; в shadow — только запись |
+| `captcha`   | капча (7.1); клиент с токеном уровня «капча» проходит. Без настроенной капчи — как `challenge` |
 | `challenge` | навигация (GET/HEAD с `Sec-Fetch-Mode: navigate` или `Accept: text/html`) → 403 и страница челленджа; иначе 403 + JSON `{"error":"challenge_required","challenge":"/__bs/challenge?r=…"}` |
 | `tarpit`    | 200 и тело, которое капает по `tarpit.chunk` байт раз в `tarpit.interval` до `tarpit.duration` (16 байт/с, 30 с); больше `tarpit.max_active` одновременно — обычный блок. HTTP/1.1 и HTTP/2, ушедший клиент освобождает слот |
 | `block`     | 403 (или 404 по политике), короткий ответ, отпечаток → кратковременный deny-кеш  |
@@ -467,7 +504,29 @@ TTL уменьшается и часть картины искажается.
   скрипте на чистом JS: для миллионов коротких входов это быстрее WebCrypto
   (≈1 млн хешей/с на ядро). Сложность по классу: `suspicious` — 16 бит
   (≈65 тыс. хешей, ~0,1 с), `bot` — 19 бит (≈0,5 млн, ~0,5 с); настраивается.
-- **Капча** — интерфейс плагина для стороннего провайдера, пока не сделан.
+- **Капча** (`challenge/captcha`, `captcha.provider`) — эскалация над
+  невидимым JS: действие `captcha` (классы, правила, лейблы) и, с
+  `captcha.escalate`, подозрительный или необычный JS-челлендж (5.3).
+  Решённая капча даёт токен уровня 1 (`v2`), действие `captcha` требует
+  его, JS-челлендж с ним тоже пропускается.
+  - `builtin` — своя: «найди фигуру как на образце». Картинки рисует шлюз
+    (`challenge/puzzle`: свой растеризатор, PNG через zlib) — шесть
+    вогнутых «клякс» под случайным поворотом, масштабом и цветом, одна —
+    почти-двойник цели, поверх — шум и линии; образец повёрнут и перекрашен.
+    Ответ (центр и радиус цели) зашифрован AES-256-GCM в nonce раунда и
+    страницы не покидает. Против ферм-решателей: раунды по очереди
+    (`rounds`), каждый — не быстрее 0,8 с и не дольше `round_timeout` по
+    часам сервера; nonce одноразовый и привязан к JA4 и /24 браузера, где
+    шли пробы (решение с другого браузера не подойдёт); клик — только
+    `isTrusted`, у мыши перед ним — траектория рукой (кривая, неровный
+    темп, кончается в точке клика); пробы 5.3 проверяются и тут.
+  - `turnstile`, `hcaptcha`, `recaptcha` — виджет провайдера, проверка
+    `siteverify` (секрет из `secret_file`, `remoteip`) в фоновых потоках;
+    ответ клиенту откладывается (`Exchange::DeferLocalResponse`) и приходит
+    на то же соединение (HTTP/1.1, HTTP/2, HTTP/3). Проверяются `hostname`,
+    у Turnstile — `cdata` (хеш nonce страницы), свежесть `challenge_ts`;
+    токен провайдера и nonce одноразовые. Страница тоже решает небольшой
+    PoW и собирает пробы.
 
 ### 7.2. Поток
 
@@ -506,7 +565,12 @@ Stateless, проверяется без похода в хранилище:
 
 ```
 v1 . issued . expires . ja4_hash[8] . ip_prefix_hash[8] . key_id . HMAC-SHA256[128 бит]
+v2 . issued . expires . ja4_hash[8] . ip_prefix_hash[8] . level . key_id . HMAC
 ```
+
+`v1` — пройден JS-челлендж, `v2` с `level=1` — капча. Nonce страниц тоже
+разного вида (`n1` — челлендж, `w1` — страница виджета, `p1` —
+зашифрованный раунд пазла), один не подставить вместо другого.
 
 - Привязан к хешу JA4 и к /24 (/48 для IPv6). Смена TLS-стека или сети
   инвалидирует токен.
@@ -545,8 +609,8 @@ API-ключами (ключ лимита) и правилами `allow`, а н�
   `fp` (JA4 + H2-fp), `host`, `header:<name>` (API-ключ), `cookie:<name>`
   (сессия), `session` — сессия челленджа: 16 hex от хеша валидного токена
   `__bs` (у клиента без токена этой части нет, лимит к нему не применяется).
-  Если части ключа у запроса нет, лимит к нему не применяется. Позже: `asn`
-  (нужна IP-база).
+  `asn` — автономная система клиента (база iptoasn, раздел 10.1). Если части
+  ключа у запроса нет, лимит к нему не применяется.
 - Фильтры лимита: `hosts`, `paths` (glob), `methods`, `classes` — так лимит
   зависит от класса (отдельные записи для `human` / `suspicious` / `bot`).
 - Каждый подходящий лимит учитывает запрос; отказ первого — ответ 429 с
@@ -715,14 +779,22 @@ events:
 - **conn** — при закрытии соединения: `ts_ms, instance, conn_id, listener,
   ip_prefix, ip_hash, route, reason, duration_ms, bytes_in, bytes_out,
   requests, sni, tls_version, alpn_offered, alpn, ja4, ja4_r, tcp_fp, ja4t,
-  h2_fp`. Отправляется для всех маршрутов, включая reject.
+  h2_fp, quic_fp, asn`. Отправляется для всех маршрутов, включая reject.
 - **req** — на каждый увиденный HTTP-запрос: `ts_ms, instance, conn_id, seq,
   ip_prefix, ip_hash, http_version, method, host, path_group, header_fp,
   header_names[], pseudo_order, has_cookie, has_referer, ja4h` + отпечатки
   соединения + `user_agent, accept*, sec_ch_ua*, sec_fetch_*`.
 
-Пустые поля не передаются. С M2 добавятся `score, class, reasons[], action,
-would_action`; с M3 — поля rate limit; ASN/страна — с IP-базами.
+Пустые поля не передаются. Вердикт: `score, class, reasons[], action,
+would_action, rate_limit`; модель: `features, model_score`; `asn`, хеш
+проб браузера `client_fp`, проверенный агент `signed_agent`.
+
+База ASN (`net/asn`): iptoasn.com `ip2asn-combined.tsv.gz` (public domain,
+IPv4 и IPv6, ~580 тыс. диапазонов, ~25 МБ в памяти, поиск — бинарный,
+~0,4 мкс), качается фоном раз в сутки (`asn.url`, кеш в `data_dir`), AS
+определяется один раз на соединение. Хостинг-сети (`asn_hosting`: облака по
+списку ASN и по словам в имени — hosting, cloud, VPS, …) дают сигнал
+`hosting_network` (10).
 
 Сериализация — JSON (ADR-010): ClickHouse читает его NATS engine без
 промежуточного сервиса. В ClickHouse события лежат в `MergeTree` с
@@ -946,22 +1018,28 @@ IPv6 ограничивается по /64: у одного клиента об�
 правила дополняют `connection_limits` шлюза, а не заменяют: шлюз видит
 TLS и HTTP и может быть точнее.
 
-**План: XDP-фильтр (будущий ADR-016).** Когда SYN-флуд или поток мусорных
-пакетов начнёт упираться в CPU ядра раньше, чем в канал, — фильтр XDP на
-сетевом интерфейсе до стека TCP:
+**XDP-фильтр (ADR-016, `src/xdp/`, `xdp.enabled`).** До стека TCP, на
+порты шлюза (443, 80; UDP 443 при HTTP/3):
 
-- блок-листы (CIDR) из admin API и автоматических решений шлюза — в
-  eBPF-map, которую шлюз обновляет сам;
-- SYN-cookie в XDP (`bpf_tcp_raw_gen_syncookie_ipv4`, ядро ≥ 6.0 —
-  проверить на целевом) и лимит SYN по префиксу;
-- сброс пакетов на :443/:80, которые не TCP, и фрагментов;
-- fail-open: программа снимается, если шлюз не обновлял map дольше N
-  секунд, — как watchdog из ADR-012.
+- блок-листы — IP/CIDR-записи admin API без хоста (allow-записи их
+  перекрывают) и, с `xdp.block_honeypot`, адреса, попавшие в honeypot, в
+  LPM-trie (IPv4 и IPv6) с истечением; поток XDP сверяет их раз в секунду;
+- лимит SYN на /24 и /64 (`xdp.syn_rate`, GCRA в LRU-хеше);
+- недопустимые флаги TCP (null, SYN+FIN, SYN+RST, Xmas) и UDP, если HTTP/3
+  выключен; фрагменты — по `drop_fragments`;
+- fail-open: программа пропускает всё, если шлюз не обновлял heartbeat
+  дольше `heartbeat_timeout` (heartbeat пишется, только пока воркеры
+  живы), а связь (`BPF_LINK_CREATE`) закрывается вместе с процессом.
 
-Открытые вопросы для ADR: драйверы сетевой карты с native XDP на целевом
-хосте (иначе generic XDP почти не выигрывает у nftables), загрузчик
-(libbpf в процессе шлюза или отдельный сервис с `CAP_BPF`), как сохранить
-сырой SYN для отпечатка TCP при SYN-cookie в XDP.
+Программа на C без системных заголовков (`filter.bpf.c`), собирается
+clang'ом в BPF, `tools/bpf_embed.py` вшивает инструкции и релокации карт в
+бинарник; свой загрузчик на `bpf()` создаёт карты, патчит `ld_imm64`,
+грузит и цепляет программу (native, иначе generic). Без libbpf и libelf.
+SYN-cookie в XDP требуют ядро ≥ 6.0 — не сделаны: ядро шлюза и так
+включает syncookies, а сырой SYN нужен для отпечатка TCP. Нужны
+`CAP_BPF` и `CAP_NET_ADMIN`; при ошибке загрузки шлюз работает без XDP.
+Тесты гоняют программу через `BPF_PROG_TEST_RUN` (в CI — привилегированный
+контейнер).
 
 ---
 
@@ -1033,7 +1111,7 @@ TLS и HTTP и может быть точнее.
 | M1 ✅ | Пассивные отпечатки (TCP, JA4, H2, порядок заголовков; JA4T/JA4H опционально), события в NATS, ClickHouse-схема. `X-Bot-*` и shadow-решения перенесены в M2 (нужен HTTP-aware прокси, ADR-013). |
 | M2 ✅ | HTTP-aware прокси с пулом HTTP/2 (ADR-015), библиотека отпечатков, проверки согласованности, скоринг, shadow/enforce по хостам, `X-Bot-*`, блок, правила (ADR-008). |
 | M3 ✅ | Rate limiter (local) и лимиты соединений на IP, политики через docker-лейблы, admin API (статус, политика хоста, оперативные списки, журнал решений). synced/strict через Valkey — когда появятся несколько узлов. |
-| M4 ✅ | JS-челлендж + PoW, токены, хорошие боты (rDNS) и политика AI-краулеров. Web Bot Auth и IP-диапазоны краулеров — позже. |
+| M4 ✅ | JS-челлендж + PoW, токены, хорошие боты (rDNS) и политика AI-краулеров. Web Bot Auth и IP-диапазоны краулеров — в roadmap-этапе. |
 | M5 ✅ | Поведенческие сигналы, honeypot, tarpit/decoy, офлайн-кластеризация, fail-open watchdog. Горячая перезагрузка библиотеки — с M6 (UI). |
 | M6 ✅ | Модель-сигнал (деревья вместо ONNX), gRPC через пул, HTTP/3 на входе. UI отложен.                   |
 
@@ -1238,8 +1316,23 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
   `/__bs/*`, тайм-ауты заголовков (тишина, slowloris, открытый блок
   HEADERS), лимит запросов на соединение, `pending_per_ip`.
 
-Не сделано: минимальная скорость тела запроса, XDP (план в 11.1),
-сохранение режима «под атакой» между перезапусками.
+Не сделано: минимальная скорость тела запроса, сохранение режима «под
+атакой» между перезапусками.
+
+### Статус: roadmap (без UI)
+
+- Пробы JS-челленджа (canvas, WebGL, audio, шрифты, экран, Worker, CDP,
+  подмена нативных функций) и три уровня находок (5.3).
+- Капча: своя (`builtin`) и Turnstile, hCaptcha, reCAPTCHA; действие
+  `captcha`, эскалация, токен уровня капчи (7.1, 7.3).
+- Краулеры: опубликованные IP-диапазоны и Web Bot Auth (5.5).
+- База ASN: ключ лимита `asn`, поля правил, событие, сигнал
+  `hosting_network` (8.1, 10.1).
+- XDP-фильтр со своим загрузчиком (11.1, ADR-016).
+- Общая основа: фоновый HTTPS-клиент (`net/http_client`), загрузчик данных
+  с кешем (`common/refresher`), zlib (FetchContent).
+
+Не сделано: Web UI.
 
 ---
 
@@ -1573,13 +1666,34 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
 
 ---
 
+### ADR-016. XDP-фильтр со своим загрузчиком
+
+- **Статус:** принято.
+- **Контекст.** SYN-флуд и мусорные пакеты нагружают ядро раньше, чем
+  шлюз их видит; nftables фильтрует поздно (после выделения skb).
+  Зависимости только через FetchContent, без системных пакетов.
+- **Решение.** BPF-программа на C (`src/xdp/filter.bpf.c`) без заголовков
+  ядра; clang собирает её при сборке шлюза, `tools/bpf_embed.py` вшивает
+  код; свой загрузчик на системном вызове `bpf()` (карты, релокации
+  `ld_imm64`, `BPF_PROG_LOAD`, `BPF_LINK_CREATE`). Блок-листы из admin API,
+  лимит SYN на префикс, мусор; fail-open по heartbeat и закрытию связи.
+- **Альтернативы.**
+  - *libbpf*: стандартный путь, но тянет libelf и zlib системными
+    пакетами.
+  - *Отдельный сервис-загрузчик с `CAP_BPF`*: проще права шлюза, но ещё
+    один процесс и свой канал обновления карт.
+  - *nftables-сеты*: проще и работает везде, но фильтрует позже.
+- **Последствия.** Для сборки на Linux нужен clang (без него шлюз
+  собирается без XDP). Шлюзу нужны `CAP_BPF` и `CAP_NET_ADMIN`. SYN-cookie
+  в XDP нет (ядро < 6.0 на целевых хостах, сырой SYN для отпечатка).
+
 ## 16. Открытые вопросы
 
 
 - Целевая нагрузка в цифрах (пиковый RPS, число хостов) — уточнить для
   нагрузочного теста M0.
-- Источник IP-баз (ASN, датацентры, резидентные прокси): бесплатные
-  (iptoasn, списки облаков) или коммерческие.
+- Резидентные прокси: бесплатные списки или коммерческие базы (ASN и
+  хостинг уже есть — iptoasn).
 - Нужна ли инъекция `<script>` челленджа в HTML-ответы для невидимого сбора
   сигналов без интерстишиала. Требует разбора и переписывания тела ответа,
   стоит отдельно оценить.

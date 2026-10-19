@@ -117,6 +117,24 @@ struct Config {
   // DNS, and what to do with AI crawlers (unset: score them like anyone).
   bool crawlers_verify = true;
   std::optional<Action> crawlers_ai;
+  // Published crawler IP ranges (Google, Bing, OpenAI, ...), downloaded
+  // every `crawlers_ranges_refresh`.
+  bool crawlers_ip_ranges = true;
+  std::chrono::milliseconds crawlers_ranges_refresh{std::chrono::hours(24)};
+  // Web Bot Auth ("web_bot_auth" section): signed bots. Valid signatures
+  // from `web_bot_auth_trusted` agents (hosts or "*.parent") make a
+  // verified bot; others are only recorded.
+  bool web_bot_auth_enabled = true;
+  std::vector<std::string> web_bot_auth_trusted = {"chatgpt.com"};
+  std::chrono::milliseconds web_bot_auth_max_validity{std::chrono::hours(24)};
+  // IP -> AS database ("asn" section): iptoasn.com's ip2asn-combined.tsv.gz,
+  // downloaded every `asn_refresh`; "" = off.
+  std::string asn_url = "https://iptoasn.com/data/ip2asn-combined.tsv.gz";
+  std::chrono::milliseconds asn_refresh{std::chrono::hours(24)};
+  // Downloaded datasets are cached here across restarts; "" = memory only.
+  std::string data_dir;
+  // CA bundle for outbound HTTPS; "" = the system's.
+  std::string ca_file;
   // Behaviour signals ("behavior" section, docs/architecture.md 5.4).
   bool behavior_enabled = true;
   std::chrono::milliseconds behavior_window{std::chrono::minutes(10)};
@@ -156,6 +174,31 @@ struct Config {
   int64_t challenge_endpoint_rate = 30;
   std::chrono::milliseconds challenge_endpoint_period{60000};
   int64_t challenge_endpoint_burst = 10;
+  // CAPTCHA ("captcha" section): "" (off), builtin, turnstile, hcaptcha
+  // or recaptcha. Shown for action "captcha" and, with `captcha_escalate`,
+  // instead of a clearance token when the JS challenge looked suspicious.
+  std::string captcha_provider;
+  std::string captcha_site_key;
+  std::string captcha_secret_file;
+  std::string captcha_verify_url;  // "" = the provider's siteverify.
+  bool captcha_check_hostname = true;
+  bool captcha_escalate = true;
+  int captcha_rounds = 2;
+  std::chrono::milliseconds captcha_round_timeout{30000};
+  int captcha_difficulty = 12;
+  // XDP pre-filter ("xdp" section, Linux): drops blocklisted sources, SYN
+  // floods per prefix and malformed packets before the TCP stack.
+  bool xdp_enabled = false;
+  std::string xdp_interface;
+  std::string xdp_mode = "auto";
+  // New TCP connections per second per /24 or /64; 0: no limit.
+  int64_t xdp_syn_rate = 0;
+  int64_t xdp_syn_burst = 1;
+  bool xdp_drop_invalid = true;
+  bool xdp_drop_fragments = false;
+  std::chrono::milliseconds xdp_heartbeat_timeout{5000};
+  // Honeypot hits also drop the address in XDP for honeypot.ttl.
+  bool xdp_block_honeypot = false;
   // Under-attack mode ("attack" section): a host gets it automatically when
   // its request rate stays above `attack_auto_rps` (0 = only by the admin
   // API) and keeps it for `attack_auto_duration`.

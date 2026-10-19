@@ -217,6 +217,21 @@ TEST_F(RateLimitSetTest, SessionKey) {
   EXPECT_FALSE(Check(limits));
 }
 
+TEST_F(RateLimitSetTest, AsnKey) {
+  RateLimitSet limits;
+  std::string error;
+  ASSERT_TRUE(
+      RateLimitSet::Compile({Spec("per-asn", {"asn"}, 1, 1)}, &limits, &error))
+      << error;
+  // Unknown AS: the limit does not apply.
+  for (int i = 0; i < 3; ++i) EXPECT_FALSE(Check(limits));
+  request_.asn = 16509;
+  EXPECT_FALSE(Check(limits));
+  EXPECT_TRUE(Check(limits));
+  request_.asn = 15169;
+  EXPECT_FALSE(Check(limits));
+}
+
 TEST_F(RateLimitSetTest, IpKeysUnmapIpv4) {
   RateLimitSet limits;
   std::string error;

@@ -2,6 +2,7 @@
 
 #include <asio/ip/address.hpp>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -10,6 +11,7 @@
 
 #include "config/config.h"
 #include "crawler/crawlers.h"
+#include "crawler/ranges.h"
 #include "crawler/verifier.h"
 #include "score/policy.h"
 #include "score/scorer.h"
@@ -188,8 +190,68 @@ TEST(CrawlerConfigTest, ParsesCrawlers) {
   ASSERT_TRUE(ParseConfig("crawlers: {ai: default}\n", &fresh, &error));
   EXPECT_FALSE(fresh.crawlers_ai.has_value());
   Config bad;
-  EXPECT_FALSE(ParseConfig("crawlers: {ai: captcha}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("crawlers: {ai: nope}\n", &bad, &error));
   EXPECT_FALSE(ParseConfig("crawlers: {rdns: true}\n", &bad, &error));
+}
+
+TEST(CrawlerRangesTest, ParsesMergesAndDecides) {
+  constexpr std::string_view kGooglebot = R"({
+    "creationTime": "2026-10-16T14:46:09.000000",
+    "prefixes": [
+      {"ipv6Prefix": "2001:4860:4801:10::/64"},
+      {"ipv4Prefix": "66.249.64.0/27"},
+      {"ipv4Prefix": "66.249.64.32/27"},
+      {"ipv4Prefix": "66.249.66.0/24"}
+    ]})";
+  IpRangeSet set;
+  std::string error;
+  ASSERT_TRUE(ParseCrawlerRanges(kGooglebot, &set, &error)) << error;
+  set.Finish();
+  EXPECT_EQ(set.size(), 3U);  // The two /27s merge.
+  const auto ip = [](std::string_view text) {
+    return asio::ip::make_address(text);
+  };
+  EXPECT_TRUE(set.Contains(ip("66.249.64.63")));
+  EXPECT_FALSE(set.Contains(ip("66.249.64.64")));
+  EXPECT_TRUE(set.Contains(ip("::ffff:66.249.66.200")));
+  EXPECT_TRUE(set.Contains(ip("2001:4860:4801:10::abcd")));
+  EXPECT_FALSE(set.Contains(ip("2001:4860:4801:11::1")));
+  EXPECT_FALSE(ParseCrawlerRanges("{}", &set, &error));
+  EXPECT_FALSE(ParseCrawlerRanges(R"({"prefixes":[{"ipv4Prefix":"x/1"}]})",
+                                  &set, &error));
+
+  CrawlerRangeStore store;
+  store.Update("openai", "https://openai.com/gptbot.json", set);
+  IpRangeSet more;
+  ASSERT_TRUE(ParseCrawlerRanges(R"({"prefixes":[{"ipv4Prefix":"20.0.0.1"}]})",
+                                 &more, &error));
+  more.Finish();
+  store.Update("openai", "https://openai.com/searchbot.json", more);
+  const auto snapshot = store.snapshot();
+  const KnownCrawler& openai = *FindCrawler("GPTBot/1.2");
+  const KnownCrawler& google = *FindCrawler("Googlebot/2.1");
+  const KnownCrawler& yandex = *FindCrawler("YandexBot/3.0");
+  EXPECT_EQ(CheckCrawlerRanges(openai, *snapshot, ip("20.0.0.1")),
+            CrawlerStatus::kVerified);
+  EXPECT_EQ(CheckCrawlerRanges(openai, *snapshot, ip("66.249.66.1")),
+            CrawlerStatus::kVerified);
+  // No reverse DNS to fall back on: a fake.
+  EXPECT_EQ(CheckCrawlerRanges(openai, *snapshot, ip("1.2.3.4")),
+            CrawlerStatus::kFailed);
+  // Nothing loaded for Google or Yandex: undecided.
+  EXPECT_EQ(CheckCrawlerRanges(google, *snapshot, ip("1.2.3.4")),
+            CrawlerStatus::kPending);
+  EXPECT_EQ(CheckCrawlerRanges(yandex, *snapshot, ip("1.2.3.4")),
+            CrawlerStatus::kPending);
+  // Google has ranges and reverse DNS: outside the ranges rDNS decides.
+  store.Update("google", "u", set);
+  EXPECT_EQ(CheckCrawlerRanges(google, *store.snapshot(), ip("1.2.3.4")),
+            CrawlerStatus::kPending);
+
+  EXPECT_EQ(FindCrawler("DuckDuckBot/1.1")->id, "duckduckgo");
+  EXPECT_EQ(FindCrawler("MistralAI-User/1.0")->id, "mistral");
+  EXPECT_EQ(CrawlerRangeSources(&store, "/data", std::chrono::hours(24)).size(),
+            13U);
 }
 
 }  // namespace

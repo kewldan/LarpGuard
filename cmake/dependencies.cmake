@@ -56,7 +56,19 @@ FetchContent_Declare(nghttp2
   EXCLUDE_FROM_ALL
   SYSTEM)
 
-FetchContent_MakeAvailable(boringssl asio nlohmann_json yaml-cpp llhttp nghttp2)
+# zlib: gunzip of downloaded data (ASN database) and PNG images (CAPTCHA).
+set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(ZLIB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZLIB_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZLIB_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(zlib
+  URL https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.xz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  EXCLUDE_FROM_ALL
+  SYSTEM)
+
+FetchContent_MakeAvailable(boringssl asio nlohmann_json yaml-cpp llhttp nghttp2
+                           zlib)
 
 # QUIC (ngtcp2 with its BoringSSL crypto backend) and HTTP/3 (nghttp3) for
 # the HTTP/3 listener. Declared after BoringSSL, whose include directory and

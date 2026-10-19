@@ -161,6 +161,7 @@ std::string ConnectionEventJson(const ConnectionRecord& record,
   SetIfNotEmpty(json, "tcp_fp", record.tcp_fingerprint);
   SetIfNotEmpty(json, "ja4t", record.ja4t);
   SetIfNotEmpty(json, "h2_fp", record.h2_fingerprint);
+  if (record.asn != 0) json["asn"] = record.asn;
   return json.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
@@ -215,7 +216,10 @@ std::string RequestEventJson(const ConnectionRecord& record,
     if (!outcome->watermark.empty()) json["watermark"] = outcome->watermark;
     if (!outcome->features.empty()) json["features"] = outcome->features;
     if (outcome->model_score >= 0) json["model_score"] = outcome->model_score;
+    SetIfNotEmpty(json, "client_fp", outcome->client_fp);
+    SetIfNotEmpty(json, "signed_agent", outcome->signed_agent);
   }
+  if (record.asn != 0) json["asn"] = record.asn;
 #if BOT_SHIELD_FOXIO
   json["ja4h"] = foxio::Ja4h(request);
   SetIfNotEmpty(json, "ja4t", record.ja4t);

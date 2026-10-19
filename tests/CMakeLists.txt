@@ -1,6 +1,8 @@
 add_executable(bot_shield_tests
   actions_test.cc
   admin_test.cc
+  asn_test.cc
+  captcha_test.cc
   behavior_test.cc
   cert_store_test.cc
   challenge_test.cc
@@ -9,6 +11,7 @@ add_executable(bot_shield_tests
   config_test.cc
   crawler_test.cc
   docker_test.cc
+  http_client_test.cc
   failopen_test.cc
   events_test.cc
   host_test.cc
@@ -24,6 +27,8 @@ add_executable(bot_shield_tests
   scoring_test.cc
   tcp_syn_test.cc
   verdicts_test.cc
+  web_bot_auth_test.cc
+  xdp_test.cc
   test_util.cc
 )
 target_compile_options(bot_shield_tests PRIVATE -Wall -Wextra)

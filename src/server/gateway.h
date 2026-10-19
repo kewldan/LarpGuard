@@ -18,11 +18,17 @@
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/server.h"
+#include "challenge/captcha.h"
+#include "challenge/challenger.h"
 #include "config/config.h"
+#include "crawler/ranges.h"
+#include "crawler/verifier.h"
+#include "crawler/web_bot_auth.h"
 #include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
 #include "fp/library.h"
+#include "net/asn.h"
 #include "net/classifier.h"
 #include "proxy/upstream_pool.h"
 #include "quic/h3_server.h"
@@ -34,6 +40,7 @@
 #include "server/connection.h"
 #include "server/health.h"
 #include "tls/cert_store.h"
+#include "xdp/xdp_filter.h"
 
 namespace bot_shield {
 
@@ -95,7 +102,12 @@ struct GatewayServices {
   ListStore* lists = nullptr;
   DecisionLog* decisions = nullptr;
   const Challenger* challenger = nullptr;
+  Captcha* captcha = nullptr;
   CrawlerVerifier* crawler_verifier = nullptr;
+  const CrawlerRangeStore* crawler_ranges = nullptr;
+  WebBotAuthVerifier* web_bot_auth = nullptr;
+  const AsnStore* asn = nullptr;
+  XdpAutoBlocks* xdp_blocks = nullptr;
   BehaviorStore* behavior = nullptr;
 };
 

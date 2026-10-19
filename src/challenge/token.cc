@@ -152,42 +152,54 @@ ClientBinding ClientBinding::For(std::string_view ja4,
 }
 
 std::string IssueToken(const TokenKeys& keys, const TokenClaims& claims) {
-  const std::string payload = std::format(
-      "v1.{}.{}.{}.{}.{}", claims.issued, claims.expires,
-      claims.binding.ja4_hash, claims.binding.ip_hash, keys.active_id());
+  const std::string payload =
+      claims.level == kTokenLevelJs
+          ? std::format("v1.{}.{}.{}.{}.{}", claims.issued, claims.expires,
+                        claims.binding.ja4_hash, claims.binding.ip_hash,
+                        keys.active_id())
+          : std::format("v2.{}.{}.{}.{}.{}.{}", claims.issued, claims.expires,
+                        claims.binding.ja4_hash, claims.binding.ip_hash,
+                        claims.level, keys.active_id());
   return payload + "." + Mac(keys.Secret(keys.active_id()), payload);
 }
 
 bool VerifyToken(const TokenKeys& keys, std::string_view token, int64_t now,
                  TokenClaims* claims) {
   std::vector<std::string_view> fields;
-  if (!CheckSigned(keys, token, &fields) || fields.size() != 5 ||
-      fields[0] != "v1") {
-    return false;
-  }
+  if (!CheckSigned(keys, token, &fields)) return false;
+  const bool v1 = fields.size() == 5 && fields[0] == "v1";
+  const bool v2 = fields.size() == 6 && fields[0] == "v2";
+  if (!v1 && !v2) return false;
   TokenClaims out;
   if (!ParseInt(fields[1], &out.issued) || !ParseInt(fields[2], &out.expires) ||
       !IsHex(fields[3], 8) || !IsHex(fields[4], 8) || out.expires <= now) {
     return false;
+  }
+  if (fields.size() == 6) {
+    int64_t level = 0;
+    if (!ParseInt(fields[5], &level) || level < 1 || level > 9) return false;
+    out.level = static_cast<int>(level);
   }
   out.binding = {std::string(fields[3]), std::string(fields[4])};
   *claims = std::move(out);
   return true;
 }
 
-std::string IssueNonce(const TokenKeys& keys, const NonceClaims& claims) {
-  const std::string payload =
-      std::format("n1.{}.{}.{}.{}.{}.{}", claims.issued, claims.difficulty,
-                  claims.binding.ja4_hash, claims.binding.ip_hash,
-                  Base64UrlEncode(claims.return_path), keys.active_id());
+std::string IssueNonce(const TokenKeys& keys, const NonceClaims& claims,
+                       std::string_view kind) {
+  const std::string payload = std::format(
+      "{}.{}.{}.{}.{}.{}.{}", kind, claims.issued, claims.difficulty,
+      claims.binding.ja4_hash, claims.binding.ip_hash,
+      Base64UrlEncode(claims.return_path), keys.active_id());
   return payload + "." + Mac(keys.Secret(keys.active_id()), payload);
 }
 
 bool VerifyNonce(const TokenKeys& keys, std::string_view nonce, int64_t now,
-                 int64_t max_age_seconds, NonceClaims* claims) {
+                 int64_t max_age_seconds, NonceClaims* claims,
+                 std::string_view kind) {
   std::vector<std::string_view> fields;
   if (!CheckSigned(keys, nonce, &fields) || fields.size() != 6 ||
-      fields[0] != "n1") {
+      fields[0] != kind) {
     return false;
   }
   NonceClaims out;

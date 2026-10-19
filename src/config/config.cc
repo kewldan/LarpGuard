@@ -284,8 +284,8 @@ bool ParsePolicy(const YAML::Node& node, Config* config, std::string* error) {
          !ParseAction(actions["verified_bot"].as<std::string>(),
                       &policy.verified_bot_action))) {
       *error =
-          "policy.actions: expected allow, challenge, block, tarpit, decoy or "
-          "throttle";
+          "policy.actions: expected allow, challenge, captcha, block, tarpit, "
+          "decoy or throttle";
       return false;
     }
   }
@@ -397,7 +397,13 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "model",
                   "fingerprints",
                   "metrics",
-                  "log_level"},
+                  "log_level",
+                  "web_bot_auth",
+                  "asn",
+                  "captcha",
+                  "xdp",
+                  "data_dir",
+                  "ca_file"},
                  error)) {
     return false;
   }
@@ -690,8 +696,14 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     }
   }
   if (const YAML::Node crawlers = root["crawlers"]) {
-    if (!CheckKeys(crawlers, "crawlers", {"verify", "ai"}, error)) {
+    if (!CheckKeys(crawlers, "crawlers",
+                   {"verify", "ai", "ip_ranges", "ranges_refresh"}, error) ||
+        !ReadDuration(crawlers, "crawlers", "ranges_refresh",
+                      &config->crawlers_ranges_refresh, error)) {
       return false;
+    }
+    if (crawlers["ip_ranges"]) {
+      config->crawlers_ip_ranges = crawlers["ip_ranges"].as<bool>();
     }
     if (crawlers["verify"]) {
       config->crawlers_verify = crawlers["verify"].as<bool>();
@@ -705,8 +717,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
         config->crawlers_ai = action;
       } else {
         *error =
-            "crawlers.ai: expected default, allow, challenge, block, tarpit, "
-            "decoy or throttle";
+            "crawlers.ai: expected default, allow, challenge, captcha, block, "
+            "tarpit, decoy or throttle";
         return false;
       }
     }
@@ -813,6 +825,160 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     if (docker["socket"]) {
       config->docker_socket =
           docker["socket"].IsNull() ? "" : docker["socket"].as<std::string>();
+    }
+  }
+  if (const YAML::Node agents = root["web_bot_auth"]) {
+    if (!CheckKeys(agents, "web_bot_auth",
+                   {"enabled", "trusted", "max_validity"}, error) ||
+        !ReadDuration(agents, "web_bot_auth", "max_validity",
+                      &config->web_bot_auth_max_validity, error)) {
+      return false;
+    }
+    if (agents["enabled"]) {
+      config->web_bot_auth_enabled = agents["enabled"].as<bool>();
+    }
+    if (const YAML::Node trusted = agents["trusted"]) {
+      if (!trusted.IsSequence()) {
+        *error = "web_bot_auth.trusted: expected a list of hosts";
+        return false;
+      }
+      config->web_bot_auth_trusted = ReadStrings(trusted);
+    }
+  }
+  if (const YAML::Node asn = root["asn"]) {
+    if (!CheckKeys(asn, "asn", {"url", "refresh"}, error) ||
+        !ReadDuration(asn, "asn", "refresh", &config->asn_refresh, error)) {
+      return false;
+    }
+    if (asn["url"]) {
+      config->asn_url = asn["url"].IsNull() ? "" : asn["url"].as<std::string>();
+      if (!config->asn_url.empty() &&
+          !config->asn_url.starts_with("https://") &&
+          !config->asn_url.starts_with("http://")) {
+        *error = "asn.url: expected an http(s) URL or \"\" (off)";
+        return false;
+      }
+    }
+  }
+  if (root["data_dir"]) {
+    config->data_dir =
+        root["data_dir"].IsNull() ? "" : root["data_dir"].as<std::string>();
+  }
+  if (root["ca_file"]) {
+    config->ca_file =
+        root["ca_file"].IsNull() ? "" : root["ca_file"].as<std::string>();
+  }
+  if (const YAML::Node captcha = root["captcha"]) {
+    if (!CheckKeys(captcha, "captcha",
+                   {"provider", "site_key", "secret_file", "verify_url",
+                    "check_hostname", "escalate", "rounds", "round_timeout",
+                    "difficulty"},
+                   error) ||
+        !ReadDuration(captcha, "captcha", "round_timeout",
+                      &config->captcha_round_timeout, error)) {
+      return false;
+    }
+    const auto text = [&captcha](const char* key) {
+      return captcha[key].IsNull() ? std::string()
+                                   : captcha[key].as<std::string>();
+    };
+    if (captcha["provider"]) config->captcha_provider = text("provider");
+    if (captcha["site_key"]) config->captcha_site_key = text("site_key");
+    if (captcha["secret_file"]) {
+      config->captcha_secret_file = text("secret_file");
+    }
+    if (captcha["verify_url"]) config->captcha_verify_url = text("verify_url");
+    if (captcha["check_hostname"]) {
+      config->captcha_check_hostname = captcha["check_hostname"].as<bool>();
+    }
+    if (captcha["escalate"]) {
+      config->captcha_escalate = captcha["escalate"].as<bool>();
+    }
+    if (captcha["rounds"]) {
+      config->captcha_rounds = captcha["rounds"].as<int>();
+      if (config->captcha_rounds < 1 || config->captcha_rounds > 5) {
+        *error = "captcha.rounds: expected 1..5";
+        return false;
+      }
+    }
+    if (captcha["difficulty"]) {
+      config->captcha_difficulty = captcha["difficulty"].as<int>();
+      if (config->captcha_difficulty < 0 || config->captcha_difficulty > 20) {
+        *error = "captcha.difficulty: expected 0..20 bits";
+        return false;
+      }
+    }
+    const std::string& provider = config->captcha_provider;
+    if (!provider.empty() && provider != "builtin" && provider != "turnstile" &&
+        provider != "hcaptcha" && provider != "recaptcha") {
+      *error =
+          "captcha.provider: expected \"\" (off), builtin, turnstile, "
+          "hcaptcha or recaptcha";
+      return false;
+    }
+    if (!provider.empty() && provider != "builtin" &&
+        (config->captcha_site_key.empty() ||
+         config->captcha_secret_file.empty())) {
+      *error =
+          std::format("captcha: {} needs site_key and secret_file", provider);
+      return false;
+    }
+  }
+  if (const YAML::Node xdp = root["xdp"]) {
+    if (!CheckKeys(xdp, "xdp",
+                   {"enabled", "interface", "mode", "syn_rate", "syn_burst",
+                    "drop_invalid", "drop_fragments", "heartbeat_timeout",
+                    "block_honeypot"},
+                   error) ||
+        !ReadDuration(xdp, "xdp", "heartbeat_timeout",
+                      &config->xdp_heartbeat_timeout, error)) {
+      return false;
+    }
+    if (xdp["enabled"]) config->xdp_enabled = xdp["enabled"].as<bool>();
+    if (xdp["interface"]) {
+      config->xdp_interface = xdp["interface"].as<std::string>();
+    }
+    if (xdp["mode"]) {
+      config->xdp_mode = xdp["mode"].as<std::string>();
+      if (config->xdp_mode != "auto" && config->xdp_mode != "native" &&
+          config->xdp_mode != "generic") {
+        *error = "xdp.mode: expected auto, native or generic";
+        return false;
+      }
+    }
+    if (xdp["syn_rate"]) {
+      const auto rate = xdp["syn_rate"].as<std::string>();
+      int64_t count = 0;
+      std::chrono::milliseconds period{0};
+      if (rate.empty() || rate == "0") {
+        config->xdp_syn_rate = 0;
+      } else if (!ParseRate(rate, &count, &period) || period.count() > 1000 ||
+                 count * 1000 / period.count() < 1) {
+        *error = "xdp.syn_rate: expected a rate per second like 200/s";
+        return false;
+      } else {
+        config->xdp_syn_rate = count * 1000 / period.count();
+      }
+    }
+    if (xdp["syn_burst"]) {
+      config->xdp_syn_burst = xdp["syn_burst"].as<int64_t>();
+      if (config->xdp_syn_burst < 1) {
+        *error = "xdp.syn_burst: expected >= 1";
+        return false;
+      }
+    }
+    if (xdp["drop_invalid"]) {
+      config->xdp_drop_invalid = xdp["drop_invalid"].as<bool>();
+    }
+    if (xdp["drop_fragments"]) {
+      config->xdp_drop_fragments = xdp["drop_fragments"].as<bool>();
+    }
+    if (xdp["block_honeypot"]) {
+      config->xdp_block_honeypot = xdp["block_honeypot"].as<bool>();
+    }
+    if (config->xdp_enabled && config->xdp_interface.empty()) {
+      *error = "xdp.interface: required when xdp.enabled (e.g. eth0)";
+      return false;
     }
   }
   if (const YAML::Node fingerprints = root["fingerprints"]) {

@@ -1,11 +1,12 @@
 FROM debian:trixie AS build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      build-essential cmake ninja-build ca-certificates git \
+      build-essential cmake ninja-build ca-certificates git python3 clang \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY CMakeLists.txt ./
 COPY cmake cmake
+COPY tools/bpf_embed.py tools/bpf_embed.py
 COPY src src
 COPY tests tests
 RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \

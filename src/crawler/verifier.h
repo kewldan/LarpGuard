@@ -20,8 +20,6 @@
 
 namespace bot_shield {
 
-enum class CrawlerStatus { kPending, kVerified, kFailed };
-
 // Checks that a request claiming a search crawler comes from it: the
 // address's reverse DNS name is in the crawler's domains and resolves back
 // to the address. Lookups run on background threads; the request path only

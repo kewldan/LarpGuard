@@ -38,12 +38,18 @@ struct ClientBinding {
 };
 
 // Clearance token (cookie __bs):
-//   v1.<issued>.<expires>.<ja4 hash>.<ip hash>.<key id>.<mac>
+//   v1.<issued>.<expires>.<ja4 hash>.<ip hash>.<key id>.<mac>    (JS)
+//   v2.<issued>.<expires>.<ja4 hash>.<ip hash>.<level>.<key id>.<mac>
 struct TokenClaims {
   int64_t issued = 0;   // Unix seconds.
   int64_t expires = 0;  // Unix seconds.
   ClientBinding binding;
+  // What was solved: kTokenLevelJs (the JS challenge) or kTokenLevelCaptcha.
+  int level = 0;
 };
+
+inline constexpr int kTokenLevelJs = 0;
+inline constexpr int kTokenLevelCaptcha = 1;
 
 std::string IssueToken(const TokenKeys& keys, const TokenClaims& claims);
 // Checks format, MAC and expiry (binding is compared by the caller).
@@ -59,10 +65,14 @@ struct NonceClaims {
   std::string return_path;
 };
 
-std::string IssueNonce(const TokenKeys& keys, const NonceClaims& claims);
-// Checks format, MAC and age (`max_age_seconds`).
+// `kind` separates nonces of different pages ("n1": the JS challenge,
+// "w1": a CAPTCHA widget page), so one cannot stand in for another.
+std::string IssueNonce(const TokenKeys& keys, const NonceClaims& claims,
+                       std::string_view kind = "n1");
+// Checks kind, format, MAC and age (`max_age_seconds`).
 bool VerifyNonce(const TokenKeys& keys, std::string_view nonce, int64_t now,
-                 int64_t max_age_seconds, NonceClaims* claims);
+                 int64_t max_age_seconds, NonceClaims* claims,
+                 std::string_view kind = "n1");
 
 // Number of leading zero bits of SHA-256("<nonce>:<counter>").
 int PowZeroBits(std::string_view nonce, std::string_view counter);

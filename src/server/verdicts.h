@@ -38,6 +38,8 @@ struct VerdictSet {
   RateLimitSet throttle;
   std::vector<std::string> honeypot_paths;
   std::optional<Action> ai_crawler_action;
+  // Web Bot Auth agents (hosts or "*.parent") trusted as verified bots.
+  std::vector<std::string> trusted_agents;
   std::shared_ptr<const GbdtModel> model;  // Null without a model file.
   double model_threshold = 0.8;
   // For logs and /status.

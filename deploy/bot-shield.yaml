@@ -84,9 +84,10 @@ mode: shadow
 policy:
   # Score (0..100) from which a request is suspicious / a bot.
   thresholds: {suspicious: 30, bot: 70}
-  # allow | challenge | block | tarpit | decoy | throttle (challenge: JS page
-  # with proof of work; tarpit: a very slow answer; decoy: watermarked fake
-  # data; throttle: the throttle limit below applies).
+  # allow | challenge | captcha | block | tarpit | decoy | throttle
+  # (challenge: JS page with proof of work; captcha: the CAPTCHA below, or
+  # the challenge without one; tarpit: a very slow answer; decoy:
+  # watermarked fake data; throttle: the throttle limit below applies).
   # verified_bot: search crawlers confirmed by reverse DNS (see crawlers).
   actions: {suspicious: allow, bot: block, verified_bot: allow}
   block_status: 403
@@ -121,8 +122,8 @@ rules: []
 # Request rate limits (GCRA). Every matching limit counts the request; over
 # a limit the answer is 429 with Retry-After on enforced hosts (shadow hosts
 # only record it). Filters: hosts, paths (globs), methods, classes. Key parts:
-# ip, ip_prefix, ja4, fp, host, session (challenge clearance token),
-# header:<name>, cookie:<name>; a request
+# ip, ip_prefix, ja4, fp, host, session (challenge clearance token), asn
+# (needs the asn database), header:<name>, cookie:<name>; a request
 # missing a part is not limited by that rule. burst defaults to the count.
 rate_limits: []
 #  - name: login
@@ -226,10 +227,83 @@ model:
 # the background: verified ones get class verified_bot, fakes the
 # fake_crawler signal. AI crawlers (GPTBot, ClaudeBot, CCBot, ...) are
 # recognized by User-Agent and get the "ai" action (default: scored like
-# anyone; allow | challenge | block). Rules and admin lists still win.
+# anyone; allow | challenge | captcha | block). Rules and admin lists
+# still win.
 crawlers:
   verify: true
   ai: default
+  # Published IP ranges (Google, Bing, Apple, DuckDuckGo, OpenAI,
+  # Perplexity, Mistral), downloaded in the background: inside them a claim
+  # is verified at once; outside them a crawler without reverse DNS
+  # (GPTBot, PerplexityBot, ...) is a fake_crawler.
+  ip_ranges: true
+  ranges_refresh: 24h
+
+# Web Bot Auth (HTTP Message Signatures, RFC 9421, tag "web-bot-auth"):
+# bots sign requests and name their key directory in Signature-Agent. The
+# keys are fetched in the background. A valid signature from a trusted
+# agent (host or "*.parent") makes a verified bot (verified_agent:<host>);
+# from others it is recorded (signed_agent:<host>); a wrong one scores
+# web_bot_auth_invalid. Ed25519 only.
+web_bot_auth:
+  enabled: true
+  trusted: ["chatgpt.com"]
+  # Longer-lived signatures are refused: they work like replayable tokens.
+  max_validity: 24h
+
+# IP -> autonomous system database (iptoasn.com, public domain), downloaded
+# in the background. Gives the rule fields asn, asn_org, asn_country,
+# asn_hosting, the rate limit key asn, the "asn" event field and the
+# hosting_network signal (clouds and hosters). "" = off.
+asn:
+  url: "https://iptoasn.com/data/ip2asn-combined.tsv.gz"
+  refresh: 24h
+
+# Downloads (crawler ranges, ASN database) are cached here and survive
+# restarts; "" = memory only (downloaded again on every start).
+data_dir: /var/lib/bot-shield/data   # Not a default: off unless set.
+# CA bundle for those downloads, CAPTCHA providers and key directories;
+# "" = the system's.
+ca_file: ""
+
+# CAPTCHA (action "captcha", docs/architecture.md 7.1): "" (off), builtin,
+# turnstile, hcaptcha or recaptcha. Solving it sets a level-2 __bs token.
+#   builtin: "click the shape that matches the sample", rendered here, in
+#     `rounds` rounds of at most round_timeout each; bound to the browser
+#     that ran the probes, one-time, with a hand-like pointer path required.
+#   turnstile | hcaptcha | recaptcha: the provider's widget, checked with its
+#     siteverify (site_key, secret_file) in the background.
+# escalate: a JS challenge that looks suspicious (DevTools protocol, a
+# spoofed User-Agent, ...) or unusual (software renderer, headless screen)
+# shows the CAPTCHA instead of failing or passing.
+captcha:
+  provider: ""
+  site_key: ""
+  secret_file: ""
+  verify_url: ""        # "" = the provider's siteverify.
+  check_hostname: true
+  escalate: true
+  rounds: 2
+  round_timeout: 30s
+  difficulty: 12        # Proof of work on the CAPTCHA page.
+
+# XDP pre-filter (Linux; ADR-016): a BPF program on the interface drops,
+# before the TCP stack, packets for the gateway's ports from IP/CIDR block
+# entries of the admin lists, SYN floods per /24 or /64 (syn_rate), invalid
+# TCP flags and UDP when http3 is off. It passes everything once the
+# gateway stops beating for heartbeat_timeout, and goes away with the
+# process (fail-open). Needs CAP_BPF and CAP_NET_ADMIN.
+xdp:
+  enabled: false
+  interface: ""          # Required when enabled, e.g. eth0.
+  mode: auto             # auto (native, else generic) | native | generic
+  syn_rate: 0            # New connections per second per prefix; 0 = off.
+  syn_burst: 1
+  drop_invalid: true
+  drop_fragments: false  # Also drops fragmented packets to any port.
+  heartbeat_timeout: 5s
+  # Honeypot hits are also dropped here for honeypot.ttl.
+  block_honeypot: false
 
 # JS challenge (action "challenge"): browsers get a page that checks a few
 # signals and solves a proof of work, then a __bs cookie (bound to the TLS

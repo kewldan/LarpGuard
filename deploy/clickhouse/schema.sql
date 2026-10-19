@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS bot_shield.conn_queue
     tcp_fp       String,
     ja4t         String,
     h2_fp        String,
-    quic_fp      String
+    quic_fp      String,
+    asn          UInt32
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -67,7 +68,9 @@ CREATE TABLE IF NOT EXISTS bot_shield.conn
     ja4t         LowCardinality(String),
     h2_fp        LowCardinality(String),
     -- QUIC transport parameter ids in client order (listener quic).
-    quic_fp      LowCardinality(String)
+    quic_fp      LowCardinality(String),
+    -- Autonomous system of the client (ASN database); 0 when unknown.
+    asn          UInt32
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)
@@ -127,7 +130,10 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     request_id         String,
     watermark          String,
     features           Array(Float32),
-    model_score        Nullable(Float32)
+    model_score        Nullable(Float32),
+    client_fp          String,
+    signed_agent       String,
+    asn                UInt32
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -191,7 +197,13 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     -- Model feature vector (src/model/features.h; training data for
     -- tools/train_model.py) and the model's probability (NULL: no model).
     features           Array(Float32),
-    model_score        Nullable(Float32)
+    model_score        Nullable(Float32),
+    -- Hash of the browser probes of a challenge or CAPTCHA (canvas, WebGL,
+    -- audio, fonts): one browser build on one machine, for clustering.
+    client_fp          String,
+    -- Verified Web Bot Auth agent (host of its key directory).
+    signed_agent       LowCardinality(String),
+    asn                UInt32
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)
@@ -205,6 +217,10 @@ ALTER TABLE bot_shield.conn ADD COLUMN IF NOT EXISTS quic_fp LowCardinality(Stri
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS watermark String;
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS features Array(Float32);
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS model_score Nullable(Float32);
+ALTER TABLE bot_shield.conn ADD COLUMN IF NOT EXISTS asn UInt32;
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS client_fp String;
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS signed_agent LowCardinality(String);
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS asn UInt32;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS bot_shield.req_mv TO bot_shield.req AS
 SELECT fromUnixTimestamp64Milli(toInt64(ts_ms), 'UTC') AS ts, * EXCEPT ts_ms

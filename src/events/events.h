@@ -45,6 +45,8 @@ struct ConnectionRecord {
   std::string quic_fp;
   // Initial TTL of the SYN (64, 128, ...); 0 when not captured.
   int tcp_initial_ttl = 0;
+  // Autonomous system of the peer (ASN database); 0 when unknown.
+  uint32_t asn = 0;
   uint64_t bytes_in = 0;
   uint64_t bytes_out = 0;
   int requests = 0;
@@ -87,6 +89,11 @@ struct RequestOutcome {
   std::string watermark;
   std::vector<float> features;
   double model_score = -1;
+  // Hash of the browser probes of a challenge or CAPTCHA (canvas, WebGL,
+  // audio, fonts), for clustering.
+  std::string client_fp;
+  // Host of a verified Web Bot Auth agent.
+  std::string signed_agent;
 };
 
 std::string RequestEventJson(const ConnectionRecord& record,

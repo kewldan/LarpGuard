@@ -14,8 +14,17 @@ namespace bot_shield {
 // What happens to a request. kChallenge shows the JS challenge to browser
 // navigations (other requests get a 403 that points to it); kTarpit answers
 // very slowly; kDecoy answers 200 with watermarked fake data.
-// kThrottle applies the "throttle" rate limit (429 above it).
-enum class Action { kAllow, kChallenge, kBlock, kTarpit, kDecoy, kThrottle };
+// kThrottle applies the "throttle" rate limit (429 above it). kCaptcha
+// shows the CAPTCHA (captcha.provider) unless the client solved one.
+enum class Action {
+  kAllow,
+  kChallenge,
+  kBlock,
+  kTarpit,
+  kDecoy,
+  kThrottle,
+  kCaptcha
+};
 
 std::string_view ActionName(Action action);
 bool ParseAction(std::string_view text, Action* action);

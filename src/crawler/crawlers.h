@@ -6,6 +6,8 @@
 
 namespace bot_shield {
 
+enum class CrawlerStatus { kPending, kVerified, kFailed };
+
 // A crawler the gateway knows by name (docs/architecture.md, section 5.5).
 struct KnownCrawler {
   std::string_view id;
@@ -15,6 +17,9 @@ struct KnownCrawler {
   std::span<const std::string_view> domains;
   // Collects data for AI models or answers AI assistants (crawlers.ai).
   bool ai = false;
+  // Published IP range lists (JSON, see ParseCrawlerRanges). With ranges
+  // but no domains, an address outside them is a fake.
+  std::span<const std::string_view> ranges;
 };
 
 std::span<const KnownCrawler> KnownCrawlers();

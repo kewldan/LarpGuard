@@ -174,6 +174,10 @@ ChallengeSettings Settings() {
 
 std::string Signals(std::string_view json) { return Base64UrlEncode(json); }
 
+constexpr std::string_view kUserAgent =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+
 constexpr std::string_view kGoodSignals =
     R"({"wd":false,"lang":2,"hc":8,"plat":"MacIntel","brands":["Chromium"],)"
     R"("tz":"Europe/Moscow","sw":1512,"ph":false,"ms":40})";
@@ -191,7 +195,8 @@ TEST(ChallengerTest, PassesSolvedChallengeAndIssuesToken) {
   const std::string query = "n=" + PercentEncode(nonce) +
                             "&c=" + Solve(nonce, 6) +
                             "&s=" + Signals(kGoodSignals);
-  const Challenger::Result result = challenger.Verify(query, binding, kNow + 2);
+  const Challenger::Result result =
+      challenger.Verify(query, binding, kUserAgent, kNow + 2);
   ASSERT_TRUE(result.passed) << result.reason;
   EXPECT_EQ(result.return_path, "/cart?id=1");
   EXPECT_TRUE(result.set_cookie.starts_with("__bs=v1."));
@@ -223,7 +228,7 @@ TEST(ChallengerTest, RejectsBadSolutions) {
                           int64_t now) {
     return challenger.Verify("n=" + PercentEncode(n) + "&c=" + std::string(c) +
                                  "&s=" + Signals(signals),
-                             who, now);
+                             who, kUserAgent, now);
   };
   const Challenger::Result ok =
       verify(nonce, counter, kGoodSignals, binding, kNow);
@@ -255,7 +260,7 @@ TEST(ChallengerTest, RejectsBadSolutions) {
             "headless");
   EXPECT_EQ(verify(nonce, counter, R"({"lang":0})", binding, kNow).reason,
             "no_languages");
-  EXPECT_FALSE(challenger.Verify("", binding, kNow).passed);
+  EXPECT_FALSE(challenger.Verify("", binding, kUserAgent, kNow).passed);
 }
 
 TEST(ChallengerTest, StripsOwnCookie) {

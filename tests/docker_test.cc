@@ -97,7 +97,7 @@ TEST(DockerLabelsTest, CrawlerChallengeAndHoneypotLabels) {
       Container("blog", {{"botshield.hosts", "blog.test"},
                          {"botshield.ai_crawlers", "default"}}),
       Container("bad", {{"botshield.hosts", "bad.test"},
-                        {"botshield.ai_crawlers", "captcha"},
+                        {"botshield.ai_crawlers", "nope"},
                         {"botshield.challenge.paths", "checkout"}}),
   };
   std::vector<std::string> warnings;

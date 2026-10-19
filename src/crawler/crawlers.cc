@@ -41,6 +41,35 @@ constexpr std::array<std::string_view, 1> kAmazonTokens = {"amazonbot"};
 constexpr std::array<std::string_view, 1> kAmazonDomains = {
     "crawl.amazonbot.amazon"};
 
+constexpr std::array<std::string_view, 2> kDuckDuckGoTokens = {"duckduckbot",
+                                                               "duckassistbot"};
+constexpr std::array<std::string_view, 1> kMistralTokens = {"mistralai-user"};
+
+// Published IP ranges (checked live; Google's format).
+constexpr std::array<std::string_view, 4> kGoogleRanges = {
+    "https://developers.google.com/static/search/apis/ipranges/"
+    "googlebot.json",
+    "https://developers.google.com/static/search/apis/ipranges/"
+    "special-crawlers.json",
+    "https://developers.google.com/static/search/apis/ipranges/"
+    "user-triggered-fetchers.json",
+    "https://developers.google.com/static/search/apis/ipranges/"
+    "user-triggered-fetchers-google.json"};
+constexpr std::array<std::string_view, 1> kBingRanges = {
+    "https://www.bing.com/toolbox/bingbot.json"};
+constexpr std::array<std::string_view, 1> kAppleRanges = {
+    "https://search.developer.apple.com/applebot.json"};
+constexpr std::array<std::string_view, 1> kDuckDuckGoRanges = {
+    "https://duckduckgo.com/duckduckbot.json"};
+constexpr std::array<std::string_view, 3> kOpenAiRanges = {
+    "https://openai.com/gptbot.json", "https://openai.com/searchbot.json",
+    "https://openai.com/chatgpt-user.json"};
+constexpr std::array<std::string_view, 2> kPerplexityRanges = {
+    "https://www.perplexity.com/perplexitybot.json",
+    "https://www.perplexity.com/perplexity-user.json"};
+constexpr std::array<std::string_view, 1> kMistralRanges = {
+    "https://mistral.ai/mistralai-user-ips.json"};
+
 // AI crawlers and assistants, by User-Agent only.
 constexpr std::array<std::string_view, 3> kOpenAiTokens = {
     "gptbot", "chatgpt-user", "oai-searchbot"};
@@ -62,28 +91,30 @@ constexpr std::array<std::string_view, 1> kOmgiliTokens = {"omgili"};
 
 constexpr Names kNone;
 
-constexpr std::array<KnownCrawler, 21> kCrawlers = {{
-    {"google", kGoogleTokens, kGoogleDomains, false},
-    {"bing", kBingTokens, kBingDomains, false},
-    {"yandex", kYandexTokens, kYandexDomains, false},
-    {"apple", kAppleTokens, kAppleDomains, false},
-    {"baidu", kBaiduTokens, kBaiduDomains, false},
-    {"petal", kPetalTokens, kPetalDomains, false},
-    {"seznam", kSeznamTokens, kSeznamDomains, false},
-    {"naver", kNaverTokens, kNaverDomains, false},
-    {"amazon", kAmazonTokens, kAmazonDomains, true},
-    {"openai", kOpenAiTokens, kNone, true},
-    {"anthropic", kAnthropicTokens, kNone, true},
-    {"commoncrawl", kCommonCrawlTokens, kNone, true},
-    {"perplexity", kPerplexityTokens, kNone, true},
-    {"bytedance", kByteDanceTokens, kNone, true},
-    {"cohere", kCohereTokens, kNone, true},
-    {"meta", kMetaTokens, kNone, true},
-    {"diffbot", kDiffbotTokens, kNone, true},
-    {"you", kYouTokens, kNone, true},
-    {"timpi", kTimpiTokens, kNone, true},
-    {"imagesift", kImagesiftTokens, kNone, true},
-    {"omgili", kOmgiliTokens, kNone, true},
+constexpr std::array<KnownCrawler, 23> kCrawlers = {{
+    {"google", kGoogleTokens, kGoogleDomains, false, kGoogleRanges},
+    {"bing", kBingTokens, kBingDomains, false, kBingRanges},
+    {"yandex", kYandexTokens, kYandexDomains, false, kNone},
+    {"apple", kAppleTokens, kAppleDomains, false, kAppleRanges},
+    {"duckduckgo", kDuckDuckGoTokens, kNone, false, kDuckDuckGoRanges},
+    {"baidu", kBaiduTokens, kBaiduDomains, false, kNone},
+    {"petal", kPetalTokens, kPetalDomains, false, kNone},
+    {"seznam", kSeznamTokens, kSeznamDomains, false, kNone},
+    {"naver", kNaverTokens, kNaverDomains, false, kNone},
+    {"amazon", kAmazonTokens, kAmazonDomains, true, kNone},
+    {"openai", kOpenAiTokens, kNone, true, kOpenAiRanges},
+    {"anthropic", kAnthropicTokens, kNone, true, kNone},
+    {"commoncrawl", kCommonCrawlTokens, kNone, true, kNone},
+    {"perplexity", kPerplexityTokens, kNone, true, kPerplexityRanges},
+    {"mistral", kMistralTokens, kNone, true, kMistralRanges},
+    {"bytedance", kByteDanceTokens, kNone, true, kNone},
+    {"cohere", kCohereTokens, kNone, true, kNone},
+    {"meta", kMetaTokens, kNone, true, kNone},
+    {"diffbot", kDiffbotTokens, kNone, true, kNone},
+    {"you", kYouTokens, kNone, true, kNone},
+    {"timpi", kTimpiTokens, kNone, true, kNone},
+    {"imagesift", kImagesiftTokens, kNone, true, kNone},
+    {"omgili", kOmgiliTokens, kNone, true, kNone},
 }};
 
 std::string Lowercase(std::string_view text) {

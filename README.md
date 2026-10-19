@@ -53,21 +53,38 @@ over ports 443/80, and Traefik moves to loopback behind it.
   Traefik receives the verdict in `X-Bot-*` headers.
 - 👀 **Shadow mode first.** Score and log everything, act on nothing. Then
   switch to `enforce` per host, from YAML or a Docker label.
-- 🧩 **JS challenge and proof-of-work.** Tokens (`__bs`) are stateless and
-  HMAC-signed, bound to the JA4 and subnet, with rotating keys. The cookie
-  never reaches your app.
-- 🤖 **Crawler verification.** Search engines are verified with reverse and
-  forward DNS. Impostors get `fake_crawler`. AI crawlers follow their own
-  `allow`, `challenge` or `block` policy.
+- 🧩 **JS challenge and proof-of-work.** The page probes canvas, WebGL,
+  audio, fonts, screen, Worker vs. window, DevTools-protocol traces and
+  patched natives. Tokens (`__bs`) are stateless and HMAC-signed, bound to
+  the JA4 and subnet, with rotating keys. The cookie never reaches your app.
+- 🧷 **CAPTCHA when it matters.** A built-in puzzle (server-rendered shapes,
+  encrypted answers, timed rounds, hand-like pointer paths) or Turnstile,
+  hCaptcha and reCAPTCHA. Suspicious JS challenges escalate to it, and the
+  `captcha` action asks for it. It is bound to the browser that ran the
+  probes, so answers bought from a solving farm don't transfer.
+- 🤖 **Crawler verification.** Search engines are verified by published IP
+  ranges and by reverse plus forward DNS. GPTBot, PerplexityBot and friends
+  are checked against their published ranges. Impostors get
+  `fake_crawler`. AI crawlers follow their own policy.
+- ✍️ **Web Bot Auth.** Signed agents (HTTP Message Signatures, Ed25519) are
+  verified against their published key directories. Trusted agents become
+  `verified_bot`, and forged signatures are penalised.
 - 📜 **Rule language.** Write conditions like
   `path ~ "/admin*" and class != "human"`. Types are checked when the config
   loads.
-- 🚦 **Rate limiting.** GCRA with composite keys: IP, subnet, fingerprint,
-  API key, cookie or session. Filters by host, path, method and class.
-  Per-IP connection limits apply before TLS.
+- 🚦 **Rate limiting.** GCRA with composite keys: IP, subnet, ASN,
+  fingerprint, API key, cookie or session. Filters by host, path, method and
+  class. Per-IP connection limits apply before TLS.
+- 🌍 **ASN awareness.** The iptoasn.com database refreshes in the
+  background. It provides `asn`, `asn_org`, `asn_country` and `asn_hosting`
+  in rules and events, plus a hosting-network signal.
+- 🛡️ **XDP pre-filter.** A BPF program with its own loader (no libbpf)
+  drops blocklisted sources, per-prefix SYN floods and malformed packets
+  before the kernel's TCP stack. It fails open with the gateway.
 - 🍯 **Honeypots and behaviour.** Trap paths such as `/.env` and `/.git/*`,
   robotic timing, 404 storms, ID enumeration, API calls without the page.
-- 🐢 **More than block.** Other actions are `challenge`, `throttle`,
+- 🐢 **More than block.** Other actions are `challenge`, `captcha`,
+  `throttle`,
   `tarpit` (a response that trickles out) and `decoy` (fake data with a
   watermark you can trace later).
 - 🌲 **Built-in ML signal.** Gradient-boosted trees are trained on your own
@@ -146,7 +163,7 @@ The binaries, config file and labels still use the working name
 
 **Requirements:** CMake ≥ 3.28, a C++20 compiler, and network access on the
 first configure. Pinned dependencies are fetched automatically: BoringSSL,
-Asio, nghttp2, ngtcp2, nghttp3, llhttp, yaml-cpp, nlohmann/json and
+Asio, nghttp2, ngtcp2, nghttp3, llhttp, zlib, yaml-cpp, nlohmann/json and
 GoogleTest.
 
 ```bash
@@ -211,7 +228,13 @@ rules:
     score: -40
 
 crawlers:
-  ai: challenge               # default | allow | challenge | block
+  ai: challenge               # default | allow | challenge | captcha | block
+
+captcha:
+  provider: builtin           # or turnstile | hcaptcha | recaptcha
+
+web_bot_auth:
+  trusted: ["chatgpt.com"]
 
 http3:
   enabled: true
@@ -271,11 +294,14 @@ cmake --build build --target tidy
 ```
 
 - **CI.** [`ci.yml`](.github/workflows/ci.yml) runs format, clang-tidy,
-  unit and e2e tests (plain and under ASan/UBSan) in `debian:trixie` for every
-  push and PR. On `main` and `v*` tags it then publishes the image.
+  unit and e2e tests (plain and under ASan/UBSan) in a privileged
+  `debian:trixie` container (so the XDP tests run) for every push and PR. On `main` and `v*` tags it then publishes the image.
 - **Style.** Google C++ Style, enforced by `clang-format` and
   `clang-tidy`. `tidy` must report 0 warnings.
 - **Sanitizers.** Build with `-DBOT_SHIELD_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`.
+- **XDP** builds on Linux when `clang` (BPF target) and `python3` are
+  installed. Its tests load the program with `BPF_PROG_TEST_RUN`, which
+  needs root or a privileged container. Elsewhere they are skipped.
 - **Linux-only paths** (`TCP_SAVED_SYN`, multi-worker `SO_REUSEPORT`). Test
   them in a `debian:trixie` container.
 - **No JA4T/JA4H** (FoxIO License): build with `-DBOT_SHIELD_FOXIO=OFF`.
@@ -287,14 +313,14 @@ cmake --build build --target tidy
 ```text
 src/
 ├── tls/        ClientHello parsing, certificate store, acme.json watcher
-├── net/        route classifier, PROXY v2, socket options, timeouts
+├── net/        classifier, PROXY v2, sockets, HTTPS client, ASN database
 ├── server/     workers, connection handlers, verdict pipeline, /metrics, /health
 ├── proxy/      HTTP/1.1 + HTTP/2 server side, HTTP/2 upstream pool to Traefik
 ├── quic/       HTTP/3 server (ngtcp2 + nghttp3)
 ├── fp/         fingerprints and passive HTTP taps (fp/foxio: JA4T/JA4H)
 ├── score/      scorer, rule language, shadow/enforce policy
-├── challenge/  JS challenge, proof-of-work, clearance tokens
-├── crawler/    crawler catalogue and rDNS verifier
+├── challenge/  JS challenge, probes, CAPTCHA (puzzle + providers), tokens
+├── crawler/    crawler catalogue, rDNS, IP ranges, Web Bot Auth
 ├── behavior/   behaviour signals and honeypot marks
 ├── action/     tarpit and decoy responses
 ├── ratelimit/  GCRA, sharded store, limit keys
@@ -303,6 +329,7 @@ src/
 ├── admin/      admin API, lists, decision log, under-attack mode
 ├── events/     JSON events and the NATS publisher
 ├── watchdog/   bot-shield-watchdog (fail-open)
+├── xdp/        XDP pre-filter: BPF program and loader (Linux)
 └── config/     strict YAML config
 ```
 
@@ -321,10 +348,11 @@ Russian.
 - [x] **M4**: JS challenge and PoW, crawler verification
 - [x] **M5**: fail-open, behaviour and honeypots, tarpit and decoy, clusters
 - [x] **M6**: ML signal, gRPC, HTTP/3
+- [x] Canvas, WebGL, audio, font and automation probes in the challenge
+- [x] CAPTCHA: built-in puzzle, Turnstile, hCaptcha, reCAPTCHA
+- [x] Crawler IP ranges and Web Bot Auth
+- [x] ASN database and rate-limit key, XDP pre-filter
 - [ ] Web UI
-- [ ] Canvas, WebGL and audio probes in the challenge; CAPTCHA plugin
-- [ ] Crawler IP ranges and Web Bot Auth
-- [ ] ASN rate-limit key, XDP pre-filter
 
 ## 📄 License
 

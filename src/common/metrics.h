@@ -86,6 +86,28 @@ struct Metrics {
   Counter challenges_would;
   Counter challenges_passed;
   Counter challenges_failed;
+  // JS challenges that ended in a CAPTCHA instead (suspicious or soft).
+  Counter challenge_escalations;
+  Counter captchas_issued;
+  Counter captchas_passed;
+  Counter captchas_failed;
+  // Web Bot Auth signatures by result.
+  Counter signed_verified;
+  Counter signed_invalid;
+  // Crawler claims decided by published IP ranges.
+  Counter crawler_ranges_verified;
+  Counter crawler_ranges_failed;
+  // Datasets in memory.
+  Gauge asn_ranges;
+  Gauge crawler_range_sets;
+  // XDP pre-filter (absolute counts read from the program).
+  Gauge xdp_attached;
+  Gauge xdp_passed;
+  Gauge xdp_blocked;
+  Gauge xdp_syn_rate;
+  Gauge xdp_invalid;
+  Gauge xdp_fragment;
+  Gauge xdp_fail_open;
   Counter tokens_valid;
   Counter docker_polls_failed;
   Gauge label_hosts;

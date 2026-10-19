@@ -195,8 +195,7 @@ fingerprints:
                            &bad, &error));
   EXPECT_TRUE(
       ParseConfig("policy: {actions: {bot: challenge}}\n", &bad, &error));
-  EXPECT_FALSE(
-      ParseConfig("policy: {actions: {bot: captcha}}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("policy: {actions: {bot: nope}}\n", &bad, &error));
   EXPECT_FALSE(ParseConfig("policy: {block_status: 200}\n", &bad, &error));
   EXPECT_FALSE(
       ParseConfig("policy: {hosts: {\"bad host\": shadow}}\n", &bad, &error));
@@ -339,6 +338,85 @@ TEST(ConfigTest, ParsesDocker) {
   EXPECT_FALSE(ParseConfig("docker: {sock: x}\n", &config, &error));
   ASSERT_TRUE(ParseConfig("policy: {hosts: {a.test: off}}\n", &config, &error));
   EXPECT_EQ(config.policy.host_modes[0].second, HostMode::kOff);
+}
+
+TEST(ConfigTest, ParsesRoadmapSections) {
+  Config config;
+  EXPECT_EQ(config.asn_url, "https://iptoasn.com/data/ip2asn-combined.tsv.gz");
+  EXPECT_TRUE(config.crawlers_ip_ranges);
+  EXPECT_TRUE(config.web_bot_auth_enabled);
+  EXPECT_EQ(config.web_bot_auth_trusted,
+            std::vector<std::string>{"chatgpt.com"});
+  EXPECT_TRUE(config.captcha_provider.empty());
+  EXPECT_FALSE(config.xdp_enabled);
+  std::string error;
+  ASSERT_TRUE(ParseConfig(R"(
+data_dir: /var/lib/bot-shield/data
+ca_file: /etc/ssl/ca.pem
+asn: {url: "", refresh: 12h}
+crawlers: {ip_ranges: false, ranges_refresh: 6h}
+web_bot_auth: {enabled: true, trusted: ["*.example.com"], max_validity: 1h}
+captcha:
+  provider: turnstile
+  site_key: 0x4AAA
+  secret_file: /run/secrets/turnstile
+  check_hostname: false
+  escalate: false
+  rounds: 3
+  round_timeout: 20s
+  difficulty: 10
+xdp:
+  enabled: true
+  interface: eth0
+  mode: generic
+  syn_rate: 200/s
+  syn_burst: 400
+  drop_invalid: false
+  drop_fragments: true
+  heartbeat_timeout: 3s
+  block_honeypot: true
+policy: {actions: {bot: captcha}}
+)",
+                          &config, &error))
+      << error;
+  EXPECT_EQ(config.data_dir, "/var/lib/bot-shield/data");
+  EXPECT_EQ(config.ca_file, "/etc/ssl/ca.pem");
+  EXPECT_TRUE(config.asn_url.empty());
+  EXPECT_EQ(config.asn_refresh, std::chrono::hours(12));
+  EXPECT_FALSE(config.crawlers_ip_ranges);
+  EXPECT_EQ(config.crawlers_ranges_refresh, std::chrono::hours(6));
+  EXPECT_EQ(config.web_bot_auth_trusted,
+            std::vector<std::string>{"*.example.com"});
+  EXPECT_EQ(config.web_bot_auth_max_validity, std::chrono::hours(1));
+  EXPECT_EQ(config.captcha_provider, "turnstile");
+  EXPECT_EQ(config.captcha_site_key, "0x4AAA");
+  EXPECT_FALSE(config.captcha_check_hostname);
+  EXPECT_FALSE(config.captcha_escalate);
+  EXPECT_EQ(config.captcha_rounds, 3);
+  EXPECT_EQ(config.captcha_round_timeout, std::chrono::seconds(20));
+  EXPECT_EQ(config.captcha_difficulty, 10);
+  EXPECT_TRUE(config.xdp_enabled);
+  EXPECT_EQ(config.xdp_interface, "eth0");
+  EXPECT_EQ(config.xdp_mode, "generic");
+  EXPECT_EQ(config.xdp_syn_rate, 200);
+  EXPECT_EQ(config.xdp_syn_burst, 400);
+  EXPECT_FALSE(config.xdp_drop_invalid);
+  EXPECT_TRUE(config.xdp_drop_fragments);
+  EXPECT_EQ(config.xdp_heartbeat_timeout, std::chrono::seconds(3));
+  EXPECT_TRUE(config.xdp_block_honeypot);
+  EXPECT_EQ(config.policy.bot_action, Action::kCaptcha);
+
+  Config bad;
+  EXPECT_FALSE(ParseConfig("captcha: {provider: nope}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("captcha: {provider: hcaptcha}\n", &bad, &error));
+  EXPECT_NE(error.find("site_key and secret_file"), std::string::npos);
+  EXPECT_TRUE(ParseConfig("captcha: {provider: builtin}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("captcha: {rounds: 9}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("xdp: {enabled: true}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("xdp: {mode: turbo}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("xdp: {syn_rate: 5/m}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("asn: {url: ftp://x}\n", &bad, &error));
+  EXPECT_FALSE(ParseConfig("web_bot_auth: {trusted: x}\n", &bad, &error));
 }
 
 TEST(ConfigTest, RejectsUnknownKeys) {

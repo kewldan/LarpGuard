@@ -22,6 +22,8 @@ std::string_view ActionName(Action action) {
       return "decoy";
     case Action::kThrottle:
       return "throttle";
+    case Action::kCaptcha:
+      return "captcha";
   }
   return "?";
 }
@@ -39,6 +41,8 @@ bool ParseAction(std::string_view text, Action* action) {
     *action = Action::kDecoy;
   } else if (text == "throttle") {
     *action = Action::kThrottle;
+  } else if (text == "captcha") {
+    *action = Action::kCaptcha;
   } else {
     return false;
   }

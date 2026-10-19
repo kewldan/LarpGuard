@@ -5,15 +5,20 @@
 #include <signal.h>      // IWYU pragma: keep
 #include <sys/signal.h>  // IWYU pragma: keep
 
+#include <algorithm>
 #include <asio/io_context.hpp>
+#include <asio/ip/address_v6.hpp>
 #include <asio/signal_set.hpp>
 #include <asio/steady_timer.hpp>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -22,27 +27,38 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "behavior/behavior.h"
+#include "challenge/captcha.h"
 #include "challenge/challenger.h"
 #include "challenge/token.h"
+#include "common/compress.h"
 #include "common/hash.h"
 #include "common/log.h"
 #include "common/metrics.h"
+#include "common/network.h"
+#include "common/refresher.h"
 #include "common/systemd.h"
 #include "common/version.h"
 #include "config/config.h"
+#include "crawler/ranges.h"
 #include "crawler/verifier.h"
+#include "crawler/web_bot_auth.h"
 #include "docker/labels.h"
 #include "docker/watcher.h"
 #include "events/events.h"
 #include "events/nats_publisher.h"
+#include "net/asn.h"
+#include "net/http_client.h"
+#include "score/policy.h"
 #include "server/gateway.h"
 #include "server/verdicts.h"
 #include "tls/acme_watcher.h"
 #include "tls/cert_store.h"
+#include "xdp/xdp_filter.h"
 
 namespace {
 
@@ -110,6 +126,39 @@ std::string VerdictSummary(const bot_shield::VerdictSet& set,
       set.library->automation().size(),
       config.policy.enforce ? "enforce" : "shadow",
       set.model ? std::format("{} trees", set.model->tree_count()) : "off");
+}
+
+// What XDP drops: global IP/CIDR block entries of the admin lists (unless
+// an allow entry covers them: allow wins) and the gateway's own blocks.
+bot_shield::XdpBlocklist XdpBlocklistFrom(
+    const std::vector<bot_shield::ListEntry>& entries,
+    bot_shield::XdpBlocklist automatic) {
+  std::vector<bot_shield::Network> allowed;
+  for (const bot_shield::ListEntry& entry : entries) {
+    if (entry.kind == bot_shield::ListKind::kIp && entry.host.empty() &&
+        entry.action == bot_shield::Action::kAllow) {
+      allowed.push_back(entry.network);
+    }
+  }
+  const auto is_allowed = [&allowed](const bot_shield::Network& network) {
+    return std::ranges::any_of(
+        allowed, [&network](const bot_shield::Network& allow) {
+          return allow.prefix <= network.prefix &&
+                 allow.Contains(asio::ip::address_v6(network.bytes));
+        });
+  };
+  bot_shield::XdpBlocklist out;
+  for (const bot_shield::ListEntry& entry : entries) {
+    if (entry.kind == bot_shield::ListKind::kIp && entry.host.empty() &&
+        entry.action == bot_shield::Action::kBlock &&
+        !is_allowed(entry.network)) {
+      out.emplace_back(entry.network, entry.expires_at);
+    }
+  }
+  for (auto& item : automatic) {
+    if (!is_allowed(item.first)) out.push_back(std::move(item));
+  }
+  return out;
 }
 
 int Run(int argc, char** argv) {
@@ -241,8 +290,118 @@ int Run(int argc, char** argv) {
                              bot_shield::CrawlerVerifier::Settings());
   }
 
+  // Outbound downloads: published crawler ranges and the ASN database,
+  // refreshed in the background and cached in data_dir.
+  if (!config.ca_file.empty()) bot_shield::SetHttpClientCaFile(config.ca_file);
+  if (!config.data_dir.empty()) {
+    std::error_code dir_error;
+    std::filesystem::create_directories(config.data_dir, dir_error);
+    if (dir_error) {
+      bot_shield::log::Warn("data_dir {}: {}", config.data_dir,
+                            dir_error.message());
+    }
+  }
+  bot_shield::CrawlerRangeStore crawler_ranges;
+  bot_shield::AsnStore asn;
+  std::vector<bot_shield::RefreshSource> sources;
+  if (config.crawlers_ip_ranges) {
+    for (bot_shield::RefreshSource& source : bot_shield::CrawlerRangeSources(
+             &crawler_ranges, config.data_dir,
+             std::chrono::duration_cast<std::chrono::seconds>(
+                 config.crawlers_ranges_refresh))) {
+      source.apply = [apply = std::move(source.apply), &crawler_ranges](
+                         std::string_view data, std::string* apply_error) {
+        if (!apply(data, apply_error)) return false;
+        bot_shield::GlobalMetrics().crawler_range_sets.Set(
+            static_cast<int64_t>(crawler_ranges.snapshot()->size()));
+        return true;
+      };
+      sources.push_back(std::move(source));
+    }
+  }
+  if (!config.asn_url.empty()) {
+    bot_shield::RefreshSource source;
+    source.name = "asn";
+    source.url = config.asn_url;
+    if (!config.data_dir.empty()) {
+      source.cache_file = config.data_dir + "/ip2asn-combined.tsv.gz";
+    }
+    source.refresh =
+        std::chrono::duration_cast<std::chrono::seconds>(config.asn_refresh);
+    source.apply = [&asn](std::string_view data, std::string* apply_error) {
+      std::string text;
+      // gzip (iptoasn.com) or plain TSV.
+      if (data.starts_with("\x1f\x8b")) {
+        if (!bot_shield::Gunzip(data, std::size_t{512} << 20, &text,
+                                apply_error)) {
+          return false;
+        }
+        data = text;
+      }
+      auto database = std::make_shared<bot_shield::AsnDatabase>();
+      if (!bot_shield::AsnDatabase::Parse(data, database.get(), apply_error)) {
+        return false;
+      }
+      bot_shield::GlobalMetrics().asn_ranges.Set(
+          static_cast<int64_t>(database->size()));
+      asn.set(std::move(database));
+      return true;
+    };
+    sources.push_back(std::move(source));
+  }
+  bot_shield::DataRefresher refresher(std::move(sources));
+  refresher.Start();
+
+  std::optional<bot_shield::WebBotAuthVerifier> web_bot_auth;
+  if (config.web_bot_auth_enabled) {
+    bot_shield::WebBotAuthVerifier::Settings settings;
+    settings.limits.max_validity_seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            config.web_bot_auth_max_validity)
+            .count();
+    web_bot_auth.emplace(settings);
+  }
+
+  std::unique_ptr<bot_shield::Captcha> captcha;
+  bot_shield::CaptchaProvider provider = bot_shield::CaptchaProvider::kNone;
+  bot_shield::ParseCaptchaProvider(config.captcha_provider, &provider);
+  if (provider != bot_shield::CaptchaProvider::kNone) {
+    bot_shield::CaptchaSettings settings;
+    settings.provider = provider;
+    settings.site_key = config.captcha_site_key;
+    settings.verify_url = config.captcha_verify_url;
+    settings.check_hostname = config.captcha_check_hostname;
+    settings.rounds = config.captcha_rounds;
+    settings.round_timeout = std::chrono::duration_cast<std::chrono::seconds>(
+        config.captcha_round_timeout);
+    settings.difficulty = config.captcha_difficulty;
+    if (!config.captcha_secret_file.empty()) {
+      std::ifstream secret_file(config.captcha_secret_file);
+      if (!secret_file || !std::getline(secret_file, settings.secret) ||
+          settings.secret.empty()) {
+        Error("captcha: cannot read secret_file {}",
+              config.captcha_secret_file);
+        return 1;
+      }
+      while (!settings.secret.empty() && (settings.secret.back() == '\r' ||
+                                          settings.secret.back() == ' ')) {
+        settings.secret.pop_back();
+      }
+    }
+    captcha =
+        std::make_unique<bot_shield::Captcha>(std::move(settings), &challenger);
+  }
+  bot_shield::XdpAutoBlocks xdp_blocks;
+
   bot_shield::GatewayServices services;
   services.challenger = &challenger;
+  services.captcha = captcha.get();
+  services.crawler_ranges =
+      config.crawlers_ip_ranges ? &crawler_ranges : nullptr;
+  if (web_bot_auth) services.web_bot_auth = &*web_bot_auth;
+  services.asn = config.asn_url.empty() ? nullptr : &asn;
+  services.xdp_blocks =
+      config.xdp_enabled && config.xdp_block_honeypot ? &xdp_blocks : nullptr;
   if (crawler_verifier) services.crawler_verifier = &*crawler_verifier;
   std::optional<bot_shield::BehaviorStore> behavior;
   if (config.behavior_enabled) {
@@ -264,6 +423,41 @@ int Run(int argc, char** argv) {
   if (!gateway.Start(&error)) {
     Error("startup: {}", error);
     return 1;
+  }
+
+  // XDP pre-filter: blocklists from the admin lists (IP/CIDR, all hosts)
+  // and honeypot hits. A failure leaves the gateway running without it.
+  std::unique_ptr<bot_shield::XdpFilter> xdp;
+  if (config.xdp_enabled) {
+    bot_shield::XdpSettings settings;
+    settings.interface = config.xdp_interface;
+    settings.mode = config.xdp_mode;
+    settings.ports = {config.listen_https.port};
+    if (config.listen_http) settings.ports.push_back(config.listen_http->port);
+    settings.allow_udp = config.http3_enabled;
+    settings.syn_rate = config.xdp_syn_rate;
+    settings.syn_burst = config.xdp_syn_burst;
+    settings.drop_invalid = config.xdp_drop_invalid;
+    settings.drop_fragments = config.xdp_drop_fragments;
+    settings.heartbeat_timeout =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            config.xdp_heartbeat_timeout);
+    xdp = bot_shield::XdpFilter::Start(
+        settings, [&gateway] { return gateway.Healthy(); },
+        [&lists, &xdp_blocks] {
+          const int64_t now =
+              std::chrono::duration_cast<std::chrono::seconds>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count();
+          return XdpBlocklistFrom(lists.Entries(now), xdp_blocks.Snapshot(now));
+        },
+        &error);
+    if (xdp) {
+      bot_shield::GlobalMetrics().xdp_attached.Set(1);
+      Info("xdp: attached to {} ({})", config.xdp_interface, xdp->mode());
+    } else {
+      Error("{} (continuing without XDP)", error);
+    }
   }
 
   // Graceful shutdown: the first signal stops accepting and waits for open
@@ -348,6 +542,7 @@ int Run(int argc, char** argv) {
   hangup.async_wait(on_hangup);
 
   control.run();
+  xdp.reset();  // Detaches before the workers go.
   gateway.Join();
   if (publisher) publisher->Stop();
   if (docker) docker->Stop();

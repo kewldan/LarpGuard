@@ -12,6 +12,7 @@ Usage: run_e2e.py path/to/bot-shield [path/to/bot_shield_fake_upstream]
 """
 
 import base64
+import hashlib
 import http.client
 import http.server
 import socketserver
@@ -27,6 +28,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 
@@ -87,6 +89,70 @@ def wait_port(port, timeout=10):
         except OSError:
             time.sleep(0.05)
     raise RuntimeError(f"port {port} did not open")
+
+
+class FakeHttp:
+    """HTTP(S) server for the gateway's own outbound requests: siteverify,
+    the ASN database, Web Bot Auth key directories."""
+
+    def __init__(self, routes, cert=None):
+        self.routes = routes
+        self.requests = []
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def serve(self, body=b""):
+                path, _, query = self.path.partition("?")
+                outer.requests.append((self.command, self.path, body))
+                route = outer.routes.get(path)
+                status, kind, data = (route(self.command, query, body)
+                                      if route else (404, "text/plain", b""))
+                self.send_response(status)
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                self.serve()
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                self.serve(self.rfile.read(length))
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                                      Handler)
+        if cert:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(*cert)
+            self.server.socket = context.wrap_socket(self.server.socket,
+                                                     server_side=True)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever,
+                         daemon=True).start()
+
+
+def node_ed25519_key():
+    """A fresh Ed25519 key as a private JWK (node's crypto)."""
+    return json.loads(subprocess.run(
+        ["node", "-e", "const k = require('crypto').generateKeyPairSync("
+         "'ed25519'); process.stdout.write(JSON.stringify("
+         "k.privateKey.export({format: 'jwk'})))"],
+        capture_output=True, text=True, check=True, timeout=30).stdout)
+
+
+def node_sign(jwk, message):
+    """Base64 Ed25519 signature of `message` (node's crypto)."""
+    script = ("const c = require('crypto'); const k = c.createPrivateKey("
+              "{key: JSON.parse(process.argv[1]), format: 'jwk'}); "
+              "process.stdout.write(c.sign(null, require('fs').readFileSync(0),"
+              " k).toString('base64'))")
+    return subprocess.run(["node", "-e", script, json.dumps(jwk)],
+                          input=message.encode(), capture_output=True,
+                          check=True, timeout=30).stdout.decode()
 
 
 class FakeNats:
@@ -366,27 +432,97 @@ class Checks:
             print(f"FAIL {name}: {e!r}")
 
 
-def solve_challenge(page, webdriver=False):
-    """Runs the challenge page's script in node; returns the verify URL."""
+def solve_challenge(page, webdriver=False, renderer="Apple M2",
+                    user_agent=""):
+    """Runs the challenge page's script in node; returns the verify URL.
+
+    Node has no DOM: the sandbox stubs what the probes touch so they see a
+    normal desktop browser (or a software renderer, to test escalation).
+    Natives are real node functions so the tampering check stays quiet.
+    """
     script = page[page.index("<script>") + 8:page.index("</script>")]
     harness = """
 const vm = require("vm");
 let target = null;
+const proto = {webdriver: %s, languages: ["en-US", "en"],
+               hardwareConcurrency: 8, platform: "MacIntel",
+               userAgent: %s, plugins: {length: 5}, maxTouchPoints: 0,
+               userAgentData: {brands: [{brand: "Chromium"}]}};
+function Navigator() {}
+Navigator.prototype = proto;
+const context2d = {
+  font: "", fillStyle: "", globalCompositeOperation: "",
+  fillRect() {}, fillText() {}, beginPath() {}, arc() {}, fill() {},
+  measureText() { return {width: 100 + this.font.length}; },
+};
+const webgl = {
+  VENDOR: 1, RENDERER: 2, MAX_TEXTURE_SIZE: 3, MAX_RENDERBUFFER_SIZE: 4,
+  MAX_VERTEX_ATTRIBS: 5, MAX_VARYING_VECTORS: 6,
+  getExtension() {
+    return {UNMASKED_VENDOR_WEBGL: 1, UNMASKED_RENDERER_WEBGL: 2};
+  },
+  getParameter(p) { return p === 1 ? "Apple" : p === 2 ? %s : 16384; },
+  getSupportedExtensions() { return ["a", "b", "c"]; },
+};
+function HTMLCanvasElement() {}
+HTMLCanvasElement.prototype.toDataURL = Math.max;
+const document = {
+  createElement() {
+    return {getContext(type) { return type === "2d" ? context2d : webgl; },
+            toDataURL() { return "data:image/png;base64," + "Q".repeat(300); }};
+  },
+};
 const sandbox = {
-  navigator: {webdriver: %s, languages: ["en-US", "en"],
-              hardwareConcurrency: 8, platform: "MacIntel",
-              userAgentData: {brands: [{brand: "Chromium"}]}},
-  screen: {width: 1512}, location: {replace: (u) => { target = u; }},
-  TextEncoder, btoa, Date, Intl,
+  navigator: Object.create(proto), Navigator, HTMLCanvasElement, document,
+  screen: {width: 1512, height: 982, availWidth: 1512, availHeight: 950,
+           colorDepth: 30},
+  devicePixelRatio: 2, outerWidth: 1512, outerHeight: 950, innerWidth: 1512,
+  innerHeight: 860,
+  location: {replace: (u) => { target = u; }},
+  TextEncoder, btoa, unescape, encodeURIComponent, Date, Intl, setTimeout,
+  clearTimeout,
 };
 sandbox.window = sandbox;
 vm.runInNewContext(require("fs").readFileSync(0, "utf8"), sandbox);
-process.stdout.write(target);
-""" % ("true" if webdriver else "false")
+setTimeout(() => process.stdout.write(target || ""), 50);
+""" % ("true" if webdriver else "false", json.dumps(user_agent),
+       json.dumps(renderer))
     result = subprocess.run(["node", "-e", harness], input=script,
                             capture_output=True, text=True, timeout=60,
                             check=True)
+    if not result.stdout:
+        raise AssertionError("challenge script did not finish: " +
+                             result.stderr)
     return result.stdout
+
+
+def solve_pow(nonce, bits):
+    counter = 0
+    while True:
+        digest = hashlib.sha256(f"{nonce}:{counter}".encode()).digest()
+        value = int.from_bytes(digest, "big")
+        if value >> (256 - bits) == 0:
+            return counter
+        counter += 1
+
+
+def b64url(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def browser_signals(user_agent=""):
+    """Signals of an ordinary desktop browser, as the probes report them."""
+    return b64url(json.dumps({
+        "wd": False, "lang": 2, "ph": False, "brands": ["Chromium"],
+        "ua": hashlib.sha256(user_agent.encode()).hexdigest()[:16],
+        "cv": "0123456789abcdef", "cvn": 0, "glr": "Apple M2",
+        "fn": 12, "pl": 5, "nt": 0, "cdp": 0, "wm": -1,
+        "sc": [1512, 982, 1512, 950, 30, 200, 1512, 950, 1512, 860]}).encode())
+
+
+def page_nonce(page):
+    start = page.index('N="') + 3
+    return page[start:page.index('"', start)]
 
 
 def expect(condition, message):
@@ -451,6 +587,40 @@ def main():
     with open(keys_path, "w") as f:
         json.dump({"active": "k1", "keys": {
             "k1": base64.b64encode(os.urandom(32)).decode()}}, f)
+    # CAPTCHA provider: tokens "ok:<cdata>:<n>" pass, anything else fails.
+    captcha_secret = os.path.join(workdir, "turnstile.secret")
+    with open(captcha_secret, "w") as f:
+        f.write("e2e-secret\n")
+
+    def siteverify(method, query, body):
+        form = urllib.parse.parse_qs(body.decode())
+        token = form.get("response", [""])[0]
+        if (method == "POST" and form.get("secret") == ["e2e-secret"] and
+                token.startswith("ok:")):
+            reply = {"success": True, "hostname": "www.a.test",
+                     "cdata": token.split(":")[1]}
+        else:
+            reply = {"success": False,
+                     "error-codes": ["invalid-input-response"]}
+        return 200, "application/json", json.dumps(reply).encode()
+
+    def ip2asn(method, query, body):
+        return 200, "text/tab-separated-values", (
+            b"1.0.0.0\t1.0.0.255\t13335\tUS\tCLOUDFLARENET\n"
+            b"127.0.0.0\t127.255.255.255\t64500\tZZ\tE2E-ISP Example\n")
+
+    outbound = FakeHttp({"/siteverify": siteverify, "/ip2asn.tsv": ip2asn})
+    # Web Bot Auth agent: key directory over HTTPS on "localhost".
+    agent_cert = make_cert(workdir, "agent", ["localhost"])
+    agent_key = node_ed25519_key()
+    agent_directory = json.dumps({"keys": [{
+        "kty": "OKP", "crv": "Ed25519", "x": agent_key["x"]}]}).encode()
+    agent = FakeHttp({
+        "/.well-known/http-message-signatures-directory":
+            lambda method, query, body: (
+                200, "application/http-message-signatures-directory+json",
+                agent_directory)}, cert=agent_cert)
+
     with open(config_path, "w") as f:
         f.write(f"""
 listen:
@@ -487,6 +657,12 @@ rules:
   - name: slowdown
     when: 'path ~ "/throttled*"'
     action: throttle
+  - name: human-check
+    when: 'path ~ "/captcha*"'
+    action: captcha
+  - name: asn-rule
+    when: 'asn == 64500 and path ~ "/asn-block*"'
+    action: block
 rate_limits:
   - name: limited-path
     paths: ["/limited*"]
@@ -507,6 +683,18 @@ docker:
   poll_interval: 200ms
 crawlers:
   ai: block
+  ip_ranges: false
+asn:
+  url: http://127.0.0.1:{outbound.port}/ip2asn.tsv
+web_bot_auth:
+  trusted: ["localhost"]
+ca_file: {agent_cert[0]}
+captcha:
+  provider: turnstile
+  site_key: e2e-site-key
+  secret_file: {captcha_secret}
+  verify_url: http://127.0.0.1:{outbound.port}/siteverify
+  difficulty: 4
 honeypot:
   paths: ["/.env", "/trap/*"]
   ttl: 1s
@@ -766,6 +954,143 @@ log_level: debug
         event = nats.find("e2e.events.req",
                           lambda e: e.get("path_group") == "/guarded/shadow")
         expect(event["would_action"] == "challenge", event)
+
+    def challenge_escalation():
+        # A software renderer is soft: the CAPTCHA decides, not a token.
+        html = b"Accept: text/html\r\n"
+        _, _, body = h1_get(https_port, "www.a.test", ca_a, "/guarded/soft",
+                            html)
+        verify = solve_challenge(body.decode(), renderer="Google SwiftShader")
+        status, headers, body = h1_get(https_port, "www.a.test", ca_a, verify)
+        expect(status == 403 and "set-cookie" not in headers, status)
+        expect(b"cf-turnstile" in body and b"e2e-site-key" in body, body[:300])
+        event = nats.find("e2e.events.req", lambda e: (
+            "challenge:escalated:software_renderer" in e.get("reasons", [])))
+        expect(len(event.get("client_fp", "")) == 16, event)
+
+    def captcha_turnstile():
+        html = b"Accept: text/html\r\n"
+        status, headers, body = h1_get(https_port, "www.a.test", ca_a,
+                                       "/captcha-gate?x=1", html)
+        expect(status == 403 and b"cf-turnstile" in body, (status, body[:200]))
+        status, _, api = h1_get(https_port, "www.a.test", ca_a,
+                                "/captcha-api", b"Accept: application/json\r\n")
+        expect(status == 403 and json.loads(api) == {
+            "error": "captcha_required",
+            "captcha": "/__bs/captcha?r=%2Fcaptcha-api"}, api)
+
+        def verify_url(page, token, user_agent=""):
+            nonce = page_nonce(page)
+            cdata = hashlib.sha256(nonce.encode()).hexdigest()[:32]
+            return ("/__bs/captcha/verify?n=" + urllib.parse.quote(nonce) +
+                    f"&c={solve_pow(nonce, 4)}&t=" +
+                    urllib.parse.quote(token.replace("CDATA", cdata)) +
+                    "&s=" + browser_signals(user_agent))
+
+        # HTTP/1.1: the provider is asked in the background, the answer
+        # follows on the same connection.
+        status, headers, _ = h1_get(https_port, "www.a.test", ca_a,
+                                    verify_url(body.decode(), "ok:CDATA:1"))
+        expect(status == 302, (status, headers))
+        expect(headers["location"] == "/captcha-gate?x=1", headers)
+        cookie = headers["set-cookie"].split(";")[0]
+        expect(cookie.startswith("__bs=v2."), cookie)
+        status, _, body = h1_get(https_port, "www.a.test", ca_a,
+                                 "/captcha-gate?x=1",
+                                 html + f"Cookie: {cookie}\r\n".encode())
+        expect(status == 200, status)
+        expect("token_valid" in json.loads(body)["headers"]["x-bot-reasons"],
+               body)
+        # The provider says no.
+        _, _, body = h1_get(https_port, "www.a.test", ca_a, "/captcha-gate",
+                            html)
+        status, headers, _ = h1_get(https_port, "www.a.test", ca_a,
+                                    verify_url(body.decode(), "forged"))
+        expect(status == 403 and "set-cookie" not in headers, status)
+        nats.find("e2e.events.req", lambda e: (
+            "captcha:failed:provider:invalid-input-response" in
+            e.get("reasons", [])))
+        posts = [r for r in outbound.requests if r[1] == "/siteverify"]
+        expect(b"remoteip=127.0.0.1" in posts[0][2], posts[0])
+
+        # HTTP/2 (curl): the same deferred answer on a stream.
+        page_path = os.path.join(workdir, "captcha-page.html")
+        status, _ = curl(https_port, "www.a.test", ca_a, "/captcha-gate",
+                         page_path, ("-A", "e2e-curl", "-H",
+                                     "Accept: text/html"))
+        expect(status == 403, status)
+        with open(page_path) as f:
+            page = f.read()
+        header_path = os.path.join(workdir, "captcha-headers.txt")
+        status, version = curl(https_port, "www.a.test", ca_a,
+                               verify_url(page, "ok:CDATA:2", "e2e-curl"),
+                               os.devnull, ("-A", "e2e-curl", "-D",
+                                            header_path))
+        expect(status == 302 and version == "2", (status, version))
+        with open(header_path) as f:
+            expect("__bs=v2." in f.read(), "h2 cookie")
+
+    def asn_database():
+        for _ in range(100):
+            values = read_metrics(metrics_url)
+            if values.get("bot_shield_asn_ranges", 0) >= 2:
+                break
+            time.sleep(0.05)
+        expect(values.get("bot_shield_asn_ranges") == 2, values.get(
+            "bot_shield_asn_ranges"))
+        # New connections get their AS: rules, limits and events see it.
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/asn-block/1",
+                              b"User-Agent: e2e-asn\r\n")
+        expect(status == 200, status)  # a.test is a shadow host.
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("path_group") == "/asn-block/:n")
+        expect(event.get("asn") == 64500, event)
+        expect("rule:asn-rule" in event["reasons"], event)
+        expect(event["would_action"] == "block", event)
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/asn-block/2")
+        expect(status == 403, status)
+
+    def web_bot_auth():
+        thumbprint = b64url(hashlib.sha256(json.dumps(
+            {"crv": "Ed25519", "kty": "OKP", "x": agent_key["x"]},
+            separators=(",", ":")).encode()).digest())
+        agent_url = f"https://localhost:{agent.port}"
+
+        def signed(path, tamper=False):
+            created = int(time.time())
+            params = (f'("@authority" "signature-agent";key="agent1")'
+                      f';created={created};keyid="{thumbprint}"'
+                      f';alg="ed25519";expires={created + 300}'
+                      f';tag="web-bot-auth"')
+            base = (f'"@authority": www.a.test\n'
+                    f'"signature-agent";key="agent1": "{agent_url}"\n'
+                    f'"@signature-params": {params}')
+            signature = node_sign(agent_key, base + ("x" if tamper else ""))
+            return h1_get(https_port, "www.a.test", ca_a, path, (
+                f'Signature-Agent: agent1="{agent_url}"\r\n'
+                f"Signature-Input: sig1={params}\r\n"
+                f"Signature: sig1=:{signature}:\r\n").encode())
+
+        # The first request fetches the key directory in the background.
+        seen = {}
+        for _ in range(100):
+            status, _, body = signed("/items/7")
+            seen = json.loads(body)["headers"] if status == 200 else {}
+            if seen.get("x-bot-class") == "verified_bot":
+                break
+            time.sleep(0.05)
+        expect(seen["x-bot-class"] == "verified_bot", seen)
+        expect(seen["x-bot-reasons"] == "verified_agent:localhost", seen)
+        event = nats.find("e2e.events.req", lambda e: e.get(
+            "signed_agent") == "localhost")
+        expect(event["class"] == "verified_bot", event)
+        # A signature over other bytes is worse than none.
+        signed("/items/8", tamper=True)
+        nats.find("e2e.events.req", lambda e: (
+            "web_bot_auth_invalid" in e.get("reasons", []) and
+            e.get("path_group") == "/items/:n"))
+        fetched = [r for r in agent.requests if r[1].startswith("/.well-known")]
+        expect(len(fetched) == 1, fetched)
 
     def crawlers():
         gptbot = ("Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; "
@@ -1422,6 +1747,13 @@ log_level: debug
          enforce_blocks_spoofed_browser),
         ("rules: allow and block override verdicts", rules_override_verdicts),
         ("challenge: page, PoW in node, token, cookie stripped", js_challenge),
+        ("challenge: soft signals escalate to the CAPTCHA",
+         challenge_escalation),
+        ("captcha: Turnstile, deferred siteverify over h1 and h2",
+         captcha_turnstile),
+        ("asn: database download, rule field, event", asn_database),
+        ("web bot auth: Ed25519 signature, key directory over HTTPS",
+         web_bot_auth),
         ("crawlers: AI policy, fake Googlebot by reverse DNS", crawlers),
         ("honeypot marks, sequential IDs", honeypot_and_behavior),
         ("tarpit (h1, h2, client leaves) and decoy with watermark",

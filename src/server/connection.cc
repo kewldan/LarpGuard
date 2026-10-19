@@ -7,6 +7,7 @@
 #include <asio/as_tuple.hpp>
 #include <asio/connect.hpp>
 #include <asio/experimental/awaitable_operators.hpp>
+#include <asio/post.hpp>
 #include <asio/ssl/host_name_verification.hpp>
 #include <asio/ssl/stream.hpp>
 #include <asio/this_coro.hpp>
@@ -30,6 +31,7 @@
 #include "action/actions.h"
 #include "admin/lists.h"
 #include "behavior/behavior.h"
+#include "challenge/captcha.h"
 #include "challenge/challenger.h"
 #include "challenge/token.h"
 #include "common/host.h"
@@ -39,7 +41,9 @@
 #include "common/url.h"
 #include "config/config.h"
 #include "crawler/crawlers.h"
+#include "crawler/ranges.h"
 #include "crawler/verifier.h"
+#include "crawler/web_bot_auth.h"
 #include "docker/labels.h"
 #include "events/event_sink.h"
 #include "events/events.h"
@@ -51,6 +55,7 @@
 #include "fp/tcp_syn.h"
 #include "fp/user_agent.h"
 #include "model/features.h"
+#include "net/asn.h"
 #include "net/classifier.h"
 #include "net/prefixed_stream.h"
 #include "net/proxy_protocol.h"
@@ -71,6 +76,7 @@
 #include "server/verdicts.h"
 #include "tls/cert_store.h"
 #include "tls/client_hello.h"
+#include "xdp/xdp_filter.h"
 
 #if BOT_SHIELD_FOXIO
 #include "fp/foxio/ja4plus.h"
@@ -176,6 +182,7 @@ class ConnectionObserver {
     record_.started_ms = UnixMillis();
     record_.listener = std::move(listener);
     record_.peer = info.peer.address();
+    LookupAsn();
   }
 
   ~ConnectionObserver() {
@@ -200,6 +207,20 @@ class ConnectionObserver {
   ConnectionRecord& record() { return record_; }
   // Released once the first request's headers are in.
   void set_pending_slot(PendingSlot* slot) { pending_slot_ = slot; }
+
+  // The peer's autonomous system, once per connection (the address does
+  // not change; QUIC migration is off).
+  void LookupAsn() {
+    if (context_.asn == nullptr) return;
+    const std::shared_ptr<const AsnDatabase> db = context_.asn->snapshot();
+    if (db == nullptr) return;
+    const std::optional<AsnInfo> info = db->Lookup(record_.peer);
+    if (!info) return;
+    record_.asn = info->asn;
+    asn_org_ = std::string(info->org);
+    asn_country_ = std::string(info->country);
+    asn_hosting_ = info->hosting;
+  }
 
   void OnSyn(std::span<const uint8_t> packet) {
     TcpSyn syn;
@@ -296,10 +317,12 @@ class ConnectionObserver {
     if (context_.verdicts == nullptr) return;
     // One snapshot for the whole request, even if a reload lands meanwhile.
     verdicts_ = context_.verdicts->snapshot();
-    session_ =
-        context_.challenger != nullptr
-            ? context_.challenger->SessionId(exchange.observed, binding, now)
-            : std::nullopt;
+    clearance_ = context_.challenger != nullptr
+                     ? context_.challenger->FindClearance(exchange.observed,
+                                                          binding, now)
+                     : std::nullopt;
+    session_ = clearance_ ? std::optional<std::string>(clearance_->session)
+                          : std::nullopt;
     const std::string host = HostOnly(exchange.request.authority);
     const std::shared_ptr<const LabelPolicies> labels =
         context_.labels != nullptr ? context_.labels->snapshot() : nullptr;
@@ -341,25 +364,40 @@ class ConnectionObserver {
     bool verified_crawler = false;
     std::optional<Action> crawler_action;
     if (crawler != nullptr) {
-      if (context_.crawler_verifier != nullptr && !crawler->domains.empty()) {
-        switch (context_.crawler_verifier->Check(*crawler, record_.peer, now)) {
-          case CrawlerStatus::kVerified:
-            verified_crawler = true;
-            verdict.score = 0;
-            verdict.bot_class = BotClass::kVerifiedBot;
-            verdict.reasons = {std::format("verified_crawler:{}", crawler->id)};
-            break;
-          case CrawlerStatus::kFailed:
-            verdict.score = std::min(
-                100, verdict.score +
-                         verdicts_->scorer->SignalWeight("fake_crawler"));
-            verdict.bot_class = verdicts_->scorer->Classify(verdict.score);
-            verdict.reasons.push_back(
-                std::format("fake_crawler:{}", crawler->id));
-            break;
-          case CrawlerStatus::kPending:
-            break;
+      // Published IP ranges decide at once; reverse DNS otherwise.
+      CrawlerStatus status = CrawlerStatus::kPending;
+      bool decided_by_ranges = false;
+      if (context_.crawler_ranges != nullptr) {
+        status = CheckCrawlerRanges(
+            *crawler, *context_.crawler_ranges->snapshot(), record_.peer);
+        decided_by_ranges = status != CrawlerStatus::kPending;
+        if (status == CrawlerStatus::kVerified) {
+          GlobalMetrics().crawler_ranges_verified.Inc();
+        } else if (status == CrawlerStatus::kFailed) {
+          GlobalMetrics().crawler_ranges_failed.Inc();
         }
+      }
+      if (!decided_by_ranges && context_.crawler_verifier != nullptr &&
+          !crawler->domains.empty()) {
+        status = context_.crawler_verifier->Check(*crawler, record_.peer, now);
+      }
+      switch (status) {
+        case CrawlerStatus::kVerified:
+          verified_crawler = true;
+          verdict.score = 0;
+          verdict.bot_class = BotClass::kVerifiedBot;
+          verdict.reasons = {std::format("verified_crawler:{}", crawler->id)};
+          break;
+        case CrawlerStatus::kFailed:
+          verdict.score = std::min(
+              100,
+              verdict.score + verdicts_->scorer->SignalWeight("fake_crawler"));
+          verdict.bot_class = verdicts_->scorer->Classify(verdict.score);
+          verdict.reasons.push_back(
+              std::format("fake_crawler:{}", crawler->id));
+          break;
+        case CrawlerStatus::kPending:
+          break;
       }
       if (crawler->ai) {
         verdict.reasons.push_back(std::format("ai_crawler:{}", crawler->id));
@@ -369,6 +407,37 @@ class ConnectionObserver {
                 ? label_policy->ai_crawlers
                 : verdicts_->ai_crawler_action;
       }
+    }
+    // Web Bot Auth: a signature that verified with the agent's published
+    // key. Trusted agents are verified bots; others are only recorded.
+    if (context_.web_bot_auth != nullptr && !verified_crawler &&
+        request.HasHeader("signature-input")) {
+      const WebBotAuthResult signed_result =
+          context_.web_bot_auth->Check(request, now);
+      if (signed_result.status == WebBotAuthStatus::kVerified) {
+        GlobalMetrics().signed_verified.Inc();
+        exchange.signed_agent = signed_result.agent;
+        if (std::ranges::any_of(
+                verdicts_->trusted_agents, [&](const std::string& pattern) {
+                  return HostMatches(pattern, signed_result.agent);
+                })) {
+          verified_crawler = true;
+          verdict.score = 0;
+          verdict.bot_class = BotClass::kVerifiedBot;
+          verdict.reasons = {
+              std::format("verified_agent:{}", signed_result.agent)};
+        } else {
+          verdict.reasons.push_back(
+              std::format("signed_agent:{}", signed_result.agent));
+        }
+      } else if (signed_result.status == WebBotAuthStatus::kInvalid) {
+        GlobalMetrics().signed_invalid.Inc();
+        AddSignal("web_bot_auth_invalid", &verdict);
+      }
+    }
+    // Clouds and hosters (ASN database).
+    if (asn_hosting_ && !verified_crawler) {
+      AddSignal("hosting_network", &verdict);
     }
     // Behaviour (5.4) and honeypot marks (6.3); verified crawlers crawl
     // regularly by nature and skip both.
@@ -384,6 +453,8 @@ class ConnectionObserver {
     const bool token_valid = !verified_crawler &&
                              context_.challenger != nullptr &&
                              session_.has_value();
+    const bool captcha_solved =
+        token_valid && clearance_->level >= kTokenLevelCaptcha;
     if (token_valid) {
       GlobalMetrics().tokens_valid.Inc();
       verdict.score =
@@ -426,10 +497,22 @@ class ConnectionObserver {
     }
     PolicyDecision decision =
         verdicts_->policy->Decide(verdict, mode, override_action);
-    // Never challenge a client that already holds a valid token.
-    if (token_valid && decision.would_action == Action::kChallenge) {
+    // Never challenge a client that already holds a valid token, nor show
+    // a CAPTCHA to one who solved it.
+    if ((token_valid && decision.would_action == Action::kChallenge) ||
+        (captcha_solved && decision.would_action == Action::kCaptcha)) {
       decision.would_action = Action::kAllow;
       decision.action = Action::kAllow;
+    }
+    // Without a CAPTCHA configured, "captcha" falls back to the challenge.
+    if (context_.captcha == nullptr) {
+      if (decision.action == Action::kCaptcha) {
+        decision.action = token_valid ? Action::kAllow : Action::kChallenge;
+      }
+      if (decision.would_action == Action::kCaptcha) {
+        decision.would_action =
+            token_valid ? Action::kAllow : Action::kChallenge;
+      }
     }
     // Under attack every host challenges clients without a token, shadow
     // mode or not; explicit allows (rules, lists) and verified crawlers pass.
@@ -509,6 +592,24 @@ class ConnectionObserver {
     if (decision.would_action == Action::kChallenge) {
       metrics.challenges_would.Inc();
     }
+    if (decision.action == Action::kCaptcha && context_.captcha != nullptr) {
+      metrics.captchas_issued.Inc();
+      if (IsNavigation(request)) {
+        exchange.RespondLocally(
+            403,
+            context_.captcha->Page(binding, exchange.request.path,
+                                   UnixMillis()),
+            {{"cache-control", "no-store"}}, "text/html; charset=utf-8");
+      } else {
+        const nlohmann::json body = {
+            {"error", "captcha_required"},
+            {"captcha", std::format("{}captcha?r={}", Challenger::kPathPrefix,
+                                    PercentEncode(exchange.request.path))}};
+        exchange.RespondLocally(403, body.dump() + "\n", {},
+                                "application/json");
+      }
+      return;
+    }
     if (decision.action == Action::kTarpit) {
       const Config& config = *context_.config;
       TarpitSettings tarpit;
@@ -549,6 +650,15 @@ class ConnectionObserver {
     if (override_action != Action::kAllow) {
       CheckRateLimits(exchange, verdict, host, decision, labels.get());
     }
+  }
+
+  // Adds a library signal (when its weight is positive) to the verdict.
+  void AddSignal(std::string_view signal, Verdict* verdict) const {
+    const int weight = verdicts_->scorer->SignalWeight(signal);
+    if (weight <= 0) return;
+    verdict->score = std::min(100, verdict->score + weight);
+    verdict->reasons.emplace_back(signal);
+    verdict->bot_class = verdicts_->scorer->Classify(verdict->score);
   }
 
   void ApplyModel(Exchange& exchange, Verdict* verdict) const {
@@ -601,6 +711,13 @@ class ConnectionObserver {
       signals.emplace_back("honeypot");
       context_.behavior->Trap(trap_keys, now_ms,
                               now_ms + config.honeypot_ttl.count());
+      if (context_.xdp_blocks != nullptr) {
+        context_.xdp_blocks->Add(
+            record_.peer, UnixMillis() / 1000 +
+                              std::chrono::duration_cast<std::chrono::seconds>(
+                                  config.honeypot_ttl)
+                                  .count());
+      }
     } else if (context_.behavior->Trapped(trap_keys, now_ms)) {
       signals.emplace_back("honeypot_client");
     }
@@ -623,6 +740,52 @@ class ConnectionObserver {
       GlobalMetrics().behavior_signals.Inc(added);
       verdict->bot_class = verdicts_->scorer->Classify(verdict->score);
     }
+  }
+
+  // A third-party CAPTCHA answer: the provider's siteverify runs on the
+  // CAPTCHA's threads; the response follows on this connection's loop.
+  void VerifyWidget(Exchange& exchange, const ClientBinding& binding,
+                    std::string_view query) const {
+    const auto finish = [](Exchange& target, const Captcha::Verdict& verdict) {
+      Metrics& metrics = GlobalMetrics();
+      target.client_fp = verdict.client_fp;
+      target.reasons = {"captcha:" + verdict.reason};
+      if (verdict.passed) {
+        metrics.captchas_passed.Inc();
+        target.action = "allow";
+        target.RespondLocally(302, "",
+                              {{"location", verdict.return_path},
+                               {"set-cookie", verdict.set_cookie},
+                               {"cache-control", "no-store"}});
+      } else {
+        metrics.captchas_failed.Inc();
+        target.action = "block";
+        target.RespondLocally(403, ChallengeFailedPage(),
+                              {{"cache-control", "no-store"}},
+                              "text/html; charset=utf-8");
+      }
+    };
+    Captcha::Verdict immediate;
+    const std::shared_ptr<Exchange> self = exchange.shared_from_this();
+    const asio::any_io_executor executor = executor_;
+    const bool queued =
+        executor &&
+        context_.captcha->VerifyWidget(
+            query, binding, exchange.observed.Header("user-agent"),
+            HostOnly(exchange.request.authority),
+            Unmapped(record_.peer).to_string(), UnixMillis(), &immediate,
+            [self, executor, finish](Captcha::Verdict verdict) {
+              asio::post(executor,
+                         [self, finish, verdict = std::move(verdict)] {
+                           if (!self->client_cancelled) finish(*self, verdict);
+                         });
+            });
+    if (queued) {
+      exchange.DeferLocalResponse();
+      return;
+    }
+    if (immediate.reason.empty()) immediate.reason = "failed:unavailable";
+    finish(exchange, immediate);
   }
 
   // /__bs/challenge?r=<path> (page) and /__bs/verify (solution).
@@ -659,11 +822,29 @@ class ConnectionObserver {
       return;
     }
     if (path == "/__bs/verify") {
-      const Challenger::Result result =
-          context_.challenger->Verify(query, binding, now);
-      if (result.passed) {
+      const Challenger::Result result = context_.challenger->Verify(
+          query, binding, exchange.observed.Header("user-agent"), now);
+      exchange.client_fp = result.client_fp;
+      const bool escalate = result.escalate && context_.captcha != nullptr &&
+                            config.captcha_escalate;
+      if (escalate) {
+        // Suspicious or unusual: the CAPTCHA decides instead of a token.
+        metrics.challenge_escalations.Inc();
+        metrics.captchas_issued.Inc();
+        exchange.reasons = {"challenge:escalated:" + (result.passed
+                                                          ? result.soft.front()
+                                                          : result.reason)};
+        exchange.action = "captcha";
+        exchange.RespondLocally(
+            403,
+            context_.captcha->Page(binding, result.return_path, UnixMillis()),
+            {{"cache-control", "no-store"}}, "text/html; charset=utf-8");
+      } else if (result.passed) {
         metrics.challenges_passed.Inc();
         exchange.reasons = {"challenge:passed"};
+        for (const std::string& soft : result.soft) {
+          exchange.reasons.push_back("challenge:soft:" + soft);
+        }
         exchange.action = "allow";
         exchange.RespondLocally(302, "",
                                 {{"location", result.return_path},
@@ -688,6 +869,39 @@ class ConnectionObserver {
               context_.challenger->DifficultyFor(BotClass::kSuspicious),
               return_path, now),
           {{"cache-control", "no-store"}}, "text/html; charset=utf-8");
+      return;
+    }
+    if (context_.captcha != nullptr && path == "/__bs/captcha") {
+      metrics.captchas_issued.Inc();
+      exchange.RespondLocally(
+          200,
+          context_.captcha->Page(binding, QueryParam(ParseQuery(query), "r"),
+                                 UnixMillis()),
+          {{"cache-control", "no-store"}}, "text/html; charset=utf-8");
+      return;
+    }
+    if (context_.captcha != nullptr && path == "/__bs/captcha/answer") {
+      Captcha::Answer answer = context_.captcha->AnswerPuzzle(
+          query, binding, exchange.observed.Header("user-agent"), UnixMillis());
+      exchange.client_fp = answer.client_fp;
+      exchange.reasons = {"captcha:" + answer.outcome};
+      HeaderList headers = {{"cache-control", "no-store"}};
+      if (!answer.set_cookie.empty()) {
+        metrics.captchas_passed.Inc();
+        exchange.action = "allow";
+        headers.emplace_back("set-cookie", answer.set_cookie);
+      } else if (answer.outcome.starts_with("failed")) {
+        metrics.captchas_failed.Inc();
+        exchange.action = "block";
+      } else {
+        exchange.action = "captcha";
+      }
+      exchange.RespondLocally(answer.outcome.starts_with("failed") ? 403 : 200,
+                              answer.body, headers, "application/json");
+      return;
+    }
+    if (context_.captcha != nullptr && path == "/__bs/captcha/verify") {
+      VerifyWidget(exchange, binding, query);
       return;
     }
     exchange.RespondLocally(404, "not found\n");
@@ -715,6 +929,7 @@ class ConnectionObserver {
     request.ja4 = record_.ja4;
     request.h2_fingerprint = exchange.h2_fingerprint;
     if (session_) request.session = *session_;
+    request.asn = record_.asn;
     const int64_t now = SteadyNanos();
     std::optional<RateLimitHit> hit;
     if (throttled) {
@@ -783,6 +998,11 @@ class ConnectionObserver {
     rules.score = verdict->score;
     rules.bot_class = BotClassName(verdict->bot_class);
     rules.reasons = &verdict->reasons;
+    rules.asn = record_.asn;
+    rules.asn_org = asn_org_;
+    rules.asn_country = asn_country_;
+    rules.asn_hosting = asn_hosting_;
+    rules.signed_agent = exchange.signed_agent;
 
     std::vector<std::string> matched;
     const int delta = verdicts_->rules.ScoreDelta(rules, &matched);
@@ -831,6 +1051,8 @@ class ConnectionObserver {
     outcome.watermark = exchange.watermark;
     outcome.features = exchange.features;
     outcome.model_score = exchange.model_score;
+    outcome.client_fp = exchange.client_fp;
+    outcome.signed_agent = exchange.signed_agent;
     try {
       context_.events->Publish(
           "req",
@@ -886,8 +1108,13 @@ class ConnectionObserver {
   PendingSlot* pending_slot_ = nullptr;
   // Verdict snapshot of the request being decided (OnProxyRequest).
   std::shared_ptr<const VerdictSet> verdicts_;
-  // Its clearance session (valid __bs token), if any.
+  // Its clearance token, if any (session id and level).
+  std::optional<Clearance> clearance_;
   std::optional<std::string> session_;
+  // From the ASN database (LookupAsn).
+  std::string asn_org_;
+  std::string asn_country_;
+  bool asn_hosting_ = false;
   asio::any_io_executor executor_;
   int request_sequence_ = 0;
 };

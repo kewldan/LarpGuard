@@ -24,8 +24,8 @@ struct RateLimitSpec {
   std::vector<std::string> methods;  // Uppercase.
   std::vector<std::string> classes;  // human, suspicious, bot.
   // Key components: ip, ip_prefix, ja4, fp, host, session (clearance
-  // token), header:<name>, cookie:<name>. A request missing a component is
-  // not limited by it.
+  // token), asn (needs the ASN database), header:<name>, cookie:<name>. A
+  // request missing a component is not limited by it.
   std::vector<std::string> key;
   int64_t count = 0;
   std::chrono::milliseconds period{0};
@@ -48,6 +48,8 @@ struct RateLimitRequest {
   std::string_view h2_fingerprint;
   // Clearance session (valid __bs token); empty without one.
   std::string_view session;
+  // Autonomous system of the client; 0 when unknown.
+  uint32_t asn = 0;
 };
 
 struct RateLimitHit {

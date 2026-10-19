@@ -10,7 +10,8 @@ Self-hosted шлюз фильтрации ботов перед Traefik. Осн�
 ClickHouse, HTTP-прокси с вердиктами и правилами, rate limiting, docker-лейблы
 и admin API, JS-челлендж и проверка краулеров, fail-open, поведение и
 honeypot, tarpit/decoy, модель-сигнал, gRPC, HTTP/3, горячая перезагрузка.
-UI отложен; оставшиеся хвосты — в Roadmap в `README.md`.
+Roadmap (раздел 14, «Статус: roadmap»): пробы челленджа, капча, IP-диапазоны
+краулеров, Web Bot Auth, база ASN, XDP. Не сделан только Web UI.
 
 ## Команды
 
@@ -30,7 +31,8 @@ cmake --build build --target tidy          # clang-tidy, должно быть 0
 
 Linux-проверка (`SO_REUSEPORT` с несколькими воркерами, `TCP_SAVED_SYN`
 работают только там) — в контейнере `debian:trixie` с `build-essential cmake
-ninja-build git python3 openssl curl nodejs`, исходники монтировать read-only.
+ninja-build git python3 openssl curl nodejs clang` (`--privileged`, чтобы
+шли XDP-тесты), исходники монтировать read-only.
 
 CI — `.github/workflows/ci.yml`: format (clang-format 23.1.3 из PyPI),
 clang-tidy (23.1.3, `debian:trixie`), тесты и e2e обычные и под ASan/UBSan;
@@ -66,7 +68,11 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 
 - `src/tls/` — разбор ClientHello, хранилище сертификатов, опрос `acme.json`.
 - `src/net/` — классификатор маршрута, PROXY v2, `PrefixedStream`,
-  `Watchdog`, сокетные опции.
+  `Watchdog`, сокетные опции, `http_client` (блокирующий HTTPS-клиент для
+  фоновых потоков — никогда на цикле воркера), `asn` (база iptoasn).
+- `src/common/refresher` — `DataRefresher`: фоновые загрузки (диапазоны
+  краулеров, ASN) с кешем в `data_dir`; новый скачиваемый набор — новый
+  `RefreshSource` в `main.cc`. `compress` — zlib (gunzip, PNG).
 - `src/server/` — обработчики соединений, воркеры, `/metrics` и `/health`
   (503, если `Heartbeats` воркера устарел).
   `ConnectionObserver` в `connection.cc` собирает отпечатки и шлёт события.
@@ -111,6 +117,20 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   `GbdtModel`. Новый или изменённый признак — новая версия набора, правка
   `FEATURE_NAMES` в `tools/train_model.py` и пересоздание
   `tests/data/gbdt_fixture.json` (`train_model.py --fixture`).
+- `src/challenge/` — JS-челлендж (`challenger`: `CheckSignals` с тремя
+  уровнями находок), JS страниц (`scripts.cc`; новый сигнал — сбор в
+  `ProbesJs`, проверка в `CheckSignals`, тест в `captcha_test.cc`, заглушка
+  в node-harness e2e), капча (`captcha`: свой пазл `puzzle` и провайдеры с
+  фоновым siteverify), токены (`token`: `v1` — JS, `v2` с уровнем — капча).
+  Ответ после фоновой проверки — `Exchange::DeferLocalResponse()` и
+  `RespondLocally()` через `asio::post` на executor соединения.
+- `src/crawler/` — каталог (`crawlers`, у краулера `domains` и `ranges`),
+  rDNS (`verifier`), IP-диапазоны (`ranges`), Web Bot Auth (`web_bot_auth`,
+  проверяется на тест-векторах драфта).
+- `src/xdp/` — XDP-фильтр: `filter.bpf.c` (без системных заголовков, раскладка
+  карт и `struct config` продублирована в `xdp_filter.cc`), вшивается
+  `tools/bpf_embed.py`, загрузчик без libbpf. Собирается только на Linux с
+  clang; тесты — через `BPF_PROG_TEST_RUN` (нужны права, иначе skip).
 - `src/server/verdicts` — `VerdictSet`: всё, что решает вердикт и
   перезагружается без рестарта (библиотека, политика, правила, лимиты,
   throttle, honeypot, crawlers.ai, модель). Новая перезагружаемая настройка —
@@ -144,7 +164,8 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   nghttp2, `max_requests_per_connection`) описана в разделе 11.1
   `docs/architecture.md`; новые лимиты — с e2e-проверкой.
 - Горячий путь без синхронного сетевого I/O и без глобальных блокировок
-  (кроме взятия снапшота сертификатов).
+  (кроме взятия снапшотов). Всё сетевое (siteverify, ключи Web Bot Auth,
+  загрузки) — в фоновых потоках; запрос только читает кеш.
 
 ## Git
 

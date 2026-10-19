@@ -224,6 +224,60 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_challenges_total", R"(result="failed")",
                challenges_failed.Get());
 
+  AppendHeader(&out, "bot_shield_challenge_escalations_total", "counter",
+               "JS challenges answered with a CAPTCHA instead of a token.");
+  AppendSample(&out, "bot_shield_challenge_escalations_total", "",
+               challenge_escalations.Get());
+
+  AppendHeader(&out, "bot_shield_captchas_total", "counter",
+               "CAPTCHAs by outcome.");
+  AppendSample(&out, "bot_shield_captchas_total", R"(result="issued")",
+               captchas_issued.Get());
+  AppendSample(&out, "bot_shield_captchas_total", R"(result="passed")",
+               captchas_passed.Get());
+  AppendSample(&out, "bot_shield_captchas_total", R"(result="failed")",
+               captchas_failed.Get());
+
+  AppendHeader(&out, "bot_shield_signed_agents_total", "counter",
+               "Web Bot Auth signatures by result.");
+  AppendSample(&out, "bot_shield_signed_agents_total", R"(result="verified")",
+               signed_verified.Get());
+  AppendSample(&out, "bot_shield_signed_agents_total", R"(result="invalid")",
+               signed_invalid.Get());
+
+  AppendHeader(&out, "bot_shield_crawler_ranges_total", "counter",
+               "Crawler claims decided by published IP ranges.");
+  AppendSample(&out, "bot_shield_crawler_ranges_total", R"(result="verified")",
+               crawler_ranges_verified.Get());
+  AppendSample(&out, "bot_shield_crawler_ranges_total", R"(result="failed")",
+               crawler_ranges_failed.Get());
+
+  AppendHeader(&out, "bot_shield_asn_ranges", "gauge",
+               "Address ranges in the ASN database.");
+  AppendSample(&out, "bot_shield_asn_ranges", "", asn_ranges.Get());
+  AppendHeader(&out, "bot_shield_crawler_range_sets", "gauge",
+               "Crawlers with published IP ranges loaded.");
+  AppendSample(&out, "bot_shield_crawler_range_sets", "",
+               crawler_range_sets.Get());
+
+  AppendHeader(&out, "bot_shield_xdp_attached", "gauge",
+               "1 while the XDP pre-filter is attached.");
+  AppendSample(&out, "bot_shield_xdp_attached", "", xdp_attached.Get());
+  AppendHeader(&out, "bot_shield_xdp_packets_total", "counter",
+               "Packets for the gateway's ports seen by the XDP pre-filter.");
+  AppendSample(&out, "bot_shield_xdp_packets_total", R"(result="passed")",
+               xdp_passed.Get());
+  AppendSample(&out, "bot_shield_xdp_packets_total", R"(result="blocked")",
+               xdp_blocked.Get());
+  AppendSample(&out, "bot_shield_xdp_packets_total", R"(result="syn_rate")",
+               xdp_syn_rate.Get());
+  AppendSample(&out, "bot_shield_xdp_packets_total", R"(result="invalid")",
+               xdp_invalid.Get());
+  AppendSample(&out, "bot_shield_xdp_packets_total", R"(result="fragment")",
+               xdp_fragment.Get());
+  AppendSample(&out, "bot_shield_xdp_packets_total", R"(result="fail_open")",
+               xdp_fail_open.Get());
+
   AppendHeader(&out, "bot_shield_challenge_endpoint_limited_total", "counter",
                "Requests to /__bs/* refused by challenge.endpoint_rate.");
   AppendSample(&out, "bot_shield_challenge_endpoint_limited_total", "",

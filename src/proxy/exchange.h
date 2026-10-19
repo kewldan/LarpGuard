@@ -59,6 +59,9 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
                         std::string_view content_type);
   void PushLocalBody(std::string_view data);
   void EndLocalBody();
+  // The gateway answers, but later (a CAPTCHA verified by its provider):
+  // nothing goes to Traefik and the client waits for RespondLocally().
+  void DeferLocalResponse();
 
   // --- Called by the upstream side -----------------------------------------
   std::size_t ReadRequestBody(std::span<uint8_t> out);
@@ -109,6 +112,10 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
   // Model feature vector (empty: not logged) and probability (< 0: none).
   std::vector<float> features;
   double model_score = -1;
+  // Hash of the browser probes (challenge or CAPTCHA answers).
+  std::string client_fp;
+  // Host of a verified Web Bot Auth agent.
+  std::string signed_agent;
   std::string mode;
   int64_t started_ms = 0;
   uint64_t response_bytes = 0;

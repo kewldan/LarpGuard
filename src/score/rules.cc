@@ -59,6 +59,11 @@ enum class Field {
   kScore,
   kClass,
   kReasons,
+  kAsn,
+  kAsnOrg,
+  kAsnCountry,
+  kAsnHosting,
+  kSignedAgent,
 };
 
 struct FieldInfo {
@@ -87,6 +92,11 @@ constexpr FieldInfo kFields[] = {
     {"score", Field::kScore, Type::kInt},
     {"class", Field::kClass, Type::kString},
     {"reasons", Field::kReasons, Type::kList},
+    {"asn", Field::kAsn, Type::kInt},
+    {"asn_org", Field::kAsnOrg, Type::kString},
+    {"asn_country", Field::kAsnCountry, Type::kString},
+    {"asn_hosting", Field::kAsnHosting, Type::kBool},
+    {"signed_agent", Field::kSignedAgent, Type::kString},
 };
 
 enum class NodeKind {
@@ -573,6 +583,23 @@ Value FieldValue(Field field, const RuleContext& context) {
     case Field::kReasons:
       value.type = Type::kList;
       value.list = context.reasons;
+      break;
+    case Field::kAsn:
+      value.type = Type::kInt;
+      value.number = context.asn;
+      break;
+    case Field::kAsnOrg:
+      value.text = context.asn_org;
+      break;
+    case Field::kAsnCountry:
+      value.text = context.asn_country;
+      break;
+    case Field::kAsnHosting:
+      value.type = Type::kBool;
+      value.flag = context.asn_hosting;
+      break;
+    case Field::kSignedAgent:
+      value.text = context.signed_agent;
       break;
   }
   return value;

@@ -68,3 +68,8 @@ weights:
   behavior_sequential_ids: 35
   # Model signal (gradient-boosted trees, model.threshold).
   model: 30
+  # Client network from the ASN database (asn.url): clouds and hosters,
+  # where real browsers are mostly VPNs and proxies.
+  hosting_network: 10
+  # A Web Bot Auth signature (web_bot_auth) that does not verify.
+  web_bot_auth_invalid: 40

@@ -34,6 +34,13 @@ struct RuleContext {
   int64_t score = 0;
   std::string_view bot_class;
   const std::vector<std::string>* reasons = nullptr;
+  // From the ASN database; 0 / "" / false when unknown.
+  int64_t asn = 0;
+  std::string_view asn_org;
+  std::string_view asn_country;
+  bool asn_hosting = false;
+  // Host of a Web Bot Auth agent whose signature verified; "" otherwise.
+  std::string_view signed_agent;
 };
 
 // A compiled boolean condition (see docs/architecture.md, "Правила").

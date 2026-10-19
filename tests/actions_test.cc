@@ -50,7 +50,7 @@ TEST(ActionsTest, ParsesNewActions) {
   specs[1].when = R"(path ~ "/fake*")";
   specs[1].action = "decoy";
   ASSERT_TRUE(RuleSet::Compile(specs, &rules, &error)) << error;
-  specs[1].action = "captcha";
+  specs[1].action = "nope";
   EXPECT_FALSE(RuleSet::Compile(specs, &rules, &error));
 }
 
