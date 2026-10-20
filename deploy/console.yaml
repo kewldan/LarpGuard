@@ -1,0 +1,43 @@
+# larpguard-console (web console): docs/architecture.md, ADR-017.
+# Keep this file mode 0600: it holds password hashes and TOTP secrets.
+
+# Loopback only: put it behind Traefik (a router of its own, TLS from
+# Traefik, ideally behind the gateway too) or reach it over an SSH tunnel.
+listen: 127.0.0.1:9901
+# The address people open. Changes must come from this origin, and cookies
+# are Secure (__Host-) unless it is http://localhost.
+public_origin: https://console.example.com
+
+gateway:
+  # The gateway's admin.socket; the console runs as its owner (0600).
+  admin_socket: /run/bot-shield/admin.sock
+  # The gateway's metrics.listen (/metrics and /health).
+  metrics_url: http://127.0.0.1:9900
+
+# Analytics; leave out (or null) to run without: the analytics screens then
+# say ClickHouse is not configured. Use a read-only user with readonly = 2
+# (read queries, may set limits like max_execution_time), for example:
+#   CREATE USER console IDENTIFIED BY '...' SETTINGS readonly = 2;
+#   GRANT SELECT ON bot_shield.* TO console;
+clickhouse:
+  url: http://127.0.0.1:8123
+  database: bot_shield
+  user: console
+  password_file: /etc/larpguard/clickhouse.password
+
+# Every change and sign-in, hash-chained (append-only).
+audit_log: /var/lib/larpguard/audit.jsonl
+
+session:
+  idle: 30m
+  max: 12h
+
+# viewer: reads everything and tests rules; operator: also lists, attack
+# mode, host modes and reloads. Make the values with
+#   larpguard-console hash-password      (reads the password from stdin)
+#   larpguard-console totp-secret <name> (prints the secret and an otpauth URI)
+users:
+  - name: admin
+    role: operator
+    password: scrypt$17$8$1$REPLACE$REPLACE
+    totp_secret: REPLACEWITHBASE32SECRET

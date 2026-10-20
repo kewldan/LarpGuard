@@ -53,6 +53,24 @@ services:
         --on-fail 'nft -f /etc/bot-shield/failopen/failopen-on.nft'
         --on-recover 'nft -f /etc/bot-shield/failopen/failopen-off.nft'
 
+  # Web console (ui/, deploy/console.yaml). Listens on 127.0.0.1:9901; publish
+  # it through a Traefik router of its own. Runs as root to reach the admin
+  # socket (mode 0600, owned by root like the gateway), with every
+  # capability dropped.
+  console:
+    image: ghcr.io/kewldan/larpguard-console:latest
+    network_mode: host
+    restart: unless-stopped
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    volumes:
+      - ./console.yaml:/etc/larpguard/console.yaml:ro
+      - /run/bot-shield:/run/bot-shield
+      - console-state:/var/lib/larpguard
+    depends_on: [bot-shield, clickhouse]
+
   # Analytics pipeline (optional): bot-shield -> NATS -> ClickHouse.
   # Enable with events.nats: "nats://127.0.0.1:4222" in bot-shield.yaml.
   nats:
@@ -77,5 +95,6 @@ services:
 volumes:
   traefik-acme:
   bot-shield-state:
+  console-state:
   nats-data:
   clickhouse-data:
