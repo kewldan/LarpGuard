@@ -1,0 +1,184 @@
+/* Segmented control: pills in a pill. */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-1);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.segment {
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 6px 12px;
+  font-size: var(--text-md);
+  background: transparent;
+  color: var(--color-text-3);
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast);
+}
+
+.segment[aria-pressed='true'] {
+  background: var(--color-surface-3);
+  color: var(--color-text);
+}
+
+.segment:hover:not([aria-pressed='true']) {
+  color: var(--color-text);
+}
+
+.fill {
+  display: flex;
+}
+
+.fill .segment {
+  flex: 1;
+  height: 38px;
+}
+
+/* Switch. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: var(--text-base);
+  text-align: left;
+}
+
+.track {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--color-line-strong);
+  transition: background var(--duration-fast);
+}
+
+.switch[aria-checked='true'] .track {
+  background: var(--color-text);
+}
+
+.switch[aria-checked='true'].danger .track {
+  background: var(--color-blocked);
+}
+
+.thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg);
+  transition: left var(--duration-fast) var(--ease-in-out);
+}
+
+.switch[aria-checked='true'] .thumb {
+  left: 18px;
+}
+
+/* Fields. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-md);
+  color: var(--color-text-3);
+}
+
+.input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-surface-1);
+  font-size: var(--text-base);
+  transition: border-color var(--duration-fast);
+}
+
+.input:focus {
+  border-color: var(--color-text);
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--color-blocked);
+}
+
+.textarea {
+  height: auto;
+  padding: 10px 12px;
+  line-height: 20px;
+  resize: vertical;
+}
+
+.select {
+  appearance: none;
+  padding-right: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-3) 50%),
+    linear-gradient(135deg, var(--color-text-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 16px,
+    calc(100% - 10px) 16px;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.hint {
+  font-size: var(--text-sm-plus);
+  color: var(--color-text-3);
+}
+
+.error {
+  font-size: var(--text-md-plus);
+  color: var(--color-blocked-text);
+}
+
+/* Query bar: search icon, mono input, a key hint. */
+.queryBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-surface-1);
+  color: var(--color-text-3);
+}
+
+.queryBar:focus-within {
+  border-color: var(--color-text);
+}
+
+.queryBar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--text-md-plus);
+  color: var(--color-text);
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-3);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-data);
+  padding: 1px 5px;
+  line-height: 1.4;
+}

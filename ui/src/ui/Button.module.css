@@ -1,0 +1,111 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 18px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast),
+    border-color var(--duration-fast),
+    opacity var(--duration-fast);
+}
+
+.sm {
+  height: 30px;
+  padding: 0 12px;
+  font-size: var(--text-md-plus);
+}
+
+.lg {
+  height: 44px;
+  padding: 0 22px;
+  font-size: var(--text-lg);
+}
+
+.xl {
+  height: 56px;
+  padding: 0 26px;
+  font-size: 16px;
+  font-weight: var(--weight-bold);
+}
+
+.block {
+  width: 100%;
+}
+
+/* Inverted: the primary action. Never orange. */
+.primary {
+  background: var(--color-inverse);
+  color: var(--color-on-inverse);
+}
+
+.primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.secondary {
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--color-surface-2);
+}
+
+.ghost {
+  color: var(--color-text-2);
+  font-weight: var(--weight-regular);
+  padding: 0 14px;
+}
+
+.ghost:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+/* Orange only when the action blocks traffic. */
+.danger {
+  background: var(--color-blocked);
+  color: var(--color-on-blocked);
+}
+
+.danger:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.dangerOutline {
+  border-color: var(--color-blocked);
+  color: var(--color-blocked-text);
+}
+
+.dangerOutline:hover:not(:disabled) {
+  background: var(--color-blocked-soft);
+}
+
+.icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+}
+
+.icon:hover:not(:disabled) {
+  background: var(--color-surface-2);
+}
+
+.iconBare {
+  width: var(--layout-touch-target);
+  height: var(--layout-touch-target);
+  padding: 0;
+  color: var(--color-text);
+}

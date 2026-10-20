@@ -6,6 +6,7 @@ import type { Hono } from 'hono';
 
 import {
   reloadResultSchema,
+  ruleCheckSchema,
   ruleTestRequestSchema,
   ruleTestResultSchema,
   rulesSchema,
@@ -72,6 +73,14 @@ export function registerRules(app: Hono<AppEnv>): void {
         hits_1h: hits?.get(rule.name) ?? 0,
       })),
     });
+  });
+
+  // Compile only: the gateway's parser and type checks, no traffic.
+  app.post('/api/rules/check', async (c) => {
+    const deps = c.get('deps');
+    const draft = parseOr400(ruleTestRequestSchema, await jsonBody(c));
+    const result = await deps.admin.testRule(draft.when, []);
+    return send(c, ruleCheckSchema, { references: result.references });
   });
 
   app.post('/api/rules/test', async (c) => {

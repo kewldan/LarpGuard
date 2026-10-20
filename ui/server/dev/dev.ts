@@ -11,7 +11,7 @@ import { parseConsoleConfig } from '../config.ts';
 import type { MetricsApi } from '../gateway/metrics.ts';
 import { createMockAdmin, MOCK_SHADOW_HOSTS } from './mock-admin.ts';
 import { createMockAnalytics } from './mock-analytics.ts';
-import { generateEvents } from './mock-data.ts';
+import { MockTraffic } from './mock-data.ts';
 
 export const DEV_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 export const DEV_PASSWORD = 'dev-password-1';
@@ -37,7 +37,12 @@ users:
 
 const started = Date.now();
 const now = () => Date.now();
-const events = generateEvents(started, MOCK_SHADOW_HOSTS);
+const traffic = new MockTraffic(started, MOCK_SHADOW_HOSTS);
+const events = traffic.events;
+// New events every second, so live views move.
+setInterval(() => {
+  traffic.extend(Date.now());
+}, 1000).unref();
 const metrics: MetricsApi = {
   read: () => {
     // The synthetic events' rate over the last minute.

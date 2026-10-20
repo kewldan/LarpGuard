@@ -1,0 +1,122 @@
+.shim {
+  display: block;
+  border-radius: var(--radius-data);
+  background:
+    linear-gradient(90deg, transparent, var(--color-surface-2), transparent)
+      no-repeat,
+    var(--color-surface-3);
+  background-size: 200px 100%;
+  animation: shimmer var(--duration-live) linear infinite;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 40px 20px;
+}
+
+.emptyTitle {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.emptyText {
+  max-width: 420px;
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--color-text-3);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* Amber: degraded, still filtering. */
+.degraded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-banner);
+  border: 1px solid var(--color-challenged);
+  background: var(--color-challenged-soft);
+  font-size: var(--text-base);
+  line-height: 1.45;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+}
+
+/* Inverted: down, outcome unknown. Never orange. */
+.down {
+  border-radius: var(--radius-card);
+  background: var(--color-inverse);
+  color: var(--color-on-inverse);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.downTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+}
+
+.downMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--color-on-inverse);
+  color: var(--color-inverse);
+  font-weight: var(--weight-bold);
+}
+
+.code {
+  display: block;
+  white-space: pre-wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-input);
+  background: color-mix(in srgb, var(--color-on-inverse) 10%, transparent);
+  font-size: var(--text-md-plus);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-banner);
+  border: 1px dashed var(--color-line-strong);
+  font-size: var(--text-md-plus);
+  color: var(--color-text-2);
+  line-height: 1.5;
+}
+
+.errorState {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 14px 16px;
+  font-size: var(--text-base);
+  color: var(--color-text-2);
+}

@@ -56,6 +56,17 @@ export const loginSchema = z.object({
 });
 export type Login = z.infer<typeof loginSchema>;
 
+// What the gateway decided about the current request (its X-Bot-*
+// headers, set when the console sits behind it); fields are null otherwise.
+export const whoamiSchema = z.object({
+  score: z.number().nullable(),
+  class: z.string().nullable(),
+  reasons: z.array(z.string()),
+  request_id: z.string().nullable(),
+  ip_prefix: z.string().nullable(),
+});
+export type Whoami = z.infer<typeof whoamiSchema>;
+
 // --- Status and health -------------------------------------------------------
 
 export const sourceStateSchema = z.enum(['ok', 'degraded', 'down', 'off']);
@@ -419,6 +430,11 @@ export const ruleTestRequestSchema = z.object({
   action: z.union([actionSchema, z.literal('score')]),
 });
 export type RuleTestRequest = z.infer<typeof ruleTestRequestSchema>;
+
+export const ruleCheckSchema = z.object({
+  references: z.array(z.string()),
+});
+export type RuleCheck = z.infer<typeof ruleCheckSchema>;
 
 export const ruleSampleSchema = z.object({
   ts: z.number(),

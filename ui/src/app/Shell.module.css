@@ -1,0 +1,303 @@
+.app {
+  min-height: 100vh;
+  display: flex;
+  align-items: stretch;
+  background: var(--color-bg);
+}
+
+.side {
+  flex: 0 0 var(--layout-sidebar-width);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  border-right: 1px solid var(--color-line);
+  background: var(--color-surface-1);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+}
+
+.brandName {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-lg);
+}
+
+.version {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-3);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-input);
+  font-size: var(--text-base);
+  white-space: nowrap;
+  color: var(--color-text-2);
+  text-decoration: none;
+  transition:
+    background var(--duration-instant),
+    color var(--duration-instant);
+}
+
+.navLink:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+.navLink[aria-current='page'] {
+  background: var(--color-surface-3);
+  color: var(--color-text);
+}
+
+.badge {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--color-text-3);
+}
+
+.foot {
+  margin-top: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-banner);
+  padding: 12px;
+  font-size: var(--text-md);
+  color: var(--color-text-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.footLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.footMeta {
+  font-size: var(--text-sm);
+  color: var(--color-text-3);
+}
+
+.footUser {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-line);
+}
+
+.footUser a,
+.footUser button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: var(--text-md);
+  color: var(--color-text-3);
+  text-decoration: none;
+}
+
+.footUser a:hover,
+.footUser button:hover {
+  color: var(--color-text);
+}
+
+.column {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px clamp(16px, 2.5vw, 32px);
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-bg);
+}
+
+.paletteButton {
+  flex: 1 1 260px;
+  max-width: 460px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-surface-1);
+  color: var(--color-text-3);
+  font-size: var(--text-base);
+  text-align: left;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.attackPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-line-strong);
+  font-size: var(--text-md-plus);
+  color: var(--color-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.attackPill:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+.attackOn {
+  background: var(--color-blocked);
+  border-color: var(--color-blocked);
+  color: var(--color-on-blocked);
+}
+
+.attackOn:hover {
+  background: var(--color-blocked);
+  color: var(--color-on-blocked);
+  opacity: 0.9;
+}
+
+.pillDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9px;
+  background: var(--color-text-3);
+}
+
+.attackOn .pillDot {
+  background: var(--color-on-blocked);
+  animation: pulse var(--duration-live) ease-in-out infinite;
+}
+
+.pillMeta {
+  color: var(--color-text-3);
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--layout-content-max-width);
+  padding: 24px clamp(16px, 2.5vw, 32px) 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.phoneHeader,
+.tabs {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .side,
+  .header {
+    display: none;
+  }
+
+  .phoneHeader {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: var(--layout-header-height);
+    padding: 0 8px 0 16px;
+    border-bottom: 1px solid var(--color-line);
+    background: var(--color-bg);
+  }
+
+  .phoneTitle {
+    font-weight: var(--weight-semibold);
+    font-size: var(--text-xl);
+  }
+
+  .phoneHeader .attackPill {
+    margin-left: auto;
+    font-size: var(--text-md);
+  }
+
+  .pillMeta {
+    display: none;
+  }
+
+  .main {
+    padding: 16px 16px calc(var(--layout-tab-bar-height) + 24px);
+    gap: 14px;
+  }
+
+  .tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-sticky);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    height: var(--layout-tab-bar-height);
+    border-top: 1px solid var(--color-line);
+    background: var(--color-surface-1);
+  }
+
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-size: var(--text-xs);
+    color: var(--color-text-3);
+    text-decoration: none;
+  }
+
+  .tab[aria-current='page'] {
+    color: var(--color-text);
+  }
+}
+
+.menuList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 36px;
+}
+
+.menuList .navLink {
+  height: 44px;
+  font-size: var(--text-lg);
+}

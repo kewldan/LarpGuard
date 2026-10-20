@@ -185,18 +185,51 @@ function pick<T extends { weight: number }>(
   return items[items.length - 1] as T;
 }
 
-// Events of the last 7 days up to `now`: denser in the last 24 hours, with
-// a burst of bad clients 40 minutes ago.
-export function generateEvents(
-  now: number,
-  shadowHosts: ReadonlySet<string>,
-  seed = 7,
-): MockEvent[] {
-  const random = mulberry32(seed);
-  const events: MockEvent[] = [];
-  let sequence = 0;
-  const day = 86_400_000;
-  const add = (ts: number, burst: boolean) => {
+// Synthetic traffic: `events` covers the last 7 days up to the start
+// (denser in the last 24 hours, with a burst of bad clients 40 minutes
+// before it), and extend() keeps adding events up to a later time.
+export class MockTraffic {
+  readonly events: MockEvent[] = [];
+  private readonly random: () => number;
+  private readonly shadowHosts: ReadonlySet<string>;
+  private readonly burstCentre: number;
+  private sequence = 0;
+  private until: number;
+
+  constructor(now: number, shadowHosts: ReadonlySet<string>, seed = 7) {
+    this.random = mulberry32(seed);
+    this.shadowHosts = shadowHosts;
+    this.burstCentre = now - 40 * 60_000;
+    const day = 86_400_000;
+    for (
+      let ts = now - 7 * day;
+      ts < now - day;
+      ts += 40_000 + this.random() * 40_000
+    ) {
+      this.add(Math.round(ts), false);
+    }
+    this.until = now - day;
+    this.extend(now);
+  }
+
+  // About two events a second, with a daily wave and the burst.
+  extend(now: number): void {
+    let ts = this.until;
+    while (ts < now) {
+      const hourOfDay = new Date(ts).getUTCHours();
+      const wave = 1 + 0.4 * Math.sin(((hourOfDay - 6) / 24) * 2 * Math.PI);
+      const burst = Math.abs(ts - this.burstCentre) < 6 * 60_000;
+      const rate = 1.8 * wave * (burst ? 3.5 : 1);
+      ts += Math.round(-Math.log(1 - this.random()) * (1000 / rate));
+      if (ts < now) this.add(ts, burst);
+    }
+    this.until = now;
+  }
+
+  private add(ts: number, burst: boolean): void {
+    const random = this.random;
+    const shadowHosts = this.shadowHosts;
+    const events = this.events;
     const client =
       burst && random() < 0.7 ? (CLIENTS[3] as Client) : pick(CLIENTS, random);
     const host = pick(MOCK_HOSTS, random).host;
@@ -223,8 +256,8 @@ export function generateEvents(
     const would = decide(score, client.class);
     const shadow = shadowHosts.has(host);
     const action = shadow ? 'allow' : would;
-    sequence += 1;
-    const id = `mock-${(ts % 100000).toString(36)}-${sequence}`;
+    this.sequence += 1;
+    const id = `mock-${(ts % 100000).toString(36)}-${this.sequence}`;
     events.push({
       ts,
       request_id: id,
@@ -268,24 +301,13 @@ export function generateEvents(
       client_fp: '',
       model_score: null,
     });
-  };
-  // Older days: one event a minute or so.
-  for (
-    let ts = now - 7 * day;
-    ts < now - day;
-    ts += 40_000 + random() * 40_000
-  ) {
-    add(Math.round(ts), false);
   }
-  // Last 24 hours: about two a second, with a daily wave and the burst.
-  for (let ts = now - day; ts < now;) {
-    const hourOfDay = new Date(ts).getUTCHours();
-    const wave = 1 + 0.4 * Math.sin(((hourOfDay - 6) / 24) * 2 * Math.PI);
-    const burstCentre = now - 40 * 60_000;
-    const burst = Math.abs(ts - burstCentre) < 6 * 60_000;
-    const rate = 1.8 * wave * (burst ? 3.5 : 1);
-    ts += Math.round(-Math.log(1 - random()) * (1000 / rate));
-    if (ts < now) add(ts, burst);
-  }
-  return events;
+}
+
+export function generateEvents(
+  now: number,
+  shadowHosts: ReadonlySet<string>,
+  seed = 7,
+): MockEvent[] {
+  return new MockTraffic(now, shadowHosts, seed).events;
 }

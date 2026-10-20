@@ -9,7 +9,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 
-import { loginSchema, sessionSchema } from '../shared/api.ts';
+import { loginSchema, sessionSchema, whoamiSchema } from '../shared/api.ts';
 import { FailureLimiter } from './auth/limiter.ts';
 import { safeEqual, type SessionData } from './auth/sessions.ts';
 import { verifyTotp } from './auth/totp.ts';
@@ -46,19 +46,23 @@ export function cookieName(deps: Deps): string {
   return secureCookies(deps.config) ? '__Host-lg_session' : 'lg_session';
 }
 
-// The client's address: the socket peer, or, from a proxy on loopback
-// (Traefik in front), the last X-Forwarded-For hop it added.
+// The client's address: the socket peer or, behind proxies on loopback
+// (gateway and Traefik on the same host), the nearest non-loopback hop of
+// X-Forwarded-For.
 function clientAddress(c: Context<AppEnv>): string {
   // No bindings at all under app.request() (tests).
   const env = c.env as AppEnv['Bindings'] | undefined;
-  const address = env?.incoming?.socket.remoteAddress ?? '';
-  const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
+  const peer = env?.incoming?.socket.remoteAddress ?? '';
+  const loopback = (address: string) =>
+    /^(127\.|::1$|::ffff:127\.)/.test(address);
   const forwarded = c.req.header('x-forwarded-for');
-  if (loopback && forwarded) {
-    const hops = forwarded.split(',').map((hop) => hop.trim());
-    return hops[hops.length - 1] ?? address;
+  if (!loopback(peer) || !forwarded) return peer;
+  const hops = forwarded.split(',').map((hop) => hop.trim());
+  for (let i = hops.length - 1; i >= 0; i -= 1) {
+    const hop = hops[i] ?? '';
+    if (hop && !loopback(hop)) return hop;
   }
-  return address;
+  return peer;
 }
 
 export function createApp(deps: Deps): Hono<AppEnv> {
@@ -171,6 +175,23 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       ],
     });
     return send(c, sessionSchema, sessionJson(session));
+  });
+
+  // The gateway's verdict on this very request (sign-in screen). Its
+  // headers are trustworthy only behind the gateway, which strips client
+  // X-Bot-*; anywhere else they are just shown back.
+  app.get('/api/whoami', (c) => {
+    const score = Number(c.req.header('x-bot-score'));
+    const reasons = c.req.header('x-bot-reasons');
+    const prefix = addressPrefix(clientAddress(c));
+    return send(c, whoamiSchema, {
+      score:
+        Number.isInteger(score) && c.req.header('x-bot-score') ? score : null,
+      class: c.req.header('x-bot-class') ?? null,
+      reasons: reasons && reasons !== '-' ? reasons.split(',') : [],
+      request_id: c.req.header('x-bot-request-id') ?? null,
+      ip_prefix: prefix || null,
+    });
   });
 
   app.delete('/api/session', (c) => {

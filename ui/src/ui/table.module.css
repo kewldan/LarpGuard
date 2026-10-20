@@ -1,0 +1,89 @@
+/* Dense table: 36px rows, hairlines, no zebra; numbers mono and right. */
+.wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-base);
+}
+
+.table th {
+  text-align: left;
+  font-weight: var(--weight-medium);
+  font-size: var(--text-md);
+  color: var(--color-text-3);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-line);
+  white-space: nowrap;
+}
+
+.table td {
+  height: var(--layout-row-height);
+  padding: 0 16px;
+  border-bottom: 1px solid var(--color-line);
+  white-space: nowrap;
+}
+
+.table tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr:hover td {
+  background: var(--color-surface-2);
+}
+
+.table tr[aria-selected='true'] td {
+  background: var(--color-surface-2);
+}
+
+.table tr[aria-selected='true'] td:first-child {
+  box-shadow: inset 2px 0 0 var(--color-text);
+}
+
+.num {
+  text-align: right !important;
+  font-family: var(--font-mono);
+  font-feature-settings: 'zero' 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'zero' 1;
+  font-size: var(--text-md-plus);
+}
+
+.muted {
+  color: var(--color-text-3);
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.ellipsis {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A plain list row (cards with rows instead of a table). */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--color-line);
+  font-size: var(--text-md-plus);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row:hover {
+  background: var(--color-surface-2);
+}
