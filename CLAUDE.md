@@ -11,7 +11,8 @@ ClickHouse, HTTP-прокси с вердиктами и правилами, rat
 и admin API, JS-челлендж и проверка краулеров, fail-open, поведение и
 honeypot, tarpit/decoy, модель-сигнал, gRPC, HTTP/3, горячая перезагрузка.
 Roadmap (раздел 14, «Статус: roadmap»): пробы челленджа, капча, IP-диапазоны
-краулеров, Web Bot Auth, база ASN, XDP. Не сделан только Web UI.
+краулеров, Web Bot Auth, база ASN, XDP. Веб-консоль (`ui/`, ADR-017) —
+отдельное приложение с BFF поверх admin API и ClickHouse.
 
 ## Команды
 
@@ -25,6 +26,19 @@ cmake --build build --target format-check
 cmake --build build --target tidy          # clang-tidy, должно быть 0 предупреждений
 ```
 
+Консоль (`ui/`, Node.js 24):
+
+```bash
+npm --prefix ui ci
+npm --prefix ui run dev:api                # BFF на моках (users.ts) :9901
+npm --prefix ui run dev:web                # Vite :5173, /api → :9901
+npm --prefix ui run format:check && npm --prefix ui run lint && npm --prefix ui run typecheck
+npm --prefix ui test                       # vitest: web (jsdom) и node
+npm --prefix ui run build && (cd ui && npx playwright test)
+npm --prefix ui run e2e:docker             # со скриншотами, как в CI (-- --update-snapshots)
+npm --prefix ui run tokens                 # tokens.css из tokens.ts
+```
+
 Санитайзеры: отдельный каталог `build-asan` с
 `-DBOT_SHIELD_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`, на macOS запускать с
 `ASAN_OPTIONS=detect_leaks=0`.
@@ -35,9 +49,11 @@ ninja-build git python3 openssl curl nodejs clang` (`--privileged`, чтобы
 шли XDP-тесты), исходники монтировать read-only.
 
 CI — `.github/workflows/ci.yml`: format (clang-format 23.1.3 из PyPI),
-clang-tidy (23.1.3, `debian:trixie`), тесты и e2e обычные и под ASan/UBSan;
-на `main` и тегах `v*` после них — мультиархитектурный образ
-`ghcr.io/kewldan/larpguard` (`latest`, `sha-…`, semver). Версию
+clang-tidy (23.1.3, `debian:trixie`), тесты и e2e обычные и под ASan/UBSan,
+джоб Console (prettier, eslint, tsc, vitest, сборка, Playwright со
+скриншотами в образе `mcr.microsoft.com/playwright`); на `main` и тегах
+`v*` после них — мультиархитектурные образы `ghcr.io/kewldan/larpguard` и
+`ghcr.io/kewldan/larpguard-console` (`latest`, `sha-…`, semver). Версию
 clang-format/clang-tidy менять в CI вместе с локальной.
 
 ## Готово, когда
@@ -107,11 +123,15 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 - `src/docker/` — клиент Docker API по unix-сокету (`client`), разбор
   лейблов `botshield.*` в снапшот `LabelPolicies` (`labels`), опрос
   (`watcher`). Приоритет режима: `policy.hosts` в YAML → лейблы → `mode`.
-- `src/admin/` — admin API на unix-сокете (`server`), оперативные списки
-  (`lists`: главнее правил, allow побеждает block) и журнал решений
-  (`decision_log`), режим «под атакой» (`attack`: челлендж всем без
-  токена, admin API и `attack.auto_rps`). Новый эндпоинт — в
-  `HandleAdminRequest` + тест в `admin_test.cc`.
+- `src/admin/` — admin API на unix-сокете (`server`, свой поток
+  `AdminServer`, не воркер), оперативные списки (`lists`: главнее правил,
+  allow побеждает block), журнал решений (`decision_log`; в ответе ещё
+  `ip_prefix`/`ip_hash` как в событиях), режимы хостов из консоли
+  (`modes`: главнее `policy.hosts` и лейблов, `admin.modes_file`,
+  применяются пересборкой `VerdictSet` через `WithConsoleModes`), режим
+  «под атакой» (`attack`). Новый эндпоинт — в `HandleAdminRequest` + тест в
+  `admin_test.cc`; если он нужен консоли — метод в
+  `ui/server/gateway/admin.ts` со схемой ответа.
 - `src/watchdog/` — `bot-shield-watchdog` (fail-open, ADR-012): опрос
   `/health` и команды nftables из `deploy/failopen/`. `src/common/systemd` —
   `sd_notify` без libsystemd.
@@ -146,6 +166,23 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в
   `Config`, разбор в `config.cc`, тест в `config_test.cc`, описание в
   `deploy/bot-shield.yaml`.
+- `ui/` — веб-консоль (ADR-017), один npm-пакет, версии точные
+  (`.npmrc`: `save-exact`). `shared/` — контракт API (схемы zod, их же
+  проверяет BFF и берёт SPA). `server/` — BFF на Hono: `auth/` (scrypt,
+  TOTP, сессии в памяти, блокировка перебора), `app.ts` (CSP, сессия, CSRF:
+  `X-CSRF-Token` + `Origin`), `roles.ts`, `gateway/` (admin-сокет только
+  белым списком вызовов, полный IP отбрасывается схемой; `/metrics`),
+  `analytics/` (ClickHouse: только параметризованные запросы из `sql.ts`),
+  `audit.ts` (JSONL с цепочкой SHA-256, откат), `routes/`, `dev/` (моки:
+  шлюз в памяти и синтетический трафик — только для разработки и тестов).
+  `src/` — SPA: `design/tokens.ts` — единственный источник значений из
+  дизайна (`tokens.css` генерируется, тест сверяет), `ui/` примитивы,
+  `domain/` доменные компоненты, `screens/`, `app/` (роутер, оболочка,
+  ⌘K), `lib/` (запросы TanStack Query, форматирование, чистая логика).
+  Новый экран: маршрут в `app/router.tsx` (параметры — схема в
+  `app/search.ts`), эндпоинт в `server/routes/` + схема в `shared/api.ts`.
+  Выдуманных данных в коде нет: чего нет в шлюзе — не показывается.
+  Комментарии и тексты интерфейса — на английском.
 
 Инварианты, которые легко сломать:
 
@@ -176,6 +213,9 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 - Горячий путь без синхронного сетевого I/O и без глобальных блокировок
   (кроме взятия снапшотов). Всё сетевое (siteverify, ключи Web Bot Auth,
   загрузки) — в фоновых потоках; запрос только читает кеш.
+- Консоль не видит полный IP: из `/decisions` BFF оставляет только
+  `ip_prefix`/`ip_hash`, браузер не ходит ни в admin-сокет, ни в ClickHouse.
+  Изменяющий маршрут BFF — с `requireRole('operator')` и записью в аудит.
 
 ## Git
 

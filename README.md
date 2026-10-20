@@ -105,6 +105,11 @@ over ports 443/80, and Traefik moves to loopback behind it.
 - 📊 **Analytics.** Connection and request events go to NATS and then
   ClickHouse. They never contain full IPs, query strings or cookie values.
   Anomaly clusters suggest new library entries.
+- 🖥️ **Web console.** Overview, a requests explorer with the reasons behind
+  each verdict, fingerprints, a rule editor that type-checks with the
+  gateway's own parser and tests drafts on the last hour of traffic, lists,
+  rate limits, host modes, crawlers, attack mode and an audit log with
+  revert. Dark and light, works on a phone.
 
 ## 🏗️ How it fits
 
@@ -263,14 +268,39 @@ curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /status` | Workers, connections, verdict generation |
-| `GET /policy?host=…` | The effective policy for a host |
+| `GET /config` | The verdict settings in effect, without secrets |
+| `GET /policy?host=…` | The effective policy for a host (`GET /policy`: every host with a mode of its own) |
+| `POST /policy`, `DELETE /policy/<host>` | Host mode from the console; beats the config until removed |
 | `/lists` | Allow and block lists with TTLs (they win over rules) |
 | `GET /decisions/<id>` | Why a request was decided this way (from `X-Bot-Request-Id`) |
 | `/attack` | Under-attack mode: challenge everyone without a token |
+| `POST /rules/test` | Compile a rule condition and run it on sample events |
+| `GET /asn?numbers=…` | AS names from the ASN database |
 | `POST /reload` | Hot-reload verdict settings |
 
 Prometheus metrics and `/health` are served on `127.0.0.1:9900`.
 `/health` returns 503 when a worker loop stalls.
+
+### 🖥️ The web console
+
+`ghcr.io/kewldan/larpguard-console` runs next to the gateway. It serves the
+UI and a small backend that talks to the admin socket and ClickHouse; the
+browser never reaches either directly. Sign-in takes a password and a TOTP
+code, roles are `viewer` and `operator`, every change lands in a
+hash-chained audit log, and full client addresses never leave the gateway.
+
+```bash
+echo 'a long password' | docker run --rm -i ghcr.io/kewldan/larpguard-console hash-password
+```
+
+```bash
+docker run --rm ghcr.io/kewldan/larpguard-console totp-secret admin
+```
+
+Put the hash and the secret into [`deploy/console.yaml`](deploy/console.yaml)
+and start the `console` service from
+[`deploy/docker-compose.yml`](deploy/docker-compose.yml). It listens on
+`127.0.0.1:9901`; publish it through a Traefik router of its own.
 
 ## 🧪 Development
 
@@ -293,9 +323,16 @@ cmake --build build --target format-check
 cmake --build build --target tidy
 ```
 
+- **Console.** In `ui/`: `npm ci`, then `npm run dev:api` (backend on an
+  in-memory gateway with synthetic traffic) and `npm run dev:web`; sign in
+  as `dev` (see `ui/server/dev/users.ts`). Checks: `npm run lint`,
+  `npm run typecheck`, `npm test`, `npx playwright test`; screenshots are
+  compared on Linux with `npm run e2e:docker`.
 - **CI.** [`ci.yml`](.github/workflows/ci.yml) runs format, clang-tidy,
   unit and e2e tests (plain and under ASan/UBSan) in a privileged
-  `debian:trixie` container (so the XDP tests run) for every push and PR. On `main` and `v*` tags it then publishes the image.
+  `debian:trixie` container (so the XDP tests run), and the console's lint,
+  types, unit, browser and screenshot tests, for every push and PR. On
+  `main` and `v*` tags it then publishes both images.
 - **Style.** Google C++ Style, enforced by `clang-format` and
   `clang-tidy`. `tidy` must report 0 warnings.
 - **Sanitizers.** Build with `-DBOT_SHIELD_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug`.
@@ -331,6 +368,11 @@ src/
 ├── watchdog/   bot-shield-watchdog (fail-open)
 ├── xdp/        XDP pre-filter: BPF program and loader (Linux)
 └── config/     strict YAML config
+ui/
+├── shared/     the console API contract (zod schemas)
+├── server/     the console backend: sessions, admin socket, ClickHouse, audit
+├── src/        the console UI: design tokens, components, screens
+└── tests/e2e/  browser and screenshot tests
 ```
 
 ## 📚 Docs
@@ -352,7 +394,7 @@ Russian.
 - [x] CAPTCHA: built-in puzzle, Turnstile, hCaptcha, reCAPTCHA
 - [x] Crawler IP ranges and Web Bot Auth
 - [x] ASN database and rate-limit key, XDP pre-filter
-- [ ] Web UI
+- [x] Web UI
 
 ## 📄 License
 
