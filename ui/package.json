@@ -26,7 +26,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "e2e:update": "playwright test --update-snapshots"
+    "e2e:docker": "sh scripts/e2e-docker.sh"
   },
   "dependencies": {
     "@clickhouse/client": "1.24.1",

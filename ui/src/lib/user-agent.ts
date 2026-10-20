@@ -8,6 +8,7 @@ export interface Claim {
 
 export function parseClaim(userAgent: string): Claim {
   const ua = userAgent;
+  if (ua.trim() === '') return { browser: 'empty', os: '' };
   let browser = 'unknown';
   const tool =
     /(curl|wget|python-requests|python-urllib|go-http-client|okhttp|java|node-fetch|axios)\/?([\d.]*)/i.exec(
@@ -32,5 +33,5 @@ export function parseClaim(userAgent: string): Claim {
   else if (ua.includes('Windows')) os = 'Windows';
   else if (ua.includes('CrOS')) os = 'ChromeOS';
   else if (ua.includes('Linux')) os = 'Linux';
-  return { browser: browser || 'empty', os };
+  return { browser, os };
 }

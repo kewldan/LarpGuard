@@ -1,6 +1,8 @@
 // Development server: the BFF with an in-memory gateway and synthetic
-// analytics (npm run dev, browser tests). Sign in as "dev" with password
-// "dev-password-1" and the TOTP code of DEV_TOTP_SECRET.
+// analytics (npm run dev:api, browser tests). Sign in as "dev" (operator)
+// or "viewer" with password "dev-password-1" and the TOTP code of
+// DEV_TOTP_SECRET. LG_FIXED_TIME (Unix ms) freezes the clock and the
+// traffic, for repeatable screenshots.
 
 import { serve } from '@hono/node-server';
 
@@ -12,9 +14,7 @@ import type { MetricsApi } from '../gateway/metrics.ts';
 import { createMockAdmin, MOCK_SHADOW_HOSTS } from './mock-admin.ts';
 import { createMockAnalytics } from './mock-analytics.ts';
 import { MockTraffic } from './mock-data.ts';
-
-export const DEV_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
-export const DEV_PASSWORD = 'dev-password-1';
+import { DEV_PASSWORD, DEV_TOTP_SECRET } from './users.ts';
 
 const port = Number(process.env['LG_PORT'] ?? 9901);
 const origin = process.env['LG_ORIGIN'] ?? 'http://localhost:5173';
@@ -35,14 +35,17 @@ users:
     totp_secret: ${DEV_TOTP_SECRET}
 `);
 
-const started = Date.now();
-const now = () => Date.now();
+const fixed = process.env['LG_FIXED_TIME'];
+const started = fixed ? Number(fixed) : Date.now();
+const now = fixed ? () => started : () => Date.now();
 const traffic = new MockTraffic(started, MOCK_SHADOW_HOSTS);
 const events = traffic.events;
-// New events every second, so live views move.
-setInterval(() => {
-  traffic.extend(Date.now());
-}, 1000).unref();
+if (!fixed) {
+  // New events every second, so live views move.
+  setInterval(() => {
+    traffic.extend(Date.now());
+  }, 1000).unref();
+}
 const metrics: MetricsApi = {
   read: () => {
     // The synthetic events' rate over the last minute.
@@ -72,7 +75,7 @@ const app = createApp({
   admin: createMockAdmin(now),
   analytics: createMockAnalytics(events, now),
   metrics,
-  audit: new AuditLog(null),
+  audit: new AuditLog(null, now),
   sessions: new SessionStore({
     idleMs: config.session.idle,
     maxMs: config.session.max,

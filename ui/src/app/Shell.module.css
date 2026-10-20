@@ -1,17 +1,27 @@
 .app {
+  position: relative;
   min-height: 100vh;
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   background: var(--color-bg);
+}
+
+/* The sidebar's panel runs the full height however long the page is. */
+.app::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--layout-sidebar-width);
+  background: var(--color-surface-1);
+  border-right: 1px solid var(--color-line);
 }
 
 .side {
   flex: 0 0 var(--layout-sidebar-width);
   position: sticky;
   top: 0;
+  z-index: 1;
   height: 100vh;
-  border-right: 1px solid var(--color-line);
-  background: var(--color-surface-1);
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
@@ -225,7 +235,8 @@
 
 @media (max-width: 760px) {
   .side,
-  .header {
+  .header,
+  .app::before {
     display: none;
   }
 

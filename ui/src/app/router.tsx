@@ -1,23 +1,14 @@
-// Routes. Search parameters are validated per screen (search.ts).
+// Routes. Search parameters are validated per screen (search.ts); each
+// screen is its own chunk, loaded on first visit (and on link hover).
 
 import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   Link,
 } from '@tanstack/react-router';
 
-import { Attack } from '../screens/Attack.tsx';
-import { AuditLog } from '../screens/AuditLog.tsx';
-import { Crawlers } from '../screens/Crawlers.tsx';
-import { Fingerprints } from '../screens/Fingerprints.tsx';
-import { Hosts } from '../screens/Hosts.tsx';
-import { Lists } from '../screens/Lists.tsx';
-import { Overview } from '../screens/Overview.tsx';
-import { RateLimits } from '../screens/RateLimits.tsx';
-import { Requests } from '../screens/Requests.tsx';
-import { Rules } from '../screens/Rules.tsx';
-import { Settings } from '../screens/Settings.tsx';
 import { EmptyState } from '../ui/states.tsx';
 import { Root } from './Root.tsx';
 import {
@@ -52,64 +43,97 @@ const routes = [
     getParentRoute: () => rootRoute,
     path: '/',
     validateSearch: overviewSearch,
-    component: Overview,
+    component: lazyRouteComponent(
+      () => import('../screens/Overview.tsx'),
+      'Overview',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/requests',
     validateSearch: requestsSearch,
-    component: Requests,
+    component: lazyRouteComponent(
+      () => import('../screens/Requests.tsx'),
+      'Requests',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/fingerprints',
     validateSearch: fingerprintsSearch,
-    component: Fingerprints,
+    component: lazyRouteComponent(
+      () => import('../screens/Fingerprints.tsx'),
+      'Fingerprints',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/rules',
     validateSearch: rulesSearch,
-    component: Rules,
+    component: lazyRouteComponent(
+      () => import('../screens/Rules.tsx'),
+      'Rules',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/lists',
     validateSearch: listsSearch,
-    component: Lists,
+    component: lazyRouteComponent(
+      () => import('../screens/Lists.tsx'),
+      'Lists',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/limits',
-    component: RateLimits,
+    component: lazyRouteComponent(
+      () => import('../screens/RateLimits.tsx'),
+      'RateLimits',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/hosts',
     validateSearch: hostsSearch,
-    component: Hosts,
+    component: lazyRouteComponent(
+      () => import('../screens/Hosts.tsx'),
+      'Hosts',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/crawlers',
     validateSearch: crawlersSearch,
-    component: Crawlers,
+    component: lazyRouteComponent(
+      () => import('../screens/Crawlers.tsx'),
+      'Crawlers',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/attack',
-    component: Attack,
+    component: lazyRouteComponent(
+      () => import('../screens/Attack.tsx'),
+      'Attack',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/log',
     validateSearch: auditSearch,
-    component: AuditLog,
+    component: lazyRouteComponent(
+      () => import('../screens/AuditLog.tsx'),
+      'AuditLog',
+    ),
   }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: '/settings',
-    component: Settings,
+    component: lazyRouteComponent(
+      () => import('../screens/Settings.tsx'),
+      'Settings',
+    ),
   }),
 ] as const;
 
