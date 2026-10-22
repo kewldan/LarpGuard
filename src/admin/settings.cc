@@ -61,7 +61,7 @@ bool WriteFileAtomic(const std::string& path, std::string_view contents,
   std::size_t written = 0;
   bool ok = true;
   while (written < contents.size()) {
-    const ssize_t n =
+    const auto n =
         ::write(fd, contents.data() + written, contents.size() - written);
     if (n < 0) {
       if (errno == EINTR) continue;
