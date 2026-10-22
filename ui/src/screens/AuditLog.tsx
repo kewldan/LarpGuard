@@ -196,6 +196,7 @@ function Detail({ entry }: { entry: AuditEntry }) {
           >
             {diff.map((line, i) => (
               <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are positional.
                 key={i}
                 style={{
                   display: 'flex',

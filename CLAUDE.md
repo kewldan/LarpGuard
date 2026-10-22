@@ -32,7 +32,8 @@ cmake --build build --target tidy          # clang-tidy, должно быть 0
 npm --prefix ui ci
 npm --prefix ui run dev:api                # BFF на моках (users.ts) :9901
 npm --prefix ui run dev:web                # Vite :5173, /api → :9901
-npm --prefix ui run format:check && npm --prefix ui run lint && npm --prefix ui run typecheck
+npm --prefix ui run lint && npm --prefix ui run typecheck   # lint = biome check
+npm --prefix ui run format                 # biome check --write
 npm --prefix ui test                       # vitest: web (jsdom) и node
 npm --prefix ui run build && (cd ui && npx playwright test)
 npm --prefix ui run e2e:docker             # со скриншотами, как в CI (-- --update-snapshots)
@@ -50,7 +51,7 @@ ninja-build git python3 openssl curl nodejs clang` (`--privileged`, чтобы
 
 CI — `.github/workflows/ci.yml`: format (clang-format 23.1.3 из PyPI),
 clang-tidy (23.1.3, `debian:trixie`), тесты и e2e обычные и под ASan/UBSan,
-джоб Console (prettier, eslint, tsc, vitest, сборка, Playwright со
+джоб Console (Biome, tsc, vitest, сборка, Playwright со
 скриншотами в образе `mcr.microsoft.com/playwright`); на `main` и тегах
 `v*` после них — мультиархитектурные образы `ghcr.io/kewldan/larpguard` и
 `ghcr.io/kewldan/larpguard-console` (`latest`, `sha-…`, semver). Версию

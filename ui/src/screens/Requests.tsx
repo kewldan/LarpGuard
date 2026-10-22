@@ -6,30 +6,29 @@ import { useMemo, useState } from 'react';
 
 import type {
   AsnInfo,
-  GatewayConfig,
   RequestDetail as Detail,
+  GatewayConfig,
   RequestFilter,
   RequestRow,
 } from '../../shared/api.ts';
 import {
   ACTION_LOOK,
-  isAction,
-  RANGES,
   type Action,
   type BotClass,
+  isAction,
+  RANGES,
 } from '../../shared/domain.ts';
-import { useCanOperate } from '../app/session.ts';
 import type { RequestsSearch } from '../app/search.ts';
+import { useCanOperate } from '../app/session.ts';
 import { FingerprintPill } from '../domain/Fingerprint.tsx';
 import { ScoreBar, ScoreCell } from '../domain/ScoreBar.tsx';
-import { toneText } from '../lib/tone.ts';
 import { ActionChip, ClassBadge } from '../domain/verdict.tsx';
-import { clock, compact, count, dateTime, shorten } from '../lib/format.ts';
 import {
+  type FilterFields,
   filterToText,
   parseFilterText,
-  type FilterFields,
 } from '../lib/filter-text.ts';
+import { clock, compact, count, dateTime, shorten } from '../lib/format.ts';
 import { useCompact } from '../lib/media.ts';
 import {
   useAddListEntry,
@@ -38,6 +37,7 @@ import {
   useRequests,
 } from '../lib/queries.ts';
 import { reasonWeight, thresholdsOf, weightColor } from '../lib/signals.ts';
+import { toneText } from '../lib/tone.ts';
 import { parseClaim } from '../lib/user-agent.ts';
 import { Button } from '../ui/Button.tsx';
 import { Segmented } from '../ui/controls.tsx';
@@ -546,6 +546,7 @@ function RequestDetailView({
                 {c.claim}
               </span>
               <span
+                role="img"
                 aria-label={c.ok ? 'consistent' : 'inconsistent'}
                 style={{
                   textAlign: 'center',

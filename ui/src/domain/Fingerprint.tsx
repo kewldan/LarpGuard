@@ -76,6 +76,7 @@ export function DiffLine({
     >
       {tokens.map((token, i) => (
         <span
+          // biome-ignore lint/suspicious/noArrayIndexKey: tokens are positional and never reorder.
           key={i}
           style={{
             padding: '1px 2px',

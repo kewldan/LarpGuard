@@ -4,8 +4,8 @@
 
 import {
   ACTIONS,
-  BOT_CLASSES,
   type Action,
+  BOT_CLASSES,
   type BotClass,
 } from '../../shared/domain.ts';
 
@@ -50,7 +50,8 @@ export function filterToText(filter: FilterFields): string {
 }
 
 export type ParseResult =
-  { ok: true; filter: FilterFields } | { ok: false; error: string };
+  | { ok: true; filter: FilterFields }
+  | { ok: false; error: string };
 
 export function parseFilterText(text: string): ParseResult {
   const filter: FilterFields = {};

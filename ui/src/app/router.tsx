@@ -5,8 +5,8 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
-  lazyRouteComponent,
   Link,
+  lazyRouteComponent,
 } from '@tanstack/react-router';
 
 import { EmptyState } from '../ui/states.tsx';

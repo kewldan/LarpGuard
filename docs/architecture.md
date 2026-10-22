@@ -1865,11 +1865,11 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
   | Что              | Выбор                                   | Версия        |
   |------------------|-----------------------------------------|---------------|
   | Рантайм          | Node.js LTS                             | 24 (образ `node:24-trixie-slim`) |
-  | Язык             | TypeScript, `strict`                    | 6.0.3 (7.x пока не поддержан typescript-eslint) |
+  | Язык             | TypeScript, `strict`                    | 7.0.2         |
   | UI               | React + React DOM                       | 19.3.1        |
-  | Сборка           | Vite, `@vitejs/plugin-react`            | 8.3.4, 6.1.2  |
+  | Сборка           | Vite, `@vitejs/plugin-react`            | 8.3.5, 6.1.2  |
   | Маршрутизация    | TanStack Router (маршруты в коде, параметры поиска через zod) | 1.170.45 |
-  | Данные           | TanStack Query (кеш, опрос, отмена)     | 5.104.4       |
+  | Данные           | TanStack Query (кеш, опрос, отмена)     | 5.104.5       |
   | Контракт         | zod (схемы общие для BFF и SPA)         | 4.6.7         |
   | BFF              | Hono + `@hono/node-server`              | 4.13.13, 2.1.5 |
   | ClickHouse       | `@clickhouse/client` (HTTP)             | 1.24.1        |
@@ -1878,8 +1878,7 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
   | Шрифты           | `@fontsource/schibsted-grotesk`, `@fontsource/jetbrains-mono` | 5.3.0 |
   | Unit-тесты       | Vitest + Testing Library + jsdom        | 5.0.5, 16.3.3, 30.1.3 |
   | e2e и визуальные | Playwright                              | 1.64.1        |
-  | Линт             | ESLint + typescript-eslint (`strictTypeChecked`) + react-hooks | 10.13.0, 8.71.2, 7.1.1 |
-  | Формат           | Prettier                                | 3.9.10        |
+  | Линт и формат    | Biome (правила React и хуков, `noFloatingPromises`, `useImportType`) | 2.6.2 |
 
   Почему так. *React* — самый проверенный вариант для плотного
   интерактивного интерфейса, и дизайн уже разбит на компоненты.
@@ -1965,8 +1964,8 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
   (мульти-арх, те же теги, что у шлюза), сервис `console` в
   `deploy/docker-compose.yml` (`network_mode: host`, том с сокетом),
   пример `deploy/console.yaml`. В `ci.yml` — джоб `ui`: `npm ci`,
-  `format:check`, `lint`, `typecheck`, `test`, `build`, Playwright; образ
-  консоли собирается после него на `main` и тегах.
+  `lint` (Biome: формат, импорты, правила), `typecheck`, `test`, `build`,
+  Playwright; образ консоли собирается после него на `main` и тегах.
 
   **11. Документация.** Этот ADR; разделы 3.2, 12 (новые эндпоинты admin
   API), 14 (статус); `deploy/bot-shield.yaml` (`admin.modes_file`),

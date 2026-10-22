@@ -2,7 +2,7 @@
 // every failure says whether traffic is still being filtered and gives a
 // next step.
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 
 import { Button } from './Button.tsx';
 import { Icon } from './Icon.tsx';
@@ -45,6 +45,7 @@ export function Skeleton({
         style={{ padding: 16, display: 'grid', gap: 12 }}
       >
         {Array.from({ length: rows }, (_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows have no identity.
           <div key={i} style={{ display: 'flex', gap: 12 }}>
             <Shimmer style={{ width: 70 }} />
             <Shimmer style={{ flex: 1 }} />

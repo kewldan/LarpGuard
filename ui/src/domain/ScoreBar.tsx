@@ -2,9 +2,8 @@
 // tone of the resulting action ("04 Score bar & reason chips").
 
 import { scoreTone, type Tone } from '../design/tokens.ts';
-import { TONE_TEXT as TEXT } from '../lib/tone.ts';
-
 import type { Thresholds } from '../lib/tone.ts';
+import { TONE_TEXT as TEXT } from '../lib/tone.ts';
 
 const FILL: Record<Tone, string> = {
   allowed: 'var(--color-allowed)',

@@ -103,7 +103,7 @@ jobs:
         run: cmake --build build --target tidy
       - run: ccache --show-stats
 
-  # The web console (ui/): format, lint, types, unit tests, build and the
+  # The web console (ui/): Biome (format and lint), types, unit tests, build and the
   # browser tests. Runs in the Playwright image so screenshots compare with
   # the baselines made by `npm run e2e:docker`.
   ui:
@@ -124,7 +124,6 @@ jobs:
           path: /root/.npm
           key: npm-${{ hashFiles('ui/package-lock.json') }}
       - run: npm ci --no-audit --no-fund
-      - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test

@@ -30,11 +30,11 @@
   border-bottom: 0;
 }
 
-.table tbody tr:hover td {
+.table tr[aria-selected='true'] td {
   background: var(--color-surface-2);
 }
 
-.table tr[aria-selected='true'] td {
+.table tbody tr:hover td {
   background: var(--color-surface-2);
 }
 

@@ -5,8 +5,8 @@
 import type { GatewayConfig, ListEntry } from '../../shared/api.ts';
 import type { HostMode } from '../../shared/domain.ts';
 import {
-  AdminError,
   type AdminApi,
+  AdminError,
   type HostPolicy,
 } from '../gateway/admin.ts';
 import { compileRule, RuleError } from './mini-rules.ts';

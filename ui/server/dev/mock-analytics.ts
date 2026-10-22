@@ -3,16 +3,16 @@
 
 import type { RequestFilterParsed } from '../../shared/api.ts';
 import {
+  type Action,
   BLOCKING_ACTIONS,
   CHALLENGING_ACTIONS,
   RANGE_SECONDS,
   RANGE_STEP_SECONDS,
-  type Action,
 } from '../../shared/domain.ts';
 import {
+  type Analytics,
   bucketStarts,
   fillSeries,
-  type Analytics,
   type HostCounts,
 } from '../analytics/analytics.ts';
 import type { MockEvent } from './mock-data.ts';

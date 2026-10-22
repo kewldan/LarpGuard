@@ -1,7 +1,7 @@
 // The console's charts, drawn as plain SVG from the design: sparklines,
 // the stacked verdict area with the dashed would-block line, health dots.
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 
 import type { VerdictPoint } from '../../shared/api.ts';
 import { niceCeil, sparkPoints } from '../lib/chart-math.ts';
@@ -200,6 +200,7 @@ export function VerdictChart({
           ) : null}
         </svg>
         {tooltip ? (
+          // biome-ignore lint/a11y/noStaticElementInteractions: hover zones for a pointer-only tooltip.
           <div
             style={{ position: 'absolute', inset: 0, display: 'flex' }}
             onMouseLeave={() => {
@@ -207,6 +208,7 @@ export function VerdictChart({
             }}
           >
             {series.map((p, i) => (
+              // biome-ignore lint/a11y/noStaticElementInteractions: hover zones for a pointer-only tooltip.
               <div
                 key={p.t}
                 style={{ flex: 1, height: '100%' }}

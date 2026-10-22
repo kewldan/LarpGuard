@@ -3,7 +3,7 @@
 
 import type { Hono } from 'hono';
 
-import { hostsSchema, setModeSchema, type HostRow } from '../../shared/api.ts';
+import { type HostRow, hostsSchema, setModeSchema } from '../../shared/api.ts';
 import type { HostMode } from '../../shared/domain.ts';
 import type { AppEnv, Deps } from '../deps.ts';
 import { fail, jsonBody, parseOr400, send } from '../http.ts';

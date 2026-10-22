@@ -3,13 +3,13 @@
 // own. The aside shows what the gateway decided about this very request.
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState, type SubmitEvent } from 'react';
+import { type SubmitEvent, useRef, useState } from 'react';
 
 import { sessionSchema, whoamiSchema } from '../../shared/api.ts';
 import { sessionKey } from '../app/session.ts';
-import { ClassBadge } from '../domain/verdict.tsx';
 import { ReasonChip } from '../domain/ReasonChip.tsx';
 import { ScoreCell } from '../domain/ScoreBar.tsx';
+import { ClassBadge } from '../domain/verdict.tsx';
 import { ApiError, getJson, sendJson, setCsrfToken } from '../lib/api.ts';
 import { useTheme } from '../lib/theme.ts';
 import { Button, IconButton } from '../ui/Button.tsx';
@@ -291,6 +291,7 @@ export function Login() {
                   <div className={styles.boxRow} aria-hidden="true">
                     {Array.from({ length: 6 }, (_, i) => (
                       <div
+                        // biome-ignore lint/suspicious/noArrayIndexKey: one box per code digit.
                         key={i}
                         className={`mono ${styles.box} ${error ? styles.boxError : i === code.length ? styles.boxActive : ''}`}
                       >

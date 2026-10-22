@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-
+import { MOCK_CONFIG } from '../../server/dev/mock-config.ts';
 import { niceCeil, sparkPoints } from './chart-math.ts';
 import { limitYaml, perSecond, ruleYaml } from './config-yaml.ts';
 import { diffLines, diffSegments } from './diff.ts';
@@ -16,7 +16,6 @@ import {
 import { highlight } from './rule-syntax.ts';
 import { reasonWeight, thresholdsOf, weightColor } from './signals.ts';
 import { parseClaim } from './user-agent.ts';
-import { MOCK_CONFIG } from '../../server/dev/mock-config.ts';
 
 describe('format', () => {
   it('compacts numbers like the design', () => {

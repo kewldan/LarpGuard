@@ -3,9 +3,9 @@
 
 import { Login } from '../screens/Login.tsx';
 import { ErrorState } from '../ui/states.tsx';
-import { useSessionExpiry, useSessionQuery } from './session.ts';
 import { SessionProvider } from './SessionProvider.tsx';
 import { Shell } from './Shell.tsx';
+import { useSessionExpiry, useSessionQuery } from './session.ts';
 
 export function Root() {
   const session = useSessionQuery();

@@ -4,20 +4,19 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-
+import { HealthDot, type HealthState } from '../domain/charts.tsx';
 import { send } from '../lib/api.ts';
 import { ago, compact } from '../lib/format.ts';
 import { useGatewayConfig, useStatus } from '../lib/queries.ts';
 import { useTheme } from '../lib/theme.ts';
-import { HealthDot, type HealthState } from '../domain/charts.tsx';
 import { IconButton } from '../ui/Button.tsx';
 import { Kbd } from '../ui/controls.tsx';
 import { Icon, Logo } from '../ui/Icon.tsx';
 import { Dialog } from '../ui/Overlay.tsx';
 import { CommandPalette } from './CommandPalette.tsx';
 import { NAV } from './nav.ts';
-import { sessionKey, useSession } from './session.ts';
 import styles from './Shell.module.css';
+import { sessionKey, useSession } from './session.ts';
 
 function useSignOut(): () => void {
   const client = useQueryClient();
@@ -254,6 +253,7 @@ export function Shell() {
         label="All screens"
         variant="sheet"
       >
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegates clicks of the links inside, which handle the keyboard. */}
         <nav
           className={styles.menuList}
           aria-label="All screens"

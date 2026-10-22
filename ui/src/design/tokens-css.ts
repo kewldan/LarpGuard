@@ -16,8 +16,8 @@ import {
   scoreThreshold,
   shadow,
   space,
-  tracking,
   type Theme,
+  tracking,
   zIndex,
 } from './tokens.ts';
 

@@ -2,7 +2,7 @@
 // layer for free. A Sheet slides up from the bottom (phones), a Dialog sits
 // in the middle.
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 
 import { IconButton } from './Button.tsx';
 
@@ -28,6 +28,7 @@ export function Dialog({
   }, [open]);
   const sheet = variant === 'sheet';
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop clicks only; Escape closes the dialog natively.
     <dialog
       ref={ref}
       aria-label={label}

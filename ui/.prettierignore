@@ -1,8 +1,0 @@
-dist
-node_modules
-coverage
-playwright-report
-test-results
-src/design/tokens.css
-tests/e2e/__screenshots__
-package-lock.json

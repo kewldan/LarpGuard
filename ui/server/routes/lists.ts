@@ -4,10 +4,10 @@
 import type { Hono } from 'hono';
 
 import {
+  type ListEntry,
   listEntrySchema,
   listsSchema,
   newListEntrySchema,
-  type ListEntry,
 } from '../../shared/api.ts';
 import type { AppEnv, Deps } from '../deps.ts';
 import { fail, jsonBody, parseOr400, send } from '../http.ts';

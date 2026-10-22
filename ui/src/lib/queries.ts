@@ -8,34 +8,33 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-
+import { useSyncExternalStore } from 'react';
 import {
   attackSchema,
   auditSchema,
   crawlersSchema,
+  type EnableAttack,
+  type FingerprintKind,
   fingerprintsSchema,
   gatewayConfigSchema,
   hostsSchema,
   limitsSchema,
   listEntrySchema,
   listsSchema,
-  overviewSchema,
-  reloadResultSchema,
-  requestDetailSchema,
-  ruleCheckSchema,
-  requestPageSchema,
-  ruleTestResultSchema,
-  rulesSchema,
-  searchSchema,
-  statusSchema,
-  type EnableAttack,
-  type FingerprintKind,
   type NewListEntry,
+  overviewSchema,
   type RequestFilter,
   type RuleTestRequest,
+  reloadResultSchema,
+  requestDetailSchema,
+  requestPageSchema,
+  ruleCheckSchema,
+  rulesSchema,
+  ruleTestResultSchema,
   type SetMode,
+  searchSchema,
+  statusSchema,
 } from '../../shared/api.ts';
-import { useSyncExternalStore } from 'react';
 
 import type { Range } from '../../shared/domain.ts';
 import { getJson, send, sendJson } from './api.ts';

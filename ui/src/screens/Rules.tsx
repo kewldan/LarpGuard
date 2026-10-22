@@ -9,10 +9,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Rules as RulesData, RuleTestResult } from '../../shared/api.ts';
 import { ACTIONS, type Action } from '../../shared/domain.ts';
 import { useCanOperate } from '../app/session.ts';
-import { toneText } from '../lib/tone.ts';
 import { ActionChip } from '../domain/verdict.tsx';
 import { ApiError } from '../lib/api.ts';
-import { ruleYaml, type RuleDraft } from '../lib/config-yaml.ts';
+import { type RuleDraft, ruleYaml } from '../lib/config-yaml.ts';
 import { clock, compact, count, lineColumn, percent } from '../lib/format.ts';
 import { useCompact } from '../lib/media.ts';
 import {
@@ -24,6 +23,7 @@ import {
 } from '../lib/queries.ts';
 import { highlight } from '../lib/rule-syntax.ts';
 import { thresholdsOf } from '../lib/signals.ts';
+import { toneText } from '../lib/tone.ts';
 import { Button } from '../ui/Button.tsx';
 import { Icon, Spinner } from '../ui/Icon.tsx';
 import {
@@ -117,6 +117,7 @@ function Editor({
       >
         {lines.map((_, i) => (
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: line numbers are the index.
             key={i}
             style={{
               paddingRight: 10,
@@ -141,6 +142,7 @@ function Editor({
         >
           {lines.map((line, i) => (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: editor lines are positional.
               key={i}
               style={{
                 whiteSpace: 'pre-wrap',
@@ -150,6 +152,7 @@ function Editor({
             >
               {highlight(line).map((token, j) => (
                 <span
+                  // biome-ignore lint/suspicious/noArrayIndexKey: tokens are positional.
                   key={j}
                   style={{ color: token.color, fontWeight: token.weight }}
                 >
@@ -400,6 +403,7 @@ function TestResult({
             </thead>
             <tbody>
               {result.samples.map((sample, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: samples have no id and never reorder.
                 <tr key={i}>
                   <td className={`mono ${table.muted}`}>{clock(sample.ts)}</td>
                   <td className="mono">

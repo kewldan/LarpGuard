@@ -5,8 +5,8 @@ import type { Hono } from 'hono';
 
 import {
   gatewayConfigSchema,
-  statusSchema,
   type SourceState,
+  statusSchema,
 } from '../../shared/api.ts';
 import type { AppEnv } from '../deps.ts';
 import { send } from '../http.ts';

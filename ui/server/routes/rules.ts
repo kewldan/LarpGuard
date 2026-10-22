@@ -5,18 +5,18 @@
 import type { Hono } from 'hono';
 
 import {
+  type RuleTestResult,
   reloadResultSchema,
   ruleCheckSchema,
+  rulesSchema,
   ruleTestRequestSchema,
   ruleTestResultSchema,
-  rulesSchema,
-  type RuleTestResult,
 } from '../../shared/api.ts';
 import type { SampleEvent } from '../analytics/analytics.ts';
-import { requireRole } from '../roles.ts';
 import type { AppEnv } from '../deps.ts';
 import type { RuleSampleEvent } from '../gateway/admin.ts';
 import { jsonBody, parseOr400, send } from '../http.ts';
+import { requireRole } from '../roles.ts';
 import { actor, analytics } from './common.ts';
 
 const SAMPLE_TARGET = 2000;

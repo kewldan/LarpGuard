@@ -5,11 +5,11 @@
 import { z } from 'zod';
 
 import {
-  requestDetailSchema,
-  requestRowSchema,
   type FingerprintKind,
   type RequestFilterParsed,
   type RequestRow,
+  requestDetailSchema,
+  requestRowSchema,
   type VerdictPoint,
 } from '../../shared/api.ts';
 import {
@@ -17,7 +17,7 @@ import {
   RANGE_STEP_SECONDS,
   type Range,
 } from '../../shared/domain.ts';
-import { Sql, type Query } from './sql.ts';
+import { type Query, Sql } from './sql.ts';
 
 export type Run = <T>(query: Query, row: z.ZodType<T>) => Promise<T[]>;
 

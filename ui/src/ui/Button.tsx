@@ -5,7 +5,11 @@ import { Icon } from './Icon.tsx';
 import type { IconName } from './icons.ts';
 
 export type ButtonVariant =
-  'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerOutline';
+  | 'primary'
+  | 'secondary'
+  | 'ghost'
+  | 'danger'
+  | 'dangerOutline';
 
 export function Button({
   variant = 'secondary',

@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
 import { base32Decode, totpAt } from '../../server/auth/totp.ts';
-import { E2E_TIME, DEV_TOTP_SECRET } from '../../server/dev/users.ts';
+import { DEV_TOTP_SECRET, E2E_TIME } from '../../server/dev/users.ts';
 
 export const AUTH_FILE = 'test-results/.auth/dev.json';
 

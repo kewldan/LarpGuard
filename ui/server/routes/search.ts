@@ -7,7 +7,7 @@ import { isIP } from 'node:net';
 import type { Hono } from 'hono';
 import { z } from 'zod';
 
-import { searchSchema, type SearchResult } from '../../shared/api.ts';
+import { type SearchResult, searchSchema } from '../../shared/api.ts';
 import type { AppEnv } from '../deps.ts';
 import { addressPrefix, parseOr400, send } from '../http.ts';
 

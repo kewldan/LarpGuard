@@ -123,6 +123,7 @@ export function CommandPalette({
   const index = Math.min(active, Math.max(0, items.length - 1));
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop clicks only; Escape closes the dialog natively.
     <dialog
       ref={ref}
       aria-label="Command palette"

@@ -5,9 +5,9 @@ import type { Hono } from 'hono';
 import { z } from 'zod';
 
 import { overviewSchema, rangeSchema } from '../../shared/api.ts';
+import { RANGE_SECONDS, RANGE_STEP_SECONDS } from '../../shared/domain.ts';
 import type { AppEnv } from '../deps.ts';
 import { parseOr400, send } from '../http.ts';
-import { RANGE_SECONDS, RANGE_STEP_SECONDS } from '../../shared/domain.ts';
 import { analytics, asnNames } from './common.ts';
 
 export function registerOverview(app: Hono<AppEnv>): void {

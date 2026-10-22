@@ -2,15 +2,14 @@
 // and the health of every part.
 
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-
-import { RANGES, reasonBase, type Range } from '../../shared/domain.ts';
 import type { Overview as OverviewData, Status } from '../../shared/api.ts';
+import { RANGES, type Range, reasonBase } from '../../shared/domain.ts';
 import {
   HealthDot,
+  type HealthState,
   Legend,
   Sparkline,
   VerdictChart,
-  type HealthState,
 } from '../domain/charts.tsx';
 import { ModeBadge } from '../domain/verdict.tsx';
 import { compact, count, percent } from '../lib/format.ts';
@@ -391,7 +390,7 @@ function Crawlers({ data }: { data: OverviewData }) {
                 justifyContent: 'center',
               }}
             >
-              <svg width="8" height="8" viewBox="0 0 10 10">
+              <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true">
                 <path
                   d="M2 5.2l2 2L8 3"
                   fill="none"

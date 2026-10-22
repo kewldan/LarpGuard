@@ -125,7 +125,7 @@ function RateChart({
   );
 }
 
-function describe(entry: AttackEntry): string {
+function entryLabel(entry: AttackEntry): string {
   return entry.host === '*' ? 'all hosts' : entry.host;
 }
 
@@ -162,7 +162,7 @@ export function Attack() {
         className: styles.heroOn,
         title: 'Attack mode on',
         short: 'On',
-        sub: `${primary?.source === 'auto' ? 'Switched on automatically' : 'Switched on by an operator'} for ${data.entries.map(describe).join(', ')}. Every client without a valid token is being challenged.`,
+        sub: `${primary?.source === 'auto' ? 'Switched on automatically' : 'Switched on by an operator'} for ${data.entries.map(entryLabel).join(', ')}. Every client without a valid token is being challenged.`,
         label: left !== null ? 'Time left' : 'Active for',
         value:
           left !== null
@@ -241,7 +241,7 @@ export function Attack() {
         <div className={styles.heroTop}>
           <span className={styles.heroDot} />
           Attack mode ·{' '}
-          {active ? data.entries.map(describe).join(', ') : 'all hosts'}
+          {active ? data.entries.map(entryLabel).join(', ') : 'all hosts'}
         </div>
         <div className={styles.heroRow}>
           <div>
@@ -335,7 +335,7 @@ export function Attack() {
                     }}
                   >
                     <span className="mono" style={{ flex: '1 1 160px' }}>
-                      {describe(entry)}
+                      {entryLabel(entry)}
                     </span>
                     <span
                       className="mono"

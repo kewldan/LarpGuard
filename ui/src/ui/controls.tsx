@@ -1,11 +1,11 @@
 // Form controls: segmented, switch, text fields, query bar.
 
 import {
-  useId,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
+  useId,
 } from 'react';
 
 import styles from './controls.module.css';

@@ -2,8 +2,8 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { ScoreCell } from './ScoreBar.tsx';
-import { ActionChip, ClassBadge, ModeBadge } from './verdict.tsx';
 import styles from './verdict.module.css';
+import { ActionChip, ClassBadge, ModeBadge } from './verdict.tsx';
 
 describe('verdict primitives', () => {
   it('folds actions into tones', () => {

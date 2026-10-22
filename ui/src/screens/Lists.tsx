@@ -2,7 +2,7 @@
 // networks, JA4 and header-order globs), checked before rules and scoring.
 
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { useMemo, useState, type SubmitEvent } from 'react';
+import { type SubmitEvent, useMemo, useState } from 'react';
 
 import type { Lists as ListsData } from '../../shared/api.ts';
 import { LIST_KINDS, type ListKind } from '../../shared/domain.ts';
@@ -16,6 +16,7 @@ import {
 } from '../lib/queries.ts';
 import { Button } from '../ui/Button.tsx';
 import { PageHead } from '../ui/Card.tsx';
+import controls from '../ui/controls.module.css';
 import { QueryBar } from '../ui/controls.tsx';
 import {
   EmptyState,
@@ -24,7 +25,6 @@ import {
   Skeleton,
 } from '../ui/states.tsx';
 import { useToast } from '../ui/toast-context.ts';
-import controls from '../ui/controls.module.css';
 import styles from './screens.module.css';
 
 type Entry = ListsData['entries'][number];
@@ -432,6 +432,7 @@ export function Lists() {
           }}
         >
           <div style={{ minWidth: 980, fontSize: 12.5 }}>
+            {/* biome-ignore lint/a11y/useFocusableInteractive: a row of a static table, not a grid. */}
             <div
               role="row"
               style={{
@@ -452,8 +453,9 @@ export function Lists() {
                 'Hits 24h',
                 '',
               ].map((name, i) => (
+                // biome-ignore lint/a11y/useFocusableInteractive: a header cell of a static table, not a grid.
                 <div
-                  key={i}
+                  key={name || 'actions'}
                   role="columnheader"
                   style={{
                     padding: '10px 14px',
@@ -471,6 +473,7 @@ export function Lists() {
                 ? entry.expires_at - entry.created_at
                 : null;
               return (
+                // biome-ignore lint/a11y/useFocusableInteractive: a row of a static table, not a grid.
                 <div
                   key={entry.id}
                   role="row"

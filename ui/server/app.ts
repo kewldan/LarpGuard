@@ -6,12 +6,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono, type Context } from 'hono';
+import { type Context, Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 
 import { loginSchema, sessionSchema, whoamiSchema } from '../shared/api.ts';
 import { FailureLimiter } from './auth/limiter.ts';
-import { safeEqual, type SessionData } from './auth/sessions.ts';
+import { type SessionData, safeEqual } from './auth/sessions.ts';
 import { verifyTotp } from './auth/totp.ts';
 import { secureCookies } from './config.ts';
 import type { AppEnv, Deps } from './deps.ts';

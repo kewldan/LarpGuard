@@ -4,7 +4,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, use, useEffect } from 'react';
 
-import { sessionSchema, type Session } from '../../shared/api.ts';
+import { type Session, sessionSchema } from '../../shared/api.ts';
 import { ApiError, getJson, onUnauthorized, setCsrfToken } from '../lib/api.ts';
 
 export const sessionKey = ['session'] as const;

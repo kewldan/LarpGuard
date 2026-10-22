@@ -3,9 +3,9 @@
 import type { Hono } from 'hono';
 
 import {
+  type FingerprintKind,
   fingerprintQuerySchema,
   fingerprintsSchema,
-  type FingerprintKind,
   type GatewayConfig,
 } from '../../shared/api.ts';
 import type { AppEnv } from '../deps.ts';

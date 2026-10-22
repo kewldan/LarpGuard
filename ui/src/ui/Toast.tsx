@@ -1,11 +1,11 @@
 // Short confirmations ("Copied", "Added to block list").
 
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
   useState,
-  type ReactNode,
 } from 'react';
 
 import { ToastContext } from './toast-context.ts';

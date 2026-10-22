@@ -2,9 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
-
-import { kebab, renderTokensCss } from './tokens-css.ts';
 import { color, scoreThreshold, scoreTone } from './tokens.ts';
+import { kebab, renderTokensCss } from './tokens-css.ts';
 
 describe('tokens', () => {
   it('tokens.css is generated from tokens.ts (run npm run tokens)', () => {

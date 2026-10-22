@@ -4,7 +4,7 @@
 import { useSession } from '../app/session.ts';
 import { dateTime } from '../lib/format.ts';
 import { useGatewayConfig, useStatus } from '../lib/queries.ts';
-import { setTheme, useTheme, type ThemeChoice } from '../lib/theme.ts';
+import { setTheme, type ThemeChoice, useTheme } from '../lib/theme.ts';
 import { Card, PageHead } from '../ui/Card.tsx';
 import { Segmented } from '../ui/controls.tsx';
 import styles from './screens.module.css';

@@ -1,0 +1,84 @@
+// Format and lint: Biome. Formatting matches the earlier Prettier setup.
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "**",
+      "!src/design/tokens.css",
+      "!tests/e2e/__screenshots__",
+      "!package-lock.json"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80
+  },
+  "javascript": {
+    "formatter": { "quoteStyle": "single", "trailingCommas": "all" }
+  },
+  "css": {
+    "parser": { "cssModules": true },
+    "formatter": { "quoteStyle": "single" }
+  },
+  "assist": {
+    "actions": { "source": { "organizeImports": "on" } }
+  },
+  "linter": {
+    "domains": { "react": "recommended", "test": "recommended" },
+    "rules": {
+      "preset": "recommended",
+      "a11y": {
+        // Custom widgets carry explicit ARIA roles on purpose: segmented
+        // radios, meter bars and the responsive grid in Lists would need
+        // a different layout as <input>, <meter> or <table>.
+        "useSemanticElements": "off"
+      },
+      "complexity": {
+        // Conflicts with noPropertyAccessFromIndexSignature in tsconfig.
+        "useLiteralKeys": "off",
+        // !important only beats inline styles of shared primitives and
+        // enforces prefers-reduced-motion.
+        "noImportantStyles": "off"
+      },
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "noUnusedFunctionParameters": "error",
+        "useExhaustiveDependencies": "error",
+        "useHookAtTopLevel": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noDoubleEquals": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "error",
+        "useImportType": "error",
+        "useExportType": "error",
+        "useConst": "error",
+        "useComponentExportOnlyModules": {
+          "level": "error",
+          "options": { "allowConstantExport": true }
+        }
+      },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "src/**/*.test.ts",
+        "src/**/*.test.tsx",
+        "src/test-setup.ts"
+      ],
+      "linter": {
+        "rules": { "style": { "useComponentExportOnlyModules": "off" } }
+      }
+    }
+  ]
+}

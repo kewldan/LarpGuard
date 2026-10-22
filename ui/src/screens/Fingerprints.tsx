@@ -12,10 +12,10 @@ import {
 import { Sparkline } from '../domain/charts.tsx';
 import { DiffLine, FingerprintPill } from '../domain/Fingerprint.tsx';
 import { diffSegments, separatorFor } from '../lib/diff.ts';
-import { toneText } from '../lib/tone.ts';
 import { ago, compact, count } from '../lib/format.ts';
 import { useFingerprints, useGatewayConfig } from '../lib/queries.ts';
 import { thresholdsOf } from '../lib/signals.ts';
+import { toneText } from '../lib/tone.ts';
 import { parseClaim } from '../lib/user-agent.ts';
 import { Card, PageHead } from '../ui/Card.tsx';
 import { QueryBar } from '../ui/controls.tsx';
