@@ -399,6 +399,28 @@ The architecture, ADRs, the full signal catalogue and the milestone history
 are in [`docs/architecture.md`](docs/architecture.md). That document is in
 Russian.
 
+## 📊 Capacity on a small box
+
+Numbers from a 2 vCPU / 2 GB test box, driven by
+[`oha`](https://github.com/hatoo/oha) from ~8 ms away. Not a benchmark — a
+sense of scale and of where the limit is.
+
+| Load | Result |
+|------|--------|
+| 1,000 req/s, HTTP/2 | p99 **15 ms**, gateway ~0.2 of one core |
+| 1,000 req/s of spoofed Chrome on an `enforce` host | all blocked (403), gateway 0.4 core, upstream untouched |
+| ~4,700 req/s (saturation) | still serving, gateway **< 1 core / 65 MiB**; latency climbs, nothing dropped |
+| a new TLS connection per request, flooded | XDP caps SYNs at the configured rate per /24 and drops the rest in the kernel |
+
+The verdict engine is thread-per-core and cheap: on this box it never was
+the bottleneck — the shared CPU (chiefly event ingestion into ClickHouse)
+was. Blocking and challenging cost about the same as proxying, so
+**under-attack mode is a real defence even here**: dropping a flood is
+cheaper than forwarding it.
+
+On 2 GB, size ClickHouse carefully (small thread pools and caches) or put it
+on its own host — the analytics sink, not the gateway, is what wants RAM.
+
 ## 🗺️ Roadmap
 
 - [x] **M0**: TLS front, routing by ClientHello, certificates from `acme.json`
