@@ -157,6 +157,8 @@ export interface RuleSampleEvent {
   asn: number;
   signed_agent: string;
   ip_prefix: string;
+  tcp_rtt_us: number | null;
+  handshake_us: number | null;
 }
 
 export interface AdminApi {

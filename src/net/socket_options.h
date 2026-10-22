@@ -20,6 +20,12 @@ bool EnableSynCapture(int listen_fd);
 // The kernel hands the SYN out once per connection.
 std::vector<uint8_t> ReadSavedSyn(int fd);
 
+// The kernel's smoothed round-trip time of a connected TCP socket in
+// microseconds (TCP_INFO on Linux, TCP_CONNECTION_INFO on macOS), or -1.
+// It measures the path to the peer's TCP stack: a proxy's, when there is
+// one.
+int64_t TcpRttMicros(int fd);
+
 }  // namespace bot_shield
 
 #endif  // BOT_SHIELD_NET_SOCKET_OPTIONS_H_

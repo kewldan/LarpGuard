@@ -33,6 +33,8 @@ const FIELDS: Record<string, Type> = {
   asn_country: 'string',
   asn_hosting: 'bool',
   signed_agent: 'string',
+  tcp_rtt_ms: 'int',
+  handshake_ms: 'int',
 };
 
 interface Token {
@@ -106,6 +108,14 @@ function field(event: RuleSampleEvent, name: string): Value {
       );
     case 'asn_hosting':
       return [64496, 64497, 64500].includes(event.asn);
+    case 'tcp_rtt_ms':
+      return event.tcp_rtt_us === null
+        ? -1
+        : Math.floor(event.tcp_rtt_us / 1000);
+    case 'handshake_ms':
+      return event.handshake_us === null
+        ? -1
+        : Math.floor(event.handshake_us / 1000);
     default: {
       const value = (event as unknown as Record<string, Value | undefined>)[
         name

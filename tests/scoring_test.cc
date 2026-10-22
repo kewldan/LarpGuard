@@ -224,6 +224,39 @@ TEST_F(ScorerTest, TcpOsMismatch) {
       0);
 }
 
+TEST(RelayTest, HandshakeFarSlowerThanTcpLooksRelayed) {
+  // A proxy 5 ms away, the client 150 ms behind it.
+  EXPECT_TRUE(LooksRelayed(5'000, 155'000));
+  // A distant client without a relay: the two agree.
+  EXPECT_FALSE(LooksRelayed(140'000, 150'000));
+  // A slow phone adds a few tens of milliseconds: below the gap.
+  EXPECT_FALSE(LooksRelayed(20'000, 70'000));
+  // Large gap but not three times the TCP round trip.
+  EXPECT_FALSE(LooksRelayed(60'000, 170'000));
+  EXPECT_TRUE(LooksRelayed(40'000, 120'000));
+  // Unknown either way.
+  EXPECT_FALSE(LooksRelayed(-1, 200'000));
+  EXPECT_FALSE(LooksRelayed(5'000, -1));
+  EXPECT_FALSE(LooksRelayed(0, 200'000));
+}
+
+TEST_F(ScorerTest, RelayedConnectionSignal) {
+  const HttpRequest request = BrowserRequest(kChromeUa);
+  ScoringInput input;
+  input.request = &request;
+  input.ja4 = kChromeJa4;
+  input.offered_h2 = true;
+  input.pseudo_order = "m,a,s,p";
+  input.tcp_rtt_us = 4'000;
+  input.handshake_us = 180'000;
+  const Verdict relayed = scorer_.Score(input);
+  EXPECT_TRUE(Has(relayed, "relayed_connection"));
+  EXPECT_EQ(relayed.score,
+            FingerprintLibrary::BuiltIn().Weight("relayed_connection"));
+  input.handshake_us = 9'000;
+  EXPECT_FALSE(Has(scorer_.Score(input), "relayed_connection"));
+}
+
 TEST_F(ScorerTest, AutomationSignaturesAndCap) {
   FingerprintLibrary library;
   std::string error;

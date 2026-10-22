@@ -45,6 +45,12 @@ struct ConnectionRecord {
   std::string quic_fp;
   // Initial TTL of the SYN (64, 128, ...); 0 when not captured.
   int tcp_initial_ttl = 0;
+  // Round trips, -1 when unknown. The kernel's TCP RTT reaches the nearest
+  // TCP stack (a proxy's, if any); the TLS handshake (server flight to the
+  // client's Finished) reaches the TLS client itself. TLS 1.3 only: one
+  // round trip there.
+  int64_t tcp_rtt_us = -1;
+  int64_t handshake_us = -1;
   // Autonomous system of the peer (ASN database); 0 when unknown.
   uint32_t asn = 0;
   uint64_t bytes_in = 0;

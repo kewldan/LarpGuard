@@ -138,7 +138,9 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     model_score        Nullable(Float32),
     client_fp          String,
     signed_agent       String,
-    asn                UInt32
+    asn                UInt32,
+    tcp_rtt_us         Nullable(UInt32),
+    handshake_us       Nullable(UInt32)
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -208,7 +210,13 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     client_fp          String,
     -- Verified Web Bot Auth agent (host of its key directory).
     signed_agent       LowCardinality(String),
-    asn                UInt32
+    asn                UInt32,
+    -- Kernel TCP round trip (to the nearest TCP stack, a proxy's if any)
+    -- and the TLS 1.3 handshake (to the TLS client), microseconds; NULL
+    -- when unknown (QUIC, TLS 1.2, other platforms). Signal
+    -- relayed_connection when the second is far larger.
+    tcp_rtt_us         Nullable(UInt32),
+    handshake_us       Nullable(UInt32)
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)
@@ -224,6 +232,8 @@ ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS model_score Nullable(Float32
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS client_fp String;
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS signed_agent LowCardinality(String);
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS asn UInt32;
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS tcp_rtt_us Nullable(UInt32);
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS handshake_us Nullable(UInt32);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS bot_shield.req_mv TO bot_shield.req AS
 SELECT fromUnixTimestamp64Milli(toInt64(ts_ms), 'UTC') AS ts, * EXCEPT ts_ms

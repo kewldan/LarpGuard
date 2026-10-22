@@ -416,6 +416,17 @@ TEST_F(AdminServerTest, RulesTest) {
   EXPECT_EQ(response.body["evaluated"], 4);
   EXPECT_EQ(response.body["matched"], nlohmann::json::array({0}));
 
+  // Round trips arrive in microseconds as in events; null is unknown (-1,
+  // which "< 10" alone would match).
+  response = Call("POST", "/rules/test",
+                  R"({"when":"handshake_ms > 100 and tcp_rtt_ms >= 0 and )"
+                  R"(tcp_rtt_ms < 10",)"
+                  R"("samples":[{"tcp_rtt_us":4000,"handshake_us":180000},)"
+                  R"({"tcp_rtt_us":null,"handshake_us":180000},)"
+                  R"({"tcp_rtt_us":90000,"handshake_us":95000}]})");
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(response.body["matched"], nlohmann::json::array({0}));
+
   EXPECT_EQ(Call("POST", "/rules/test",
                  R"({"when":"true","samples":[{"score":"x"}]})")
                 .status,

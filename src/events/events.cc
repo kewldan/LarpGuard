@@ -220,6 +220,8 @@ std::string RequestEventJson(const ConnectionRecord& record,
     SetIfNotEmpty(json, "signed_agent", outcome->signed_agent);
   }
   if (record.asn != 0) json["asn"] = record.asn;
+  if (record.tcp_rtt_us >= 0) json["tcp_rtt_us"] = record.tcp_rtt_us;
+  if (record.handshake_us >= 0) json["handshake_us"] = record.handshake_us;
 #if BOT_SHIELD_FOXIO
   json["ja4h"] = foxio::Ja4h(request);
   SetIfNotEmpty(json, "ja4t", record.ja4t);

@@ -41,6 +41,10 @@ struct RuleContext {
   bool asn_hosting = false;
   // Host of a Web Bot Auth agent whose signature verified; "" otherwise.
   std::string_view signed_agent;
+  // Kernel TCP round trip and TLS 1.3 handshake in milliseconds; -1 when
+  // unknown (see LooksRelayed in score/scorer.h).
+  int64_t tcp_rtt_ms = -1;
+  int64_t handshake_ms = -1;
 };
 
 // A compiled boolean condition (see docs/architecture.md, "Правила").

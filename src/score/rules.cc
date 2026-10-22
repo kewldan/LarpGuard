@@ -64,6 +64,8 @@ enum class Field {
   kAsnCountry,
   kAsnHosting,
   kSignedAgent,
+  kTcpRttMs,
+  kHandshakeMs,
 };
 
 struct FieldInfo {
@@ -97,6 +99,8 @@ constexpr FieldInfo kFields[] = {
     {"asn_country", Field::kAsnCountry, Type::kString},
     {"asn_hosting", Field::kAsnHosting, Type::kBool},
     {"signed_agent", Field::kSignedAgent, Type::kString},
+    {"tcp_rtt_ms", Field::kTcpRttMs, Type::kInt},
+    {"handshake_ms", Field::kHandshakeMs, Type::kInt},
 };
 
 enum class NodeKind {
@@ -600,6 +604,14 @@ Value FieldValue(Field field, const RuleContext& context) {
       break;
     case Field::kSignedAgent:
       value.text = context.signed_agent;
+      break;
+    case Field::kTcpRttMs:
+      value.type = Type::kInt;
+      value.number = context.tcp_rtt_ms;
+      break;
+    case Field::kHandshakeMs:
+      value.type = Type::kInt;
+      value.number = context.handshake_ms;
       break;
   }
   return value;

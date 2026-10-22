@@ -58,4 +58,28 @@ std::vector<uint8_t> ReadSavedSyn(int fd) {
 #endif
 }
 
+int64_t TcpRttMicros(int fd) {
+#if defined(__linux__)
+  tcp_info info{};
+  auto size = static_cast<socklen_t>(sizeof(info));
+  if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, &info, &size) != 0 ||
+      info.tcpi_rtt == 0) {
+    return -1;
+  }
+  return info.tcpi_rtt;
+#elif defined(__APPLE__)
+  tcp_connection_info info{};
+  auto size = static_cast<socklen_t>(sizeof(info));
+  if (getsockopt(fd, IPPROTO_TCP, TCP_CONNECTION_INFO, &info, &size) != 0 ||
+      info.tcpi_srtt == 0) {
+    return -1;
+  }
+  // Milliseconds on macOS.
+  return static_cast<int64_t>(info.tcpi_srtt) * 1000;
+#else
+  (void)fd;
+  return -1;
+#endif
+}
+
 }  // namespace bot_shield

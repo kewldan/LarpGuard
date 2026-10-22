@@ -1,6 +1,7 @@
 #ifndef BOT_SHIELD_SCORE_SCORER_H_
 #define BOT_SHIELD_SCORE_SCORER_H_
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,7 +24,20 @@ struct ScoringInput {
   std::string_view pseudo_order;    // "m,a,s,p"; empty on HTTP/1.x.
   std::string_view header_fp;       // Own header-order fingerprint.
   int tcp_initial_ttl = 0;          // 0: unknown (no SYN capture).
+  // The kernel's TCP round trip and the TLS 1.3 handshake (one round trip
+  // to the TLS client), microseconds; -1 when unknown.
+  int64_t tcp_rtt_us = -1;
+  int64_t handshake_us = -1;
 };
+
+// A TLS client behind a TCP relay: the handshake's round trip exceeds the
+// TCP one by kRelayMinGapUs and kRelayMinRatio times. Generous on purpose:
+// slow phones and certificate checks add milliseconds, a relay to a distant
+// client adds tens to hundreds.
+inline constexpr int64_t kRelayMinGapUs = 80'000;
+inline constexpr int64_t kRelayMinRatio = 3;
+
+bool LooksRelayed(int64_t tcp_rtt_us, int64_t handshake_us);
 
 // kVerifiedBot: a search crawler whose address was verified (never from a
 // score; see crawler/verifier.h).

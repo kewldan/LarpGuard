@@ -406,6 +406,9 @@ export const requestDetailSchema = z.object({
     signed_agent: z.string(),
     client_fp: z.string(),
     model_score: z.number().nullable(),
+    // Kernel TCP round trip and TLS 1.3 handshake, microseconds.
+    tcp_rtt_us: z.number().nullable(),
+    handshake_us: z.number().nullable(),
   }),
   asn: asnInfoSchema.nullable(),
   mode: hostModeInfoSchema.nullable(),

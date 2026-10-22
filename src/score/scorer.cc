@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -115,6 +116,10 @@ Verdict Scorer::Score(const ScoringInput& input) const {
     }
   }
 
+  if (LooksRelayed(input.tcp_rtt_us, input.handshake_us)) {
+    signal("relayed_connection");
+  }
+
   const std::string user_agent_lower = Lowercase(user_agent_text);
   for (const AutomationSignature& signature : library_->automation()) {
     const bool match =
@@ -131,6 +136,12 @@ Verdict Scorer::Score(const ScoringInput& input) const {
   verdict.score = std::clamp(total, 0, 100);
   verdict.bot_class = Classify(verdict.score);
   return verdict;
+}
+
+bool LooksRelayed(int64_t tcp_rtt_us, int64_t handshake_us) {
+  return tcp_rtt_us > 0 && handshake_us > 0 &&
+         handshake_us - tcp_rtt_us >= kRelayMinGapUs &&
+         handshake_us >= kRelayMinRatio * tcp_rtt_us;
 }
 
 BotClass Scorer::Classify(int score) const {

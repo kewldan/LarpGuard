@@ -82,6 +82,8 @@ export interface SampleEvent {
   ip_prefix: string;
   action: string;
   would_action: string;
+  tcp_rtt_us: number | null;
+  handshake_us: number | null;
 }
 
 const sampleRow = z.object({
@@ -105,6 +107,8 @@ const sampleRow = z.object({
   ip_prefix: z.string(),
   action: z.string(),
   would_action: z.string(),
+  tcp_rtt_us: z.coerce.number().nullable(),
+  handshake_us: z.coerce.number().nullable(),
 });
 
 export interface FingerprintStats {

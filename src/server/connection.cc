@@ -366,6 +366,8 @@ class ConnectionObserver {
     input.pseudo_order = pseudo;
     input.header_fp = header_fp;
     input.tcp_initial_ttl = record_.tcp_initial_ttl;
+    input.tcp_rtt_us = record_.tcp_rtt_us;
+    input.handshake_us = record_.handshake_us;
     Verdict verdict = verdicts_->scorer->Score(input);
     // Claimed crawlers: verified search engines skip scoring, fakes are
     // penalized, AI crawlers get their configured action.
@@ -891,6 +893,8 @@ class ConnectionObserver {
     }
     report.header_fp = HeaderOrderFingerprint(request);
     report.tcp_initial_ttl = record_.tcp_initial_ttl;
+    report.tcp_rtt_us = record_.tcp_rtt_us;
+    report.handshake_us = record_.handshake_us;
     if (verdicts_ != nullptr) {
       report.tls_engines = MatchingTlsEngines(*verdicts_->library, record_.ja4);
     }
@@ -1129,6 +1133,9 @@ class ConnectionObserver {
     rules.asn_country = asn_country_;
     rules.asn_hosting = asn_hosting_;
     rules.signed_agent = exchange.signed_agent;
+    rules.tcp_rtt_ms = record_.tcp_rtt_us < 0 ? -1 : record_.tcp_rtt_us / 1000;
+    rules.handshake_ms =
+        record_.handshake_us < 0 ? -1 : record_.handshake_us / 1000;
 
     std::vector<std::string> matched;
     const int delta = verdicts_->rules.ScoreDelta(rules, &matched);
@@ -1432,6 +1439,7 @@ asio::awaitable<void> RunTerminate(tcp::socket socket,
   {
     ScopedWatchdog deadline(executor, config.tls_handshake_timeout,
                             [&client] { CloseQuietly(client.lowest_layer()); });
+    const auto started = std::chrono::steady_clock::now();
     auto [ec] =
         co_await client.async_handshake(asio::ssl::stream_base::server, kUse);
     if (ec) {
@@ -1440,6 +1448,16 @@ asio::awaitable<void> RunTerminate(tcp::socket socket,
                  deadline->expired() ? "timeout" : ec.message());
       co_return;
     }
+    // The ClientHello was already read: from here the handshake is our
+    // flight and the client's Finished, one round trip in TLS 1.3.
+    if (SSL_version(client.native_handle()) == TLS1_3_VERSION) {
+      observer.record().handshake_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - started)
+              .count();
+    }
+    observer.record().tcp_rtt_us =
+        TcpRttMicros(client.lowest_layer().native_handle());
   }
   const std::string alpn = SelectedAlpn(client.native_handle());
   observer.record().alpn = alpn;

@@ -338,7 +338,22 @@ function claimRows(row: Detail['row']) {
       observed: row.tcp_fp || '—',
       ok: !has('os_tcp_mismatch'),
     },
+    {
+      // The kernel's round trip reaches the nearest TCP stack, the TLS 1.3
+      // handshake the TLS client: far apart, a relay sits between them.
+      k: 'Path',
+      claim: 'direct',
+      observed:
+        row.tcp_rtt_us === null && row.handshake_us === null
+          ? '—'
+          : `TCP ${millis(row.tcp_rtt_us)} · TLS ${millis(row.handshake_us)}`,
+      ok: !has('relayed_connection'),
+    },
   ];
+}
+
+function millis(micros: number | null): string {
+  return micros === null ? '?' : `${(micros / 1000).toFixed(1)} ms`;
 }
 
 function RequestDetailView({

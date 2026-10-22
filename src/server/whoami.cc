@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include "fp/library.h"
+#include "score/scorer.h"
 
 namespace bot_shield {
 namespace {
@@ -66,6 +68,24 @@ std::string TtlText(int ttl) {
   return std::format("{}", ttl);
 }
 
+std::string Millis(int64_t micros) {
+  return micros < 0
+             ? std::string("?")
+             : std::format("{:.1f} ms", static_cast<double>(micros) / 1000.0);
+}
+
+// TCP as the kernel measures it (to the nearest TCP stack) against the TLS
+// handshake (to the TLS client).
+std::string RoundTripText(const WhoamiReport& report) {
+  std::string text =
+      std::format("TCP {} · TLS handshake {}", Millis(report.tcp_rtt_us),
+                  Millis(report.handshake_us));
+  if (LooksRelayed(report.tcp_rtt_us, report.handshake_us)) {
+    text += " (relayed: the TLS client is farther than the TCP peer)";
+  }
+  return text;
+}
+
 std::string NetworkText(const WhoamiReport& report) {
   std::string text = report.ip_prefix.empty() ? report.ip : report.ip_prefix;
   if (report.asn != 0) {
@@ -108,6 +128,7 @@ std::vector<std::pair<std::string, std::string>> StackRows(
   rows.emplace_back("Header order",
                     report.header_fp.empty() ? "-" : report.header_fp);
   rows.emplace_back("TCP TTL", TtlText(report.tcp_initial_ttl));
+  rows.emplace_back("Round trips", RoundTripText(report));
   return rows;
 }
 
@@ -298,7 +319,10 @@ std::string RenderWhoamiJson(const WhoamiReport& report) {
         {"h2_fingerprint", report.h2_fingerprint},
         {"pseudo_order", report.pseudo_order},
         {"header_fp", report.header_fp},
-        {"tcp_initial_ttl", report.tcp_initial_ttl}}},
+        {"tcp_initial_ttl", report.tcp_initial_ttl},
+        {"tcp_rtt_us", report.tcp_rtt_us},
+        {"handshake_us", report.handshake_us},
+        {"relayed", LooksRelayed(report.tcp_rtt_us, report.handshake_us)}}},
   };
   return json.dump(2) + "\n";
 }

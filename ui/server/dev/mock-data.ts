@@ -65,6 +65,9 @@ interface Client {
   score: [number, number];
   reasons: string[];
   weight: number;
+  // Behind a TCP relay (residential proxy): the TLS handshake takes far
+  // longer than the TCP round trip.
+  relayed?: boolean;
 }
 
 const CHROME_JA4 = 't13d1516h2_8daaf6152771_02713d6af862';
@@ -116,8 +119,14 @@ const CLIENTS: Client[] = [
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     class: 'bot',
     score: [70, 100],
-    reasons: ['ua_tls_mismatch', 'h2_settings_mismatch', 'hosting_network'],
+    reasons: [
+      'ua_tls_mismatch',
+      'h2_settings_mismatch',
+      'hosting_network',
+      'relayed_connection',
+    ],
     weight: 7,
+    relayed: true,
   },
   {
     ja4: 't13d3112h2_e8f1e7e78f70_6bebaf5329ac',
@@ -258,6 +267,13 @@ export class MockTraffic {
     const action = shadow ? 'allow' : would;
     this.sequence += 1;
     const id = `mock-${(ts % 100000).toString(36)}-${this.sequence}`;
+    // Round trips from the sequence number, not from random(): the other
+    // synthetic values stay as they were.
+    const spread = ((this.sequence * 2654435761) >>> 0) / 4294967296;
+    const tcpRtt = client.relayed ? 2 + spread * 6 : 15 + spread * 65;
+    const handshake = client.relayed
+      ? 120 + spread * 140
+      : tcpRtt + 3 + spread * 12;
     events.push({
       ts,
       request_id: id,
@@ -300,6 +316,8 @@ export class MockTraffic {
       signed_agent: '',
       client_fp: '',
       model_score: null,
+      tcp_rtt_us: Math.round(tcpRtt * 1000),
+      handshake_us: Math.round(handshake * 1000),
     });
   }
 }

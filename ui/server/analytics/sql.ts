@@ -235,7 +235,7 @@ GROUP BY value ORDER BY requests DESC LIMIT 20`,
   header_names, pseudo_order, h2_fp, tcp_fp, ja4h, accept_language,
   sec_ch_ua, sec_ch_ua_platform, sec_ch_ua_mobile, sec_fetch_mode,
   sec_fetch_site, rate_limit, duration_ms, local, signed_agent, client_fp,
-  model_score
+  model_score, tcp_rtt_us, handshake_us
 FROM ${this.table}
 WHERE req.ts BETWEEN fromUnixTimestamp64Milli({from:Int64}) AND fromUnixTimestamp64Milli({to:Int64})
   AND request_id = {id:String}
@@ -308,7 +308,7 @@ GROUP BY name ORDER BY requests DESC LIMIT 500`,
       sql: `SELECT toUnixTimestamp64Milli(ts) AS ts, host, method,
   path_group AS path, http_version, sni, ja4, h2_fp, pseudo_order,
   header_fp, tcp_fp, user_agent, score, class, reasons, asn, signed_agent,
-  ip_prefix, action, would_action
+  ip_prefix, action, would_action, tcp_rtt_us, handshake_us
 FROM ${this.table}
 WHERE ${since(seconds)}
   AND cityHash64(request_id, conn_id, seq) % {modulo:UInt64} = 0

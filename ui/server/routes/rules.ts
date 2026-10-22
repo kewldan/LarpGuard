@@ -49,6 +49,8 @@ function toEvent(sample: SampleEvent): RuleSampleEvent {
     asn: sample.asn,
     signed_agent: sample.signed_agent,
     ip_prefix: sample.ip_prefix,
+    tcp_rtt_us: sample.tcp_rtt_us,
+    handshake_us: sample.handshake_us,
   };
 }
 

@@ -139,6 +139,7 @@ export const MOCK_CONFIG: GatewayConfig = {
       hosting_network: 10,
       automation_user_agent: 80,
       fake_crawler: 60,
+      relayed_connection: 15,
     },
     automation: [
       {

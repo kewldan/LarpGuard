@@ -108,6 +108,17 @@ TEST_F(RulesTest, AsnAndSignedAgentFields) {
   EXPECT_FALSE(Condition::Compile("asn == \"16509\"", &error));
 }
 
+TEST_F(RulesTest, RoundTripFields) {
+  // Unknown is -1, so "> n" never matches it.
+  EXPECT_FALSE(Eval("handshake_ms > 100"));
+  EXPECT_TRUE(Eval("tcp_rtt_ms < 0"));
+  context_.tcp_rtt_ms = 4;
+  context_.handshake_ms = 180;
+  EXPECT_TRUE(Eval("handshake_ms > 100 and tcp_rtt_ms < 10"));
+  std::string error;
+  EXPECT_FALSE(Condition::Compile("tcp_rtt_ms == \"4\"", &error));
+}
+
 TEST_F(RulesTest, References) {
   std::string error;
   const auto condition = Condition::Compile(

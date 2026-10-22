@@ -285,6 +285,16 @@ TTL уменьшается и часть картины искажается.
 - `ua_h2_mismatch`: H2 SETTINGS или порядок псевдозаголовков не совпадают с
   профилем.
 - `os_tcp_mismatch`: UA говорит Windows, а TCP-стек похож на Linux.
+- `relayed_connection` (15): TLS 1.3-рукопожатие намного дольше TCP RTT —
+  TLS-клиент сидит за TCP-ретранслятором. RTT ядра (`TCP_INFO`, на macOS
+  `TCP_CONNECTION_INFO`) измеряет путь до ближайшего TCP-стека — у
+  резидентного или SOCKS-прокси это сам прокси, — а рукопожатие (наш
+  полёт после ClientHello и Finished клиента, ровно один круг в TLS 1.3)
+  доходит до настоящего клиента. Сигнал, если рукопожатие длиннее RTT на
+  80 мс и втрое (`LooksRelayed` в `score/scorer.h`): медленный телефон и
+  проверка цепочки добавляют миллисекунды, ретранслятор до далёкого клиента
+  — десятки и сотни. Вес скромный: так же выглядят спутниковые каналы и
+  TCP-ускорители операторов. TLS 1.2 (два круга) и QUIC не оцениваются.
 - `missing_client_hints`: Chromium без `sec-ch-ua` на навигации.
 - `fetch_meta_inconsistent`: `sec-fetch-mode=navigate`, но `accept` не HTML.
 - `known_automation_fp`: JA4 или H2 из списка известных библиотек (Go
@@ -432,7 +442,9 @@ TTL уменьшается и часть картины искажается.
    `http_version`, `sni`, `alpn`, `ja4`, `h2_fp`, `pseudo_order`,
    `header_fp`, `tcp_fp`, `user_agent`, `ua_family`, `ua_engine`, `ua_os`,
    `ua_tool`, `score`, `class`, `reasons`, `asn` (целое), `asn_org`,
-   `asn_country`, `asn_hosting` (bool), `signed_agent`. Функции:
+   `asn_country`, `asn_hosting` (bool), `signed_agent`, `tcp_rtt_ms` и
+   `handshake_ms` (целые, мс; `-1`, если неизвестно, — поэтому
+   `tcp_rtt_ms >= 0 and tcp_rtt_ms < 10`, а не только `< 10`). Функции:
    `header("name")`,
    `has_header("name")`, `cidr("net/len")`. Типы проверяются при загрузке
    конфига (`--check-config`), совпадения попадают в причины как
@@ -788,7 +800,10 @@ events:
 
 Пустые поля не передаются. Вердикт: `score, class, reasons[], action,
 would_action, rate_limit`; модель: `features, model_score`; `asn`, хеш
-проб браузера `client_fp`, проверенный агент `signed_agent`.
+проб браузера `client_fp`, проверенный агент `signed_agent`; RTT ядра
+`tcp_rtt_us` и TLS 1.3-рукопожатие `handshake_us` (микросекунды, сигнал
+`relayed_connection`). Новые колонки очереди NATS: `ALTER` её не меняет —
+`req_mv` и `req_queue` пересоздаются (`DROP` и повторный `schema.sql`).
 
 База ASN (`net/asn`): iptoasn.com `ip2asn-combined.tsv.gz` (public domain,
 IPv4 и IPv6, ~580 тыс. диапазонов, ~25 МБ в памяти, поиск — бинарный,
@@ -962,7 +977,8 @@ nghttp2 по умолчанию. `max_requests_per_connection` (1000) закры
 краулеры, поведение, модель, токен, правила, списки, режим «под
 атакой», — но вместо действия шлюз отвечает отчётом: на кого похож
 клиент (заявленный User-Agent против TLS-, HTTP/2- и TCP-отпечатков и
-профилей библиотеки), скор, класс, причины с весами, что будет с ним на
+профилей библиотеки), RTT TCP и рукопожатия, скор, класс, причины с
+весами, что будет с ним на
 этом хосте сейчас и в enforce. Браузер (`Accept: text/html`) получает
 страницу, curl — текст, `?format=json` или `Accept: application/json` —
 JSON. Лимиты запросов не проверяются (нечего защищать), действует лимит
@@ -2037,7 +2053,8 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
 - Целевая нагрузка в цифрах (пиковый RPS, число хостов) — уточнить для
   нагрузочного теста M0.
 - Резидентные прокси: бесплатные списки или коммерческие базы (ASN и
-  хостинг уже есть — iptoasn).
+  хостинг уже есть — iptoasn; без списков их выдаёт разрыв RTT,
+  `relayed_connection`).
 - Нужна ли инъекция `<script>` челленджа в HTML-ответы для невидимого сбора
   сигналов без интерстишиала. Требует разбора и переписывания тела ответа,
   стоит отдельно оценить.

@@ -24,7 +24,7 @@ constexpr std::string_view kBuiltInYaml =
 # change it. Values come from published specifications and the browsers'
 # cipher suite lists (JA4 cipher hashes were recomputed from them). Extend
 # the library from the fp_hourly clusters in ClickHouse.
-version: 2026-10-18
+version: 2026-10-22
 
 # Network stacks of real browsers, by the engine a User-Agent implies. A
 # client claiming an engine but showing another stack is the main signal.
@@ -93,6 +93,11 @@ weights:
   hosting_network: 10
   # A Web Bot Auth signature (web_bot_auth) that does not verify.
   web_bot_auth_invalid: 40
+  # The TLS 1.3 handshake takes far longer than the kernel's TCP round
+  # trip: the TLS client sits behind a TCP relay (residential and SOCKS
+  # proxies; also satellite links and carrier TCP accelerators, hence the
+  # modest weight).
+  relayed_connection: 15
 )yaml";
 
 std::vector<std::string> ReadList(const YAML::Node& node) {

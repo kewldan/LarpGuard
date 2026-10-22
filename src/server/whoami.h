@@ -47,6 +47,9 @@ struct WhoamiReport {
   std::string pseudo_order;
   std::string header_fp;
   int tcp_initial_ttl = 0;  // 0: not captured.
+  // Kernel TCP round trip and TLS 1.3 handshake, microseconds; -1 unknown.
+  int64_t tcp_rtt_us = -1;
+  int64_t handshake_us = -1;
   // Browser engines whose TLS cipher list matches the JA4 ("chromium").
   std::vector<std::string> tls_engines;
 

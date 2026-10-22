@@ -69,6 +69,14 @@ TEST(WhoamiTest, TextSaysWhatWouldHappen) {
             std::string::npos);
   EXPECT_NE(text.find("+60  automation_user_agent"), std::string::npos);
   EXPECT_NE(text.find("no known browser"), std::string::npos);
+  EXPECT_NE(text.find("TCP ? · TLS handshake ?"), std::string::npos);
+
+  WhoamiReport relayed = CurlReport();
+  relayed.tcp_rtt_us = 4'200;
+  relayed.handshake_us = 151'000;
+  EXPECT_NE(RenderWhoamiText(relayed).find(
+                "TCP 4.2 ms · TLS handshake 151.0 ms (relayed"),
+            std::string::npos);
 
   WhoamiReport enforced = CurlReport();
   enforced.mode = "enforce";

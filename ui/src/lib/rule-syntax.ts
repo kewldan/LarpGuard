@@ -26,6 +26,8 @@ const FIELDS = new Set([
   'asn_country',
   'asn_hosting',
   'signed_agent',
+  'tcp_rtt_ms',
+  'handshake_ms',
 ]);
 const KEYWORDS = new Set(['and', 'or', 'not', 'in']);
 const FUNCTIONS = new Set(['header', 'has_header', 'cidr']);

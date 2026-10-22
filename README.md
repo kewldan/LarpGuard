@@ -48,6 +48,10 @@ over ports 443/80, and Traefik moves to loopback behind it.
 - 🔍 **Fingerprints at every layer.** TCP SYN (Linux), JA4, HTTP/2
   (Akamai format), header order, QUIC transport parameters. JA4T/JA4H are
   optional.
+- 🛰️ **Proxies give themselves away.** The kernel's TCP round trip ends
+  at the nearest TCP stack, a proxy's; the TLS 1.3 handshake reaches the
+  real client. A big gap means a relay (`relayed_connection`), no proxy
+  list needed.
 - 🧠 **Consistency scoring.** Each signal adds a weight and a reason code.
   Requests are classed `human`, `suspicious`, `bot` or `verified_bot`.
   Traefik receives the verdict in `X-Bot-*` headers.

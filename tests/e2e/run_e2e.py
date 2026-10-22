@@ -1259,6 +1259,8 @@ whoami: true
                    for r in report["verdict"]["reasons"]}
         expect(weights.get("ua_tls_mismatch", 0) > 0, weights)
         expect(report["network"]["ip"] == "127.0.0.1", report)
+        expect(report["stack"]["handshake_us"] > 0, report)
+        expect(report["stack"]["relayed"] is False, report)
         # A browser's Accept gets the page.
         status, headers, body = h1_get(
             https_port, "a.test", ca_a, "/__bs/whoami",
@@ -1667,6 +1669,11 @@ whoami: true
         expect(event["status"] == 200, event)
         expect(event["h2_fp"].count("|") == 3, event)
         expect(event["pseudo_order"].startswith("m,"), event)
+        # Round trips (TLS 1.3 with curl): loopback, so tiny, not relayed.
+        expect(0 < event["handshake_us"] < 2_000_000, event)
+        if "tcp_rtt_us" in event:  # 0 on some loopbacks: then left out
+            expect(event["tcp_rtt_us"] < 2_000_000, event)
+        expect("relayed_connection" not in event.get("reasons", []), event)
 
     def events_local_and_passthrough():
         h1_get(https_port, "noh2.test", ca_a, "/fail")

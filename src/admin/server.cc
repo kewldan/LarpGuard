@@ -479,6 +479,8 @@ struct RuleSample {
   UserAgent ua;
   int64_t score = 0;
   int64_t asn = 0;
+  int64_t tcp_rtt_ms = -1;
+  int64_t handshake_ms = -1;
   asio::ip::address ip;
 };
 
@@ -509,6 +511,15 @@ bool ParseSample(const nlohmann::json& json, RuleSample* sample) {
   if (const auto it = json.find("asn"); it != json.end()) {
     if (!it->is_number_integer()) return false;
     sample->asn = it->get<int64_t>();
+  }
+  // Round trips in microseconds as in events; null or absent: unknown.
+  for (const auto& [key, field] :
+       {std::pair{"tcp_rtt_us", &RuleSample::tcp_rtt_ms},
+        std::pair{"handshake_us", &RuleSample::handshake_ms}}) {
+    const auto it = json.find(key);
+    if (it == json.end() || it->is_null()) continue;
+    if (!it->is_number_integer()) return false;
+    sample->*field = it->get<int64_t>() / 1000;
   }
   if (const auto it = json.find("reasons"); it != json.end()) {
     if (!it->is_array()) return false;
@@ -583,6 +594,8 @@ AdminResponse RulesTest(std::string_view body, const AdminContext& context) {
       rule.reasons = &sample.reasons;
       rule.asn = sample.asn;
       rule.signed_agent = sample.signed_agent;
+      rule.tcp_rtt_ms = sample.tcp_rtt_ms;
+      rule.handshake_ms = sample.handshake_ms;
       if (asn && sample.asn > 0) {
         if (const auto info = asn->Find(static_cast<uint32_t>(sample.asn))) {
           rule.asn_org = info->org;
