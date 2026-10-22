@@ -281,6 +281,19 @@ curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
 Prometheus metrics and `/health` are served on `127.0.0.1:9900`.
 `/health` returns 503 when a worker loop stalls.
 
+🔎 With `whoami: true`, any host answers `/__bs/whoami` with what the
+gateway thinks of that very request instead of acting on it: who you look
+like, the score and reasons with their weights, the fingerprints, and what
+would happen to you now and in enforce mode. A browser gets a page, curl
+gets text, `?format=json` gets JSON:
+
+```bash
+curl https://shop.example.com/__bs/whoami
+```
+
+It shows how the scoring works, so it is off by default: turn it on to
+test clients, not on a site under attack.
+
 ### 🖥️ The web console
 
 `ghcr.io/kewldan/larpguard-console` runs next to the gateway. It serves the

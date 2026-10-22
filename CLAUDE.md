@@ -93,6 +93,7 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 - `src/server/` — обработчики соединений, воркеры, `/metrics` и `/health`
   (503, если `Heartbeats` воркера устарел).
   `ConnectionObserver` в `connection.cc` собирает отпечатки и шлёт события.
+  `whoami` — отчёт `/__bs/whoami` (вердикт вместо действия, `whoami: true`).
 - `src/fp/` — отпечатки и пассивные HTTP-разборщики. `src/fp/foxio/` —
   JA4T/JA4H под FoxIO License, только за `BOT_SHIELD_FOXIO`; код вне этой
   папки не должен от них зависеть (только `#if BOT_SHIELD_FOXIO`).

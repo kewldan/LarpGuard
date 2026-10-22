@@ -27,6 +27,7 @@ add_executable(bot_shield_tests
   scoring_test.cc
   tcp_syn_test.cc
   verdicts_test.cc
+  whoami_test.cc
   web_bot_auth_test.cc
   xdp_test.cc
   test_util.cc

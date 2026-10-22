@@ -221,6 +221,9 @@ struct Config {
 
   std::optional<Endpoint> metrics_listen = Endpoint{"127.0.0.1", 9900};
   log::Level log_level = log::Level::kInfo;
+  // GET /__bs/whoami answers with the verdict on the asking request
+  // instead of acting on it. It reveals the scoring, so off by default.
+  bool whoami = false;
 };
 
 // Parses "250ms", "5s", "2m", "1h".

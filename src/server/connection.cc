@@ -74,6 +74,7 @@
 #include "score/rules.h"
 #include "score/scorer.h"
 #include "server/verdicts.h"
+#include "server/whoami.h"
 #include "tls/cert_store.h"
 #include "tls/client_hello.h"
 #include "xdp/xdp_filter.h"
@@ -301,6 +302,10 @@ class ConnectionObserver {
     const int64_t now = UnixMillis() / 1000;
     const ClientBinding binding =
         ClientBinding::For(record_.ja4, IpPrefix(record_.peer));
+    const std::string_view target = exchange.request.path;
+    const bool whoami =
+        target.substr(0, target.find('?')) == kWhoamiPath && WhoamiEnabled();
+    if (whoami && !ChallengeEndpointAllowed(exchange)) return;
     if (context_.challenger != nullptr) {
       // The clearance cookie is ours; the application never sees it.
       for (auto& [name, value] : exchange.request.headers) {
@@ -309,7 +314,8 @@ class ConnectionObserver {
       std::erase_if(exchange.request.headers, [](const auto& header) {
         return header.first == "cookie" && header.second.empty();
       });
-      if (exchange.request.path.starts_with(Challenger::kPathPrefix)) {
+      if (exchange.request.path.starts_with(Challenger::kPathPrefix) &&
+          !whoami) {
         HandleChallengeEndpoint(exchange, binding, now);
         return;
       }
@@ -332,7 +338,10 @@ class ConnectionObserver {
         labels ? labels->PolicyFor(host) : nullptr;
     // "off": plain proxying, no verdicts and no limits.
     exchange.mode = HostModeName(mode);
-    if (mode == HostMode::kOff) return;
+    if (mode == HostMode::kOff) {
+      if (whoami) RespondWhoami(exchange, host, mode, Verdict{}, false, {});
+      return;
+    }
     // Under-attack mode: counted before the verdict so a flood of any
     // class trips the automatic switch.
     bool under_attack = false;
@@ -531,6 +540,10 @@ class ConnectionObserver {
     exchange.reasons = verdict.reasons;
     exchange.action = ActionName(decision.action);
     exchange.would_action = ActionName(decision.would_action);
+    if (whoami) {
+      RespondWhoami(exchange, host, mode, verdict, token_valid, decision);
+      return;
+    }
 
     Metrics& metrics = GlobalMetrics();
     switch (verdict.bot_class) {
@@ -788,6 +801,139 @@ class ConnectionObserver {
     finish(exchange, immediate);
   }
 
+  // The /__bs/* endpoints are answered here, so the request rate limits
+  // never see them: a per-address limit of their own. False when over it
+  // (429 sent).
+  bool ChallengeEndpointAllowed(Exchange& exchange) const {
+    const Config& config = *context_.config;
+    const GcraResult allowed = context_.rate_limit_store->Check(
+        "bs\x1f" + Unmapped(record_.peer).to_string(),
+        GcraParams::FromRate(
+            config.challenge_endpoint_rate,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                config.challenge_endpoint_period)
+                .count(),
+            config.challenge_endpoint_burst),
+        SteadyNanos());
+    if (allowed.allowed) return true;
+    GlobalMetrics().challenge_endpoint_limited.Inc();
+    exchange.action = "rate_limit";
+    exchange.rate_limit = "challenge_endpoint";
+    exchange.RespondLocally(
+        429, "too many requests\n",
+        {{"retry-after",
+          std::to_string(RetryAfterSeconds(allowed.retry_after_ns))},
+         {"cache-control", "no-store"}});
+    return false;
+  }
+
+  // `whoami: true` in the current verdict set (reloadable).
+  bool WhoamiEnabled() const {
+    if (context_.verdicts == nullptr) return false;
+    const std::shared_ptr<const VerdictSet> verdicts =
+        context_.verdicts->snapshot();
+    return verdicts != nullptr && verdicts->config != nullptr &&
+           verdicts->config->whoami;
+  }
+
+  // What a reason added to the score: the library weight of the signal (or
+  // of its prefix), an automation signature's own weight, the token
+  // credit (negative); 0 for reasons that only record.
+  int ReasonWeight(std::string_view reason) const {
+    if (reason == "token_valid") {
+      return context_.challenger != nullptr
+                 ? -context_.challenger->token_credit()
+                 : 0;
+    }
+    const FingerprintLibrary& library = *verdicts_->library;
+    if (reason.starts_with("known_automation:")) {
+      const std::string_view id = reason.substr(17);
+      for (const AutomationSignature& signature : library.automation()) {
+        if (signature.id == id) return signature.weight;
+      }
+      return 0;
+    }
+    if (const int weight = library.Weight(reason); weight != 0) return weight;
+    return library.Weight(reason.substr(0, reason.find(':')));
+  }
+
+  // Answers /__bs/whoami with the verdict instead of acting on it. The
+  // event records it as allowed, with the would-be action and reason
+  // "whoami".
+  void RespondWhoami(Exchange& exchange, const std::string& host, HostMode mode,
+                     const Verdict& verdict, bool token_valid,
+                     const PolicyDecision& decision) const {
+    const HttpRequest& request = exchange.observed;
+    const UserAgent ua = ParseUserAgent(request.Header("user-agent"));
+    WhoamiReport report;
+    report.request_id = exchange.request_id;
+    report.host = host;
+    report.mode = HostModeName(mode);
+    report.ip = Unmapped(record_.peer).to_string();
+    report.ip_prefix = IpPrefix(record_.peer);
+    report.asn = record_.asn;
+    report.asn_org = asn_org_;
+    report.hosting = asn_hosting_;
+    report.user_agent = std::string(request.Header("user-agent"));
+    report.claimed_family = ua.family;
+    report.claimed_major = ua.major;
+    report.claimed_os = ua.os;
+    report.claimed_tool = ua.tool;
+    report.claims_crawler = ua.claims_crawler;
+    report.headless = ua.headless;
+    report.http_version = record_.quic ? "3" : request.version;
+    report.offered_h2 = record_.offered_h2;
+    report.ja4 = record_.ja4;
+    report.h2_fingerprint = exchange.h2_fingerprint;
+    for (const std::string& name : request.pseudo_header_order) {
+      if (!report.pseudo_order.empty()) report.pseudo_order.push_back(',');
+      report.pseudo_order.push_back(name.size() > 1 ? name[1] : '?');
+    }
+    report.header_fp = HeaderOrderFingerprint(request);
+    report.tcp_initial_ttl = record_.tcp_initial_ttl;
+    if (verdicts_ != nullptr) {
+      report.tls_engines = MatchingTlsEngines(*verdicts_->library, record_.ja4);
+    }
+    if (mode != HostMode::kOff) {
+      report.score = verdict.score;
+      report.bot_class = std::string(BotClassName(verdict.bot_class));
+      for (const std::string& reason : verdict.reasons) {
+        report.reasons.emplace_back(reason, ReasonWeight(reason));
+      }
+      report.token_valid = token_valid;
+      report.action = std::string(ActionName(decision.action));
+      report.would_action = std::string(ActionName(decision.would_action));
+    }
+    exchange.mode = "whoami";
+    exchange.action = "allow";
+    exchange.reasons.emplace_back("whoami");
+    std::string_view content_type = "text/plain; charset=utf-8";
+    std::string body;
+    const std::string_view target = exchange.request.path;
+    const std::size_t question = target.find('?');
+    switch (ChooseWhoamiFormat(question == std::string_view::npos
+                                   ? std::string_view()
+                                   : target.substr(question + 1),
+                               request.Header("accept"))) {
+      case WhoamiFormat::kJson:
+        content_type = "application/json";
+        body = RenderWhoamiJson(report);
+        break;
+      case WhoamiFormat::kHtml:
+        content_type = "text/html; charset=utf-8";
+        body = RenderWhoamiHtml(report);
+        break;
+      case WhoamiFormat::kText:
+        body = RenderWhoamiText(report);
+        break;
+    }
+    exchange.RespondLocally(200, std::move(body),
+                            {{"cache-control", "no-store"},
+                             {"content-security-policy",
+                              "default-src 'none'; style-src 'unsafe-inline'"}},
+                            content_type);
+  }
+
   // /__bs/challenge?r=<path> (page) and /__bs/verify (solution).
   void HandleChallengeEndpoint(Exchange& exchange, const ClientBinding& binding,
                                int64_t now) const {
@@ -799,28 +945,8 @@ class ConnectionObserver {
                                        : target.substr(question + 1);
     exchange.mode = "challenge";
     Metrics& metrics = GlobalMetrics();
-    // Answered here, so the request rate limits never see these paths.
     const Config& config = *context_.config;
-    const GcraResult allowed = context_.rate_limit_store->Check(
-        "bs\x1f" + Unmapped(record_.peer).to_string(),
-        GcraParams::FromRate(
-            config.challenge_endpoint_rate,
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                config.challenge_endpoint_period)
-                .count(),
-            config.challenge_endpoint_burst),
-        SteadyNanos());
-    if (!allowed.allowed) {
-      metrics.challenge_endpoint_limited.Inc();
-      exchange.action = "rate_limit";
-      exchange.rate_limit = "challenge_endpoint";
-      exchange.RespondLocally(
-          429, "too many requests\n",
-          {{"retry-after",
-            std::to_string(RetryAfterSeconds(allowed.retry_after_ns))},
-           {"cache-control", "no-store"}});
-      return;
-    }
+    if (!ChallengeEndpointAllowed(exchange)) return;
     if (path == "/__bs/verify") {
       const Challenger::Result result = context_.challenger->Verify(
           query, binding, exchange.observed.Header("user-agent"), now);

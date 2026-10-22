@@ -403,7 +403,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "captcha",
                   "xdp",
                   "data_dir",
-                  "ca_file"},
+                  "ca_file",
+                  "whoami"},
                  error)) {
     return false;
   }
@@ -870,6 +871,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     config->data_dir =
         root["data_dir"].IsNull() ? "" : root["data_dir"].as<std::string>();
   }
+  if (root["whoami"]) config->whoami = root["whoami"].as<bool>();
   if (root["ca_file"]) {
     config->ca_file =
         root["ca_file"].IsNull() ? "" : root["ca_file"].as<std::string>();

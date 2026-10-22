@@ -85,6 +85,7 @@ max_requests_per_connection: 50
 metrics:
   listen: ""
 log_level: debug
+whoami: true
 )";
   Config config;
   std::string error;
@@ -109,6 +110,8 @@ log_level: debug
   EXPECT_EQ(config.max_connections, 1000u);
   EXPECT_FALSE(config.metrics_listen.has_value());
   EXPECT_EQ(config.log_level, log::Level::kDebug);
+  EXPECT_TRUE(config.whoami);
+  EXPECT_FALSE(Config().whoami);
 }
 
 TEST(ConfigTest, GatewayProtectionDefaults) {

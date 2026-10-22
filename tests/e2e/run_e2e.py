@@ -729,6 +729,7 @@ admin:
 metrics:
   listen: 127.0.0.1:{metrics_port}
 log_level: debug
+whoami: true
 """)
 
     log_path = os.path.join(workdir, "bot-shield.log")
@@ -1234,6 +1235,52 @@ log_level: debug
                "after")
         status, body = admin_call(admin_socket, "GET", "/status")
         expect(body["verdicts_generation"] >= 3, body)
+
+    def whoami():
+        # curl on a shadow host: text, passes now, blocked in enforce.
+        out = os.path.join(workdir, "whoami.txt")
+        status, _ = curl(https_port, "a.test", ca_a, "/__bs/whoami", out)
+        text = open(out).read()
+        expect(status == 200, (status, text))
+        expect("You look like curl, an HTTP tool or library." in text, text)
+        expect("in enforce mode, blocked." in text, text)
+        expect("automation_user_agent" in text, text)
+        # A spoofed Chrome on the enforce host is answered, not blocked.
+        status, headers, body = h1_get(
+            https_port, "www.a.test", ca_a, "/__bs/whoami?format=json",
+            f"User-Agent: {chrome_ua}\r\n".encode())
+        expect(status == 200, (status, body))
+        report = json.loads(body)
+        expect(report["you_look_like"].startswith(
+            "something that claims to be Chrome"), report)
+        expect(report["mode"] == "enforce", report)
+        expect(report["verdict"]["action"] == "block", report)
+        weights = {r["reason"]: r["weight"]
+                   for r in report["verdict"]["reasons"]}
+        expect(weights.get("ua_tls_mismatch", 0) > 0, weights)
+        expect(report["network"]["ip"] == "127.0.0.1", report)
+        # A browser's Accept gets the page.
+        status, headers, body = h1_get(
+            https_port, "a.test", ca_a, "/__bs/whoami",
+            b"Accept: text/html,application/xhtml+xml\r\n")
+        expect(status == 200 and b"<h1>You look like" in body, body[:200])
+        event = nats.find("e2e.events.req",
+                          lambda e: "whoami" in e.get("reasons", []) and
+                          e.get("host") == "www.a.test")
+        expect(event["action"] == "allow" and event["local"] is True, event)
+        expect(event["would_action"] == "block", event)
+        # Off again (reload): an unknown /__bs/ path.
+        original = open(config_path).read()
+        with open(config_path, "w") as f:
+            f.write(original.replace("whoami: true", "whoami: false"))
+        status, body = admin_call(admin_socket, "POST", "/reload")
+        expect(status == 200, body)
+        status, _, _ = h1_get(https_port, "a.test", ca_a, "/__bs/whoami")
+        expect(status == 404, status)
+        with open(config_path, "w") as f:
+            f.write(original)
+        status, body = admin_call(admin_socket, "POST", "/reload")
+        expect(status == 200, body)
 
     def rate_limits():
         statuses = [h1_get(https_port, "www.a.test", ca_a, "/limited")
@@ -1806,6 +1853,8 @@ log_level: debug
          tarpit_and_decoy),
         ("throttle action: own limit, enforce and shadow", throttle),
         ("hot reload: SIGHUP, POST /reload, broken file kept out", hot_reload),
+        ("whoami: text, JSON, page; answered, not blocked; reloadable",
+         whoami),
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),

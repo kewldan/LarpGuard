@@ -358,3 +358,8 @@ metrics:
   listen: "127.0.0.1:9900"
 
 log_level: info
+
+# GET /__bs/whoami on every host answers with the gateway's verdict on that
+# request (page for browsers, text for curl, ?format=json) instead of
+# acting on it. It reveals the scoring and weights: for testing clients.
+whoami: false

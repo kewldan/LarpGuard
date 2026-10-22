@@ -66,6 +66,7 @@ add_library(bot_shield_core STATIC
   server/gateway.cc
   server/health.cc
   server/verdicts.cc
+  server/whoami.cc
   server/metrics_server.cc
   tls/acme_watcher.cc
   tls/cert_store.cc
