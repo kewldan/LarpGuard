@@ -98,6 +98,43 @@ describe('admin client', () => {
     expect(JSON.stringify(decision)).not.toContain('203.0.113.77');
   });
 
+  it('reads list entries the way the gateway writes them', async () => {
+    // ListStore::ToJson leaves out an empty host and comment.
+    handler = (method) => [
+      method === 'POST' ? 201 : 200,
+      method === 'POST'
+        ? {
+            id: 2,
+            kind: 'ip',
+            value: '198.51.100.0/24',
+            action: 'block',
+            created_at: 1_700_000_000,
+            expires_at: 0,
+          }
+        : {
+            entries: [
+              {
+                id: 1,
+                kind: 'ip',
+                value: '203.0.113.7/32',
+                action: 'allow',
+                created_at: 1_700_000_000,
+                expires_at: 0,
+              },
+            ],
+          },
+    ];
+    const client = createAdminClient(socket);
+    const [entry] = await client.lists();
+    expect(entry).toMatchObject({ host: '', comment: '' });
+    const added = await client.addList({
+      kind: 'ip',
+      value: '198.51.100.0/24',
+      action: 'block',
+    });
+    expect(added).toMatchObject({ id: 2, host: '', comment: '' });
+  });
+
   it('returns null for unknown decisions and throws gateway errors', async () => {
     handler = (_method, url) =>
       url.startsWith('/decisions')

@@ -250,6 +250,12 @@ const gatewayErrorSchema = z.object({
   column: z.number().optional(),
 });
 
+// The gateway leaves out an empty host and comment (ListStore::ToJson).
+const gatewayListEntry = listEntrySchema.extend({
+  host: z.string().default(''),
+  comment: z.string().default(''),
+});
+
 export function createAdminClient(socketPath: string): AdminApi {
   async function json<T>(
     schema: z.ZodType<T>,
@@ -311,12 +317,12 @@ export function createAdminClient(socketPath: string): AdminApi {
     lists: async () =>
       (
         await must(
-          z.object({ entries: z.array(listEntrySchema) }),
+          z.object({ entries: z.array(gatewayListEntry) }),
           'GET',
           '/lists',
         )
       ).entries,
-    addList: (entry) => must(listEntrySchema, 'POST', '/lists', entry),
+    addList: (entry) => must(gatewayListEntry, 'POST', '/lists', entry),
     removeList: async (id) =>
       (await json(ok, 'DELETE', `/lists/${id}`, undefined, true)) !== null,
     decision: (requestId) =>

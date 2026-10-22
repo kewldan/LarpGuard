@@ -22,8 +22,13 @@ function useSignOut(): () => void {
   const client = useQueryClient();
   return () => {
     void send('DELETE', '/api/session').finally(() => {
-      client.clear();
+      // Null first, then drop the rest: clear() would also remove the
+      // session query its observer watches, and the screen would not
+      // notice the sign-out.
       client.setQueryData(sessionKey, null);
+      client.removeQueries({
+        predicate: (query) => query.queryKey[0] !== sessionKey[0],
+      });
     });
   };
 }
