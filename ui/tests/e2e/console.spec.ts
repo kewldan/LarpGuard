@@ -18,8 +18,8 @@ test.describe('sign-in', () => {
     await page.getByLabel('Username').fill('viewer');
     await page.getByLabel('Password').fill(DEV_PASSWORD);
     await page.getByRole('button', { name: 'Continue' }).click();
+    // The sixth digit signs in by itself.
     await page.getByLabel('Code').fill(currentCode());
-    await page.getByRole('button', { name: 'Verify' }).click();
     // Lands where the link pointed.
     await expect(
       page.getByRole('heading', { name: 'Lists', exact: true }),
@@ -36,7 +36,6 @@ test.describe('sign-in', () => {
     await page.getByLabel('Password').fill(DEV_PASSWORD);
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('Code').fill('000000');
-    await page.getByRole('button', { name: 'Verify' }).click();
     await expect(page.getByRole('alert')).toContainText('wrong');
   });
 });

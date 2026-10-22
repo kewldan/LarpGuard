@@ -162,9 +162,14 @@ export function Login() {
     setTimeout(() => codeRef.current?.focus(), 0);
   };
 
-  const submit = async (event?: SubmitEvent<HTMLFormElement>) => {
+  // `typed`: the code as just entered (state lags one render behind).
+  const submit = async (
+    event?: SubmitEvent<HTMLFormElement>,
+    typed: string = code,
+  ) => {
     event?.preventDefault();
-    if (!/^\d{6}$/.test(code)) {
+    if (busy) return;
+    if (!/^\d{6}$/.test(typed)) {
       setError('Enter the six digits from your authenticator.');
       return;
     }
@@ -174,7 +179,7 @@ export function Login() {
       const session = await sendJson(sessionSchema, 'POST', '/api/session', {
         username,
         password,
-        totp: code,
+        totp: typed,
       });
       setCsrfToken(session.csrf);
       setPassword('');
@@ -354,6 +359,10 @@ export function Login() {
                         .slice(0, 6);
                       setCode(digits);
                       setError(null);
+                      // The sixth digit signs in, no Verify press needed.
+                      if (digits.length === 6 && code.length < 6) {
+                        void submit(undefined, digits);
+                      }
                     }}
                   />
                 </div>

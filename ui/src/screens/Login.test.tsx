@@ -103,8 +103,8 @@ describe('sign-in', () => {
     await user.type(screen.getByLabelText('Username'), 'ops');
     await user.type(screen.getByLabelText('Password'), 'x');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
+    // The sixth digit submits by itself.
     await user.type(screen.getByLabelText('Code'), '000000');
-    await user.click(screen.getByRole('button', { name: 'Verify' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'The user name, password or code is wrong.',
     );
