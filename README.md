@@ -421,21 +421,6 @@ cheaper than forwarding it.
 On 2 GB, size ClickHouse carefully (small thread pools and caches) or put it
 on its own host — the analytics sink, not the gateway, is what wants RAM.
 
-## 🗺️ Roadmap
-
-- [x] **M0**: TLS front, routing by ClientHello, certificates from `acme.json`
-- [x] **M1**: passive fingerprints, events to NATS and ClickHouse
-- [x] **M2**: HTTP-aware proxy, verdicts, rule language
-- [x] **M3**: rate limiting, Docker labels, admin API
-- [x] **M4**: JS challenge and PoW, crawler verification
-- [x] **M5**: fail-open, behaviour and honeypots, tarpit and decoy, clusters
-- [x] **M6**: ML signal, gRPC, HTTP/3
-- [x] Canvas, WebGL, audio, font and automation probes in the challenge
-- [x] CAPTCHA: built-in puzzle, Turnstile, hCaptcha, reCAPTCHA
-- [x] Crawler IP ranges and Web Bot Auth
-- [x] ASN database and rate-limit key, XDP pre-filter
-- [x] Web UI
-
 ## 📄 License
 
 [MIT](LICENSE). The JA4T/JA4H code in `src/fp/foxio/` is under the
