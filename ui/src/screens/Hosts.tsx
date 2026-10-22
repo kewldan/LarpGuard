@@ -407,18 +407,7 @@ export function Hosts() {
                             lineHeight: 1.45,
                           }}
                         >
-                          <span
-                            style={{
-                              // Readable over the shadow hatch.
-                              background:
-                                mode === 'shadow'
-                                  ? 'var(--color-surface-1)'
-                                  : 'transparent',
-                              padding: '0 2px',
-                            }}
-                          >
-                            {MODE_TEXT[mode]}
-                          </span>
+                          {MODE_TEXT[mode]}
                         </div>
                       </button>
                     );

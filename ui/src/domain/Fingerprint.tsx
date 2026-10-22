@@ -1,5 +1,5 @@
-// Fingerprint pill (readable prefix and hash end, full on hover or focus,
-// click to copy) and a segment-by-segment diff ("05 Fingerprint pill &
+// Fingerprint pill (readable prefix and hash end, full on hover or focus in
+// a layer above it so the table does not reflow, click to copy) and a segment-by-segment diff ("05 Fingerprint pill &
 // diff").
 
 import { useState } from 'react';
@@ -19,11 +19,24 @@ export function FingerprintPill({
   const copy = useCopy();
   const [open, setOpen] = useState(false);
   if (!value) return <span style={{ color: 'var(--color-text-3)' }}>—</span>;
+  const short = shorten(value);
+  const pill = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 26,
+    padding: '2px 10px',
+    borderRadius: 6,
+    border: '1px solid var(--color-line-strong)',
+    background: 'var(--color-surface-2)',
+    fontSize: 12,
+    textAlign: 'left',
+  } as const;
   return (
     <button
       type="button"
       className="mono"
-      title={`${value} (click to copy)`}
+      title="Click to copy"
       aria-label={`Copy ${kind ?? 'fingerprint'} ${value}`}
       onMouseEnter={() => {
         setOpen(true);
@@ -42,22 +55,36 @@ export function FingerprintPill({
         copy(value, kind);
       }}
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        minHeight: 26,
-        padding: '2px 10px',
-        borderRadius: 6,
-        border: '1px solid var(--color-line-strong)',
-        background: 'var(--color-surface-2)',
-        fontSize: 12,
-        textAlign: 'left',
+        ...pill,
+        position: 'relative',
         maxWidth: '100%',
-        overflowWrap: 'anywhere',
+        whiteSpace: 'nowrap',
       }}
     >
-      <span>{open ? value : shorten(value)}</span>
+      <span>{short}</span>
       <Icon name="copy" size={12} strokeWidth={1.1} />
+      {open && short !== value ? (
+        <span
+          aria-hidden="true"
+          style={{
+            ...pill,
+            position: 'absolute',
+            top: -1,
+            left: -1,
+            zIndex: 2,
+            width: 'max-content',
+            maxWidth: 'min(640px, 80vw)',
+            whiteSpace: 'normal',
+            overflowWrap: 'anywhere',
+            border: '1px solid var(--color-text-3)',
+            boxShadow: 'var(--shadow-overlay)',
+            pointerEvents: 'none',
+          }}
+        >
+          <span>{value}</span>
+          <Icon name="copy" size={12} strokeWidth={1.1} />
+        </span>
+      ) : null}
     </button>
   );
 }

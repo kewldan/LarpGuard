@@ -36,8 +36,11 @@ const FINGERPRINT_COLUMNS: Record<FingerprintKind, string> = {
   tcp_fp: 'tcp_fp',
 };
 
+// Time conditions name the column as `req.ts`: ClickHouse substitutes
+// SELECT aliases into WHERE, and the request queries return
+// `toUnixTimestamp64Milli(ts) AS ts`, which a bare `ts` would then mean.
 export function since(seconds: number): string {
-  return `ts >= now64(3) - toIntervalSecond(${Math.trunc(seconds)})`;
+  return `req.ts >= now64(3) - toIntervalSecond(${Math.trunc(seconds)})`;
 }
 
 export class Sql {
@@ -45,6 +48,7 @@ export class Sql {
 
   constructor(database: string) {
     if (!/^\w+$/.test(database)) throw new Error('invalid database name');
+    // The table is named `req`, which the time conditions rely on.
     this.table = `${database}.req`;
   }
 
@@ -181,7 +185,7 @@ WHERE ${since(86_400)}`,
       params['max_score'] = filter.max_score;
     }
     if (withCursor && filter.before !== undefined) {
-      parts.push('ts < fromUnixTimestamp64Milli({before:Int64})');
+      parts.push('req.ts < fromUnixTimestamp64Milli({before:Int64})');
       params['before'] = filter.before;
     }
     return { clause: parts.join('\n  AND '), params };
@@ -195,7 +199,7 @@ WHERE ${since(86_400)}`,
   would_action, status, ja4, user_agent
 FROM ${this.table}
 WHERE ${clause}
-ORDER BY ts DESC LIMIT {limit:UInt32}`,
+ORDER BY req.ts DESC LIMIT {limit:UInt32}`,
       params: { ...params, limit: filter.limit },
     };
   }
@@ -233,7 +237,7 @@ GROUP BY value ORDER BY requests DESC LIMIT 20`,
   sec_fetch_site, rate_limit, duration_ms, local, signed_agent, client_fp,
   model_score
 FROM ${this.table}
-WHERE ts BETWEEN fromUnixTimestamp64Milli({from:Int64}) AND fromUnixTimestamp64Milli({to:Int64})
+WHERE req.ts BETWEEN fromUnixTimestamp64Milli({from:Int64}) AND fromUnixTimestamp64Milli({to:Int64})
   AND request_id = {id:String}
 LIMIT 1`,
       params: { id: requestId, from: ts - 60_000, to: ts + 60_000 },

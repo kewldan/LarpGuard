@@ -2,7 +2,8 @@
 
 const integer = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
-// 12480 → "12.5k", 9402 → "9,402", 4.2 → "4.2", 0.04 → "0.04".
+// 12480 → "12.5k", 9402 → "9,402", 4.2 → "4.2", 0.04 → "0.04",
+// 0.004 → "<0.01" (not "0.00": a small rate is not zero).
 export function compact(value: number): string {
   if (!Number.isFinite(value)) return '—';
   const abs = Math.abs(value);
@@ -12,6 +13,7 @@ export function compact(value: number): string {
   if (abs >= 100 || Number.isInteger(value)) return integer.format(value);
   if (abs >= 1) return value.toFixed(1);
   if (abs === 0) return '0';
+  if (abs < 0.01) return value < 0 ? '>-0.01' : '<0.01';
   return value.toFixed(2);
 }
 

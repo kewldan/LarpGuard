@@ -161,7 +161,17 @@ function TopHosts({ data }: { data: OverviewData }) {
                 textDecoration: 'none',
               }}
             >
-              <span className="mono" style={{ flex: 1 }}>
+              <span
+                className="mono"
+                title={host.host}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {host.host}
               </span>
               {host.mode ? <ModeBadge mode={host.mode.mode} /> : null}

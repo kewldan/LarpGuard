@@ -34,7 +34,7 @@ export function registerRequests(app: Hono<AppEnv>): void {
     );
     if (!/^[\w.-]{1,128}$/.test(id)) fail(400, 'invalid request id');
     const row = await analytics(deps).request(id, ts);
-    if (!row) return fail(404, 'request not found (events are kept 14 days)');
+    if (!row) return fail(404, 'request not found');
     const [names, policy, decision] = await Promise.all([
       asnNames(deps, [row.asn]),
       deps.admin.policy(row.host).catch(() => null),

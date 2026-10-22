@@ -38,6 +38,8 @@ textarea {
 }
 
 button {
+  /* No UA grey under buttons that only set an image (the shadow hatch). */
+  background-color: transparent;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }

@@ -24,6 +24,8 @@ describe('format', () => {
     expect(compact(4.25)).toBe('4.3');
     expect(compact(0.041)).toBe('0.04');
     expect(compact(0)).toBe('0');
+    expect(compact(0.004)).toBe('<0.01');
+    expect(compact(0.005)).toBe('<0.01');
     expect(compact(2_500_000)).toBe('2.5M');
     expect(percent(1, 4)).toBe('25.0%');
     expect(percent(1, 0)).toBe('0%');
