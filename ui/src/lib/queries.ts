@@ -23,6 +23,7 @@ import {
   listsSchema,
   type NewListEntry,
   overviewSchema,
+  passkeyListSchema,
   type RequestFilter,
   type RuleTestRequest,
   reloadResultSchema,
@@ -38,6 +39,7 @@ import {
 
 import type { Range } from '../../shared/domain.ts';
 import { getJson, send, sendJson } from './api.ts';
+import { addPasskey } from './passkeys.ts';
 
 export const keys = {
   status: ['status'] as const,
@@ -55,6 +57,7 @@ export const keys = {
   attack: ['attack'] as const,
   audit: ['audit'] as const,
   search: (q: string) => ['search', q] as const,
+  passkeys: ['passkeys'] as const,
 };
 
 const LIVE = 5000;
@@ -251,6 +254,14 @@ export function useAudit() {
   });
 }
 
+export function usePasskeys() {
+  return useQuery({
+    queryKey: keys.passkeys,
+    queryFn: ({ signal }) =>
+      getJson(passkeyListSchema, '/api/passkeys', undefined, signal),
+  });
+}
+
 export function useSearch(q: string) {
   return useQuery({
     queryKey: keys.search(q),
@@ -336,5 +347,16 @@ export function useRevert() {
   return useChange(
     (id: string) => send('POST', `/api/audit/${encodeURIComponent(id)}/revert`),
     [keys.lists, keys.hosts, keys.attack],
+  );
+}
+
+export function useAddPasskey() {
+  return useChange(addPasskey, [keys.passkeys]);
+}
+
+export function useRemovePasskey() {
+  return useChange(
+    (id: string) => send('DELETE', `/api/passkeys/${encodeURIComponent(id)}`),
+    [keys.passkeys],
   );
 }

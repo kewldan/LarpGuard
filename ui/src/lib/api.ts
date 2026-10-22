@@ -80,7 +80,8 @@ async function request(
     } catch {
       // Not JSON: keep the status line.
     }
-    if (response.status === 401 && path !== '/api/session') {
+    // Sign-in endpoints answer 401 for wrong credentials, not a lost session.
+    if (response.status === 401 && !path.startsWith('/api/session')) {
       for (const listener of unauthorizedListeners) listener();
     }
     throw new ApiError(response.status, message, column);

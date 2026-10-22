@@ -1,5 +1,5 @@
-// Settings: who you are, your session, the theme on this browser, and
-// where the rest is configured.
+// Settings: who you are, your session and passkeys, the theme on this
+// browser, and where the rest is configured.
 
 import { useSession } from '../app/session.ts';
 import { dateTime } from '../lib/format.ts';
@@ -7,6 +7,7 @@ import { useGatewayConfig, useStatus } from '../lib/queries.ts';
 import { setTheme, type ThemeChoice, useTheme } from '../lib/theme.ts';
 import { Card, PageHead } from '../ui/Card.tsx';
 import { Segmented } from '../ui/controls.tsx';
+import { PasskeysCard } from './SettingsPasskeys.tsx';
 import styles from './screens.module.css';
 
 export function Settings() {
@@ -61,10 +62,11 @@ export function Settings() {
             Users, roles, passwords and two-factor secrets live in the
             console&apos;s <span className="mono">console.yaml</span> (
             <span className="mono">larpguard-console hash-password</span>,{' '}
-            <span className="mono">totp-secret</span>). Passkeys are not
-            supported yet.
+            <span className="mono">totp-secret</span>). Passkeys are yours to
+            add below.
           </div>
         </Card>
+        <PasskeysCard />
         <Card title="Appearance">
           <div
             style={{

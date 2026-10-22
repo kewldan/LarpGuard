@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Analytics } from './analytics/analytics.ts';
 import { createApp } from './app.ts';
 import { AuditLog } from './audit.ts';
+import { PasskeyStore } from './auth/passkeys.ts';
 import { SessionStore } from './auth/sessions.ts';
 import { base32Decode, totpAt } from './auth/totp.ts';
 import { parseConsoleConfig } from './config.ts';
@@ -52,6 +53,7 @@ function build(overrides: Partial<Deps> = {}) {
     },
     audit: new AuditLog(null, () => clock),
     sessions: new SessionStore({ idleMs: 30 * 60_000, maxMs: 12 * 3_600_000 }),
+    passkeys: new PasskeyStore(null),
     now: () => clock,
     staticRoot: null,
     verifyPassword: (password) =>

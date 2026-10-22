@@ -170,7 +170,8 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 - `ui/` — веб-консоль (ADR-017), один npm-пакет, версии точные
   (`.npmrc`: `save-exact`). `shared/` — контракт API (схемы zod, их же
   проверяет BFF и берёт SPA). `server/` — BFF на Hono: `auth/` (scrypt,
-  TOTP, сессии в памяти, блокировка перебора), `app.ts` (CSP, сессия, CSRF:
+  TOTP, сессии в памяти, `signin` — блокировка перебора и проверка кода,
+  `passkeys` — файл ключей WebAuthn и одноразовые challenge), `app.ts` (CSP, сессия, CSRF:
   `X-CSRF-Token` + `Origin`), `roles.ts`, `gateway/` (admin-сокет только
   белым списком вызовов, полный IP отбрасывается схемой; `/metrics`),
   `analytics/` (ClickHouse: только параметризованные запросы из `sql.ts`),
@@ -217,6 +218,8 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 - Консоль не видит полный IP: из `/decisions` BFF оставляет только
   `ip_prefix`/`ip_hash`, браузер не ходит ни в admin-сокет, ни в ClickHouse.
   Изменяющий маршрут BFF — с `requireRole('operator')` и записью в аудит.
+  Исключение — свои passkeys (`routes/passkeys.ts`): любая роль, но
+  добавление только после повторного пароля и кода, и тоже в аудит.
 
 ## Git
 

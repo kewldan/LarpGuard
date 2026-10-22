@@ -13,6 +13,7 @@ import { createAnalytics } from './analytics/analytics.ts';
 import { createClickHouseRun } from './analytics/clickhouse.ts';
 import { createApp } from './app.ts';
 import { AuditLog } from './audit.ts';
+import { PasskeyStore } from './auth/passkeys.ts';
 import { hashPassword, verifyPassword } from './auth/password.ts';
 import { SessionStore } from './auth/sessions.ts';
 import { newTotpSecret, otpauthUri } from './auth/totp.ts';
@@ -56,6 +57,10 @@ function serveCommand(argv: string[]): void {
       idleMs: config.session.idle,
       maxMs: config.session.max,
     }),
+    passkeys:
+      config.passkeys_file === null
+        ? null
+        : new PasskeyStore(config.passkeys_file),
     now: Date.now,
     staticRoot:
       values.static ?? fileURLToPath(new URL('../web', import.meta.url)),

@@ -88,6 +88,12 @@ export const consoleConfigSchema = z
       .nullable()
       .default(null),
     audit_log: z.string().min(1),
+    // Registered passkeys (written by the console); null turns passkeys off.
+    passkeys_file: z
+      .string()
+      .min(1)
+      .nullable()
+      .default('/var/lib/larpguard/passkeys.json'),
     session: z
       .object({
         idle: duration.default(30 * 60_000),

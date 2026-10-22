@@ -8,6 +8,7 @@ import { serve } from '@hono/node-server';
 
 import { createApp } from '../app.ts';
 import { AuditLog } from '../audit.ts';
+import { PasskeyStore } from '../auth/passkeys.ts';
 import { SessionStore } from '../auth/sessions.ts';
 import { parseConsoleConfig } from '../config.ts';
 import type { MetricsApi } from '../gateway/metrics.ts';
@@ -80,6 +81,8 @@ const app = createApp({
     idleMs: config.session.idle,
     maxMs: config.session.max,
   }),
+  // In memory: passkeys registered in development vanish on restart.
+  passkeys: new PasskeyStore(null),
   now,
   staticRoot,
   // Development only: one fixed password for both users.

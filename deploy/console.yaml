@@ -28,6 +28,10 @@ clickhouse:
 # Every change and sign-in, hash-chained (append-only).
 audit_log: /var/lib/larpguard/audit.jsonl
 
+# Passkeys users add in Settings (written by the console, mode 0600); null
+# turns passkeys off. They need HTTPS: the RP ID is public_origin's host.
+passkeys_file: /var/lib/larpguard/passkeys.json   # The default.
+
 session:
   idle: 30m
   max: 12h

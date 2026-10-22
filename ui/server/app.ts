@@ -10,10 +10,9 @@ import { type Context, Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 
 import { loginSchema, sessionSchema, whoamiSchema } from '../shared/api.ts';
-import { FailureLimiter } from './auth/limiter.ts';
 import { type SessionData, safeEqual } from './auth/sessions.ts';
-import { verifyTotp } from './auth/totp.ts';
-import { secureCookies } from './config.ts';
+import { SignInGuard } from './auth/signin.ts';
+import { type ConsoleUser, secureCookies } from './config.ts';
 import type { AppEnv, Deps } from './deps.ts';
 import {
   addressPrefix,
@@ -24,6 +23,11 @@ import {
   send,
 } from './http.ts';
 import { registerRoutes } from './routes/index.ts';
+import {
+  type PasskeyContext,
+  registerPasskeySignIn,
+  registerPasskeys,
+} from './routes/passkeys.ts';
 
 const CSP = [
   "default-src 'self'",
@@ -37,10 +41,6 @@ const CSP = [
   "form-action 'self'",
   "frame-ancestors 'none'",
 ].join('; ');
-
-// A password check that costs the same for unknown users.
-const DUMMY_HASH =
-  'scrypt$17$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 export function cookieName(deps: Deps): string {
   return secureCookies(deps.config) ? '__Host-lg_session' : 'lg_session';
@@ -71,15 +71,9 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   const secure = secureCookies(deps.config);
   const origin = new URL(deps.config.public_origin).origin;
   const users = new Map(deps.config.users.map((user) => [user.name, user]));
-  // Five failures in five minutes lock a name or a client network for five
-  // minutes.
-  const limiter = new FailureLimiter({
-    limit: 5,
-    windowMs: 5 * 60_000,
-    lockMs: 5 * 60_000,
-  });
-  // A TOTP code works once.
-  const usedSteps = new Map<string, number>();
+  const guard = new SignInGuard(deps.verifyPassword);
+  const network = (c: Context<AppEnv>) =>
+    addressPrefix(clientAddress(c)) || 'unknown';
 
   app.onError((error) => {
     const response = errorResponse(error);
@@ -109,55 +103,12 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     expires_at: deps.sessions.expiresAt(session),
   });
 
-  // --- Session API (no session needed) ----------------------------------
-
-  app.get('/api/session', (c) => {
-    const session = deps.sessions.get(getCookie(c, cookie), deps.now());
-    if (!session) return fail(401, 'not signed in');
-    return send(c, sessionSchema, sessionJson(session));
-  });
-
-  app.post('/api/session', async (c) => {
-    if (c.req.header('origin') !== origin) fail(403, 'cross-origin request');
-    const login = parseOr400(loginSchema, await jsonBody(c));
-    const now = deps.now();
-    const network = addressPrefix(clientAddress(c)) || 'unknown';
-    const keys = [`user:${login.username}`, `net:${network}`];
-    const locked = Math.max(...keys.map((key) => limiter.lockedFor(key, now)));
-    if (locked > 0) {
-      fail(
-        429,
-        `too many failed sign-ins, try again in ${Math.ceil(locked / 60_000)} min`,
-      );
-    }
-    const user = users.get(login.username);
-    const passwordOk = await deps.verifyPassword(
-      login.password,
-      user?.password ?? DUMMY_HASH,
-    );
-    const step = user
-      ? verifyTotp(user.totp_secret, login.totp, Math.floor(now / 1000))
-      : null;
-    const replay =
-      user !== undefined &&
-      step !== null &&
-      (usedSteps.get(user.name) ?? -1) >= step;
-    if (!user || !passwordOk || step === null || replay) {
-      const lockedNow = keys.map((key) => limiter.fail(key, now)).some(Boolean);
-      deps.audit.append({
-        kind: 'auth',
-        actor: user ? user.name : 'unknown',
-        what: `Failed sign-in for "${login.username}"${lockedNow ? ', locked 5 min' : ''}`,
-        facts: [
-          ['From', network],
-          ['Reason', replay ? 'code already used' : 'wrong credentials'],
-        ],
-      });
-      return fail(401, 'wrong user name, password or code');
-    }
-    for (const key of keys) limiter.succeed(key);
-    usedSteps.set(user.name, step);
-    const session = deps.sessions.create(user.name, user.role, now);
+  const openSession = (
+    c: Context<AppEnv>,
+    user: ConsoleUser,
+    how: string,
+  ): SessionData => {
+    const session = deps.sessions.create(user.name, user.role, deps.now());
     setCookie(c, cookie, session.id, {
       httpOnly: true,
       secure,
@@ -170,12 +121,68 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       actor: user.name,
       what: 'Signed in',
       facts: [
-        ['From', network],
+        ['From', network(c)],
         ['Role', user.role],
+        ['With', how],
       ],
     });
+    return session;
+  };
+
+  const passkeys: PasskeyContext = {
+    guard,
+    users,
+    origin,
+    network,
+    openSession,
+    sessionJson,
+  };
+
+  // --- Session API (no session needed) ----------------------------------
+
+  app.get('/api/session', (c) => {
+    const session = deps.sessions.get(getCookie(c, cookie), deps.now());
+    if (!session) return fail(401, 'not signed in');
     return send(c, sessionSchema, sessionJson(session));
   });
+
+  app.post('/api/session', async (c) => {
+    if (c.req.header('origin') !== origin) fail(403, 'cross-origin request');
+    const login = parseOr400(loginSchema, await jsonBody(c));
+    const now = deps.now();
+    const from = network(c);
+    const keys = [`user:${login.username}`, `net:${from}`];
+    const locked = guard.lockedFor(keys, now);
+    if (locked > 0) {
+      fail(
+        429,
+        `too many failed sign-ins, try again in ${Math.ceil(locked / 60_000)} min`,
+      );
+    }
+    const user = users.get(login.username);
+    const result = await guard.check(user, login.password, login.totp, now);
+    if (!user || result !== 'ok') {
+      const lockedNow = guard.fail(keys, now);
+      deps.audit.append({
+        kind: 'auth',
+        actor: user ? user.name : 'unknown',
+        what: `Failed sign-in for "${login.username}"${lockedNow ? ', locked 5 min' : ''}`,
+        facts: [
+          ['From', from],
+          [
+            'Reason',
+            result === 'replay' ? 'code already used' : 'wrong credentials',
+          ],
+        ],
+      });
+      return fail(401, 'wrong user name, password or code');
+    }
+    guard.succeed(keys);
+    const session = openSession(c, user, 'password and code');
+    return send(c, sessionSchema, sessionJson(session));
+  });
+
+  registerPasskeySignIn(app, passkeys);
 
   // The gateway's verdict on this very request (sign-in screen). Its
   // headers are trustworthy only behind the gateway, which strips client
@@ -191,6 +198,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       reasons: reasons && reasons !== '-' ? reasons.split(',') : [],
       request_id: c.req.header('x-bot-request-id') ?? null,
       ip_prefix: prefix || null,
+      passkeys: deps.passkeys !== null,
     });
   });
 
@@ -222,6 +230,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   });
 
   registerRoutes(app);
+  registerPasskeys(app, passkeys);
 
   app.all('/api/*', () => fail(404, 'unknown endpoint'));
 

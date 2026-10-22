@@ -1,7 +1,9 @@
 // Sign-in: user name and password, then the authenticator code. Both go
 // to the server together, so a wrong password is never confirmed on its
-// own. The aside shows what the gateway decided about this very request.
+// own. Or a passkey, which stands for both. The aside shows what the
+// gateway decided about this very request.
 
+import { browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type SubmitEvent, useRef, useState } from 'react';
 
@@ -11,6 +13,7 @@ import { ReasonChip } from '../domain/ReasonChip.tsx';
 import { ScoreCell } from '../domain/ScoreBar.tsx';
 import { ClassBadge } from '../domain/verdict.tsx';
 import { ApiError, getJson, sendJson, setCsrfToken } from '../lib/api.ts';
+import { passkeyErrorText, signInWithPasskey } from '../lib/passkeys.ts';
 import { useTheme } from '../lib/theme.ts';
 import { Button, IconButton } from '../ui/Button.tsx';
 import { Eyebrow } from '../ui/Card.tsx';
@@ -18,13 +21,17 @@ import { TextInput } from '../ui/controls.tsx';
 import { Logo, Spinner } from '../ui/Icon.tsx';
 import styles from './Login.module.css';
 
-function Verdict() {
-  const whoami = useQuery({
+function useWhoami() {
+  return useQuery({
     queryKey: ['whoami'],
     queryFn: ({ signal }) =>
       getJson(whoamiSchema, '/api/whoami', undefined, signal),
     staleTime: Infinity,
   }).data;
+}
+
+function Verdict() {
+  const whoami = useWhoami();
   const behind = whoami?.score !== null && whoami?.score !== undefined;
   return (
     <aside
@@ -121,6 +128,28 @@ export function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
+  const passkeys = useWhoami()?.passkeys === true && browserSupportsWebAuthn();
+
+  const withPasskey = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await signInWithPasskey();
+      setCsrfToken(session.csrf);
+      client.setQueryData(sessionKey, session);
+    } catch (failure) {
+      setError(
+        passkeyErrorText(failure) ??
+          (failure instanceof ApiError
+            ? failure.status === 401
+              ? 'This passkey was not accepted. Use your password and code.'
+              : failure.message
+            : 'Passkey sign-in failed.'),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const toCode = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -254,6 +283,17 @@ export function Login() {
                   <Button type="submit" variant="primary" size="lg" block>
                     Continue
                   </Button>
+                  {passkeys ? (
+                    <Button
+                      size="lg"
+                      block
+                      disabled={busy}
+                      onClick={() => void withPasskey()}
+                    >
+                      {busy ? <Spinner /> : null}
+                      Sign in with a passkey
+                    </Button>
+                  ) : null}
                 </div>
                 <p className={styles.foot}>
                   Lost access? An administrator sets a new hash with{' '}

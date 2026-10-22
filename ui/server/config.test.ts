@@ -28,6 +28,10 @@ describe('console config', () => {
     const config = parseConsoleConfig(minimal);
     expect(config.gateway.admin_socket).toBe('/run/bot-shield/admin.sock');
     expect(config.clickhouse).toBeNull();
+    expect(config.passkeys_file).toBe('/var/lib/larpguard/passkeys.json');
+    expect(
+      parseConsoleConfig(`${minimal}passkeys_file: null\n`).passkeys_file,
+    ).toBeNull();
     expect(secureCookies(config)).toBe(true);
     expect(
       secureCookies(

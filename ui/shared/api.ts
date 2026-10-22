@@ -56,16 +56,65 @@ export const loginSchema = z.object({
 });
 export type Login = z.infer<typeof loginSchema>;
 
-// What the gateway decided about the current request (its X-Bot-*
-// headers, set when the console sits behind it); fields are null otherwise.
+// For the sign-in screen: what the gateway decided about the current
+// request (its X-Bot-* headers, set when the console sits behind it;
+// fields are null otherwise) and whether passkeys are on.
 export const whoamiSchema = z.object({
   score: z.number().nullable(),
   class: z.string().nullable(),
   reasons: z.array(z.string()),
   request_id: z.string().nullable(),
   ip_prefix: z.string().nullable(),
+  passkeys: z.boolean(),
 });
 export type Whoami = z.infer<typeof whoamiSchema>;
+
+// --- Passkeys ----------------------------------------------------------------
+
+// WebAuthn JSON (PublicKeyCredential*OptionsJSON, *ResponseJSON) is checked
+// by the WebAuthn library on the server; here only its outline.
+const webauthnJson = z.custom<object>(
+  (value) => typeof value === 'object' && value !== null,
+);
+const credentialResponse = z.looseObject({ id: z.string().min(1).max(1024) });
+
+export const passkeyOptionsSchema = z.object({
+  // Names the challenge of this sign-in (absent for registration, which is
+  // bound to the session).
+  ceremony: z.string().optional(),
+  options: webauthnJson,
+});
+export type PasskeyOptions = z.infer<typeof passkeyOptionsSchema>;
+
+export const passkeySignInSchema = z.object({
+  ceremony: z.string().max(64),
+  response: credentialResponse,
+});
+
+// Adding a passkey asks for the password and a code again: a stolen
+// session alone cannot plant a lasting credential.
+export const passkeyReauthSchema = loginSchema.omit({ username: true });
+
+export const newPasskeySchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  response: credentialResponse,
+});
+export type NewPasskey = z.infer<typeof newPasskeySchema>;
+
+export const passkeySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  created_at: z.number(),
+  last_used_at: z.number().nullable(),
+});
+export type Passkey = z.infer<typeof passkeySchema>;
+
+export const passkeyListSchema = z.object({
+  // False when console.yaml sets passkeys_file: null.
+  enabled: z.boolean(),
+  passkeys: z.array(passkeySchema),
+});
+export type PasskeyList = z.infer<typeof passkeyListSchema>;
 
 // --- Status and health -------------------------------------------------------
 

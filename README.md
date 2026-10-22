@@ -286,8 +286,9 @@ Prometheus metrics and `/health` are served on `127.0.0.1:9900`.
 `ghcr.io/kewldan/larpguard-console` runs next to the gateway. It serves the
 UI and a small backend that talks to the admin socket and ClickHouse; the
 browser never reaches either directly. Sign-in takes a password and a TOTP
-code, roles are `viewer` and `operator`, every change lands in a
-hash-chained audit log, and full client addresses never leave the gateway.
+code, or a passkey each user adds in Settings; roles are `viewer` and
+`operator`, every change lands in a hash-chained audit log, and full client
+addresses never leave the gateway.
 
 ```bash
 echo 'a long password' | docker run --rm -i ghcr.io/kewldan/larpguard-console hash-password

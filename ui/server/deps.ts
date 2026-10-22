@@ -5,6 +5,7 @@ import type { HttpBindings } from '@hono/node-server';
 
 import type { Analytics } from './analytics/analytics.ts';
 import type { AuditLog } from './audit.ts';
+import type { PasskeyStore } from './auth/passkeys.ts';
 import type { SessionData, SessionStore } from './auth/sessions.ts';
 import type { ConsoleConfig } from './config.ts';
 import type { AdminApi } from './gateway/admin.ts';
@@ -18,6 +19,8 @@ export interface Deps {
   metrics: MetricsApi;
   audit: AuditLog;
   sessions: SessionStore;
+  // Null: passkeys are off (passkeys_file: null).
+  passkeys: PasskeyStore | null;
   now: () => number;
   // Built SPA (index.html and assets); null: API only (development).
   staticRoot: string | null;

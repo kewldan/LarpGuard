@@ -7,7 +7,8 @@ import { defineConfig, devices } from '@playwright/test';
 import { E2E_TIME } from './server/dev/users.ts';
 
 const PORT = 9911;
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+// localhost, not 127.0.0.1: WebAuthn takes no IP address as the RP ID.
+const ORIGIN = `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -42,7 +43,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'node server/dev/dev.ts',
-    url: `${ORIGIN}/api/whoami`,
+    url: `http://127.0.0.1:${PORT}/api/whoami`,
     reuseExistingServer: false,
     env: {
       LG_PORT: String(PORT),
