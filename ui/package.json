@@ -19,6 +19,7 @@
     "build:server": "vite build --config vite.server.config.ts",
     "start": "node dist/server/main.js",
     "tokens": "node scripts/gen-tokens.ts",
+    "settings-help": "node scripts/gen-settings-help.ts",
     "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.server.json && tsc -p tsconfig.node.json",
     "lint": "biome check --error-on-warnings .",
     "format": "biome check --write .",

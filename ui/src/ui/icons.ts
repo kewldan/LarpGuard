@@ -13,6 +13,7 @@ export const ICON_PATHS = {
     'M8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6M2 4l3 2M14 4l-3 2M2 12l3-2M14 12l-3-2',
   attack: 'M8 2l6 11H2zM8 6v3.5M8 11.5h.01',
   log: 'M3 2h7l3 3v9H3zM6 7h4M6 10h4',
+  config: 'M3 3v10M8 3v10M13 3v10M1.5 6h3M6.5 10h3M11.5 5h3',
   moon: 'M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z',
   sun: 'M8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1',
   back: 'M10 3L5 8l5 5',

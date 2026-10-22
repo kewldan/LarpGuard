@@ -9,12 +9,15 @@ import { errorSchema } from '../../shared/api.ts';
 export class ApiError extends Error {
   readonly status: number;
   readonly column: number | undefined;
+  // The settings key a refused change is about.
+  readonly path: string | undefined;
 
-  constructor(status: number, message: string, column?: number) {
+  constructor(status: number, message: string, column?: number, path?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.column = column;
+    this.path = path;
   }
 }
 
@@ -71,11 +74,13 @@ async function request(
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
     let column: number | undefined;
+    let key: string | undefined;
     try {
       const parsed = errorSchema.safeParse(await response.json());
       if (parsed.success) {
         message = parsed.data.error;
         column = parsed.data.column;
+        key = parsed.data.path;
       }
     } catch {
       // Not JSON: keep the status line.
@@ -84,7 +89,7 @@ async function request(
     if (response.status === 401 && !path.startsWith('/api/session')) {
       for (const listener of unauthorizedListeners) listener();
     }
-    throw new ApiError(response.status, message, column);
+    throw new ApiError(response.status, message, column, key);
   }
   return response;
 }

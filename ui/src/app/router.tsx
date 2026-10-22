@@ -13,6 +13,7 @@ import { EmptyState } from '../ui/states.tsx';
 import { Root } from './Root.tsx';
 import {
   auditSearch,
+  configSearch,
   crawlersSearch,
   fingerprintsSearch,
   hostsSearch,
@@ -116,6 +117,15 @@ const routes = [
     component: lazyRouteComponent(
       () => import('../screens/Attack.tsx'),
       'Attack',
+    ),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/config',
+    validateSearch: configSearch,
+    component: lazyRouteComponent(
+      () => import('../screens/Config.tsx'),
+      'Config',
     ),
   }),
   createRoute({

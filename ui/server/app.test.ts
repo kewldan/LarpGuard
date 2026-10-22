@@ -293,6 +293,118 @@ describe('changes', () => {
   });
 });
 
+describe('settings', () => {
+  it('shows every key, never a secret value, and edits need an operator', async () => {
+    const app = build();
+    const viewer = await signIn(app, 'watcher');
+    const response = await send(app, viewer, 'GET', '/api/settings');
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).not.toContain('dev-token');
+    const body = JSON.parse(text) as {
+      revision: string;
+      keys: { path: string; secret: boolean; set?: boolean }[];
+    };
+    const token = body.keys.find((key) => key.path === 'events.token');
+    expect(token).toMatchObject({ secret: true, set: true });
+    expect(token).not.toHaveProperty('value');
+    const change = {
+      base_revision: body.revision,
+      set: { 'captcha.rounds': 3 },
+    };
+    expect(
+      (await send(app, viewer, 'POST', '/api/settings', change)).status,
+    ).toBe(403);
+    expect(
+      (await send(app, viewer, 'POST', '/api/settings/validate', change))
+        .status,
+    ).toBe(403);
+  });
+
+  it('validates, applies, audits without secrets and reverts', async () => {
+    const app = build();
+    const ops = await signIn(app);
+    const view = async () =>
+      (await (await send(app, ops, 'GET', '/api/settings')).json()) as {
+        revision: string;
+        keys: { path: string; value?: unknown; source: string }[];
+      };
+    let settings = await view();
+    // A refused value names its key; nothing is written.
+    let response = await send(app, ops, 'POST', '/api/settings/validate', {
+      base_revision: settings.revision,
+      set: { 'captcha.rounds': 9 },
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ path: 'captcha.rounds' });
+    response = await send(app, ops, 'POST', '/api/settings', {
+      base_revision: settings.revision,
+      set: { 'decoy.html_file': '/etc/shadow' },
+    });
+    expect(response.status).toBe(422);
+    response = await send(app, ops, 'POST', '/api/settings', {
+      base_revision: settings.revision,
+      set: {
+        'policy.thresholds.bot': 80,
+        'captcha.secret': 'hunter2-secret',
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain('hunter2');
+    // The old revision is stale now.
+    expect(
+      (
+        await send(app, ops, 'POST', '/api/settings', {
+          base_revision: settings.revision,
+          set: { whoami: true },
+        })
+      ).status,
+    ).toBe(409);
+    const audit = (await (
+      await send(app, ops, 'GET', '/api/audit')
+    ).json()) as {
+      entries: { id: string; kind: string; revertible: boolean }[];
+    };
+    expect(JSON.stringify(audit)).not.toContain('hunter2');
+    const withSecret = audit.entries.find((e) => e.kind === 'settings');
+    expect(withSecret?.revertible).toBe(false);
+
+    settings = await view();
+    response = await send(app, ops, 'POST', '/api/settings', {
+      base_revision: settings.revision,
+      set: { 'policy.block_status': 451 },
+    });
+    expect(response.status).toBe(200);
+    const entries = (
+      (await (await send(app, ops, 'GET', '/api/audit')).json()) as {
+        entries: {
+          id: string;
+          kind: string;
+          what: string;
+          revertible: boolean;
+        }[];
+      }
+    ).entries;
+    const blockStatus = entries.find((e) =>
+      e.what.startsWith('policy.block_status'),
+    );
+    expect(blockStatus?.revertible).toBe(true);
+    expect(
+      (await send(app, ops, 'POST', `/api/audit/${blockStatus?.id}/revert`))
+        .status,
+    ).toBe(204);
+    settings = await view();
+    expect(
+      settings.keys.find((key) => key.path === 'policy.block_status'),
+    ).toMatchObject({ value: 403, source: 'default' });
+
+    const history = (await (
+      await send(app, ops, 'GET', '/api/settings/history')
+    ).json()) as { versions: { revision: string }[] };
+    expect(history.versions.length).toBe(3);
+  });
+});
+
 describe('data', () => {
   it('never passes full addresses through', async () => {
     const leaky: Analytics = {

@@ -15,6 +15,13 @@ import {
   type ListEntry,
   listEntrySchema,
   type NewListEntry,
+  type Settings,
+  type SettingsDiff,
+  type SettingsHistory,
+  type SettingValue,
+  settingsDiffSchema,
+  settingsHistorySchema,
+  settingsSchema,
 } from '../../shared/api.ts';
 import type { HostMode } from '../../shared/domain.ts';
 
@@ -25,12 +32,15 @@ export class AdminError extends Error {
   readonly status: number;
   // Column of a rule compile error (422 from /rules/test).
   readonly column: number | undefined;
+  // The settings key a refused change is about.
+  readonly path: string | undefined;
 
-  constructor(status: number, message: string, column?: number) {
+  constructor(status: number, message: string, column?: number, path?: string) {
     super(message);
     this.name = 'AdminError';
     this.status = status;
     this.column = column;
+    this.path = path;
   }
 }
 
@@ -138,6 +148,13 @@ const reloadSchema = z.object({
   summary: z.string(),
 });
 
+// A settings change as the gateway takes it (secrets in `set` as strings).
+export interface GatewaySettingsChange {
+  base_revision: string;
+  set: Record<string, SettingValue>;
+  reset: string[];
+}
+
 // Fields of a req event that a rule test sends to the gateway.
 export interface RuleSampleEvent {
   host: string;
@@ -181,6 +198,11 @@ export interface AdminApi {
   ): Promise<RulesTestResponse>;
   asns(numbers: number[]): Promise<AsnInfo[]>;
   reload(): Promise<string>;
+  settings(): Promise<Settings>;
+  validateSettings(change: GatewaySettingsChange): Promise<SettingsDiff>;
+  applySettings(change: GatewaySettingsChange): Promise<SettingsDiff>;
+  settingsHistory(): Promise<SettingsHistory>;
+  rollbackSettings(revision: string, base: string): Promise<SettingsDiff>;
 }
 
 interface RawResponse {
@@ -250,6 +272,7 @@ function call(
 const gatewayErrorSchema = z.object({
   error: z.string(),
   column: z.number().optional(),
+  path: z.string().optional(),
 });
 
 // The gateway leaves out an empty host and comment (ListStore::ToJson).
@@ -276,6 +299,7 @@ export function createAdminClient(socketPath: string): AdminApi {
           ? error.data.error
           : `admin API status ${response.status}`,
         error.success ? error.data.column : undefined,
+        error.success ? error.data.path : undefined,
       );
     }
     const parsed = schema.safeParse(response.body);
@@ -364,5 +388,17 @@ export function createAdminClient(socketPath: string): AdminApi {
       return response.asns;
     },
     reload: async () => (await must(reloadSchema, 'POST', '/reload')).summary,
+    settings: () => must(settingsSchema, 'GET', '/settings'),
+    validateSettings: (change) =>
+      must(settingsDiffSchema, 'POST', '/settings/validate', change),
+    applySettings: (change) =>
+      must(settingsDiffSchema, 'POST', '/settings', change),
+    settingsHistory: () =>
+      must(settingsHistorySchema, 'GET', '/settings/history'),
+    rollbackSettings: (revision, base) =>
+      must(settingsDiffSchema, 'POST', '/settings/rollback', {
+        revision,
+        base_revision: base,
+      }),
   };
 }

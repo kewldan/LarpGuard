@@ -20,5 +20,6 @@ export const NAV: NavItem[] = [
   { to: '/hosts', name: 'Hosts & policy', icon: 'hosts', tab: 'Hosts' },
   { to: '/crawlers', name: 'Crawlers', icon: 'crawlers' },
   { to: '/attack', name: 'Attack mode', icon: 'attack' },
+  { to: '/config', name: 'Configuration', icon: 'config' },
   { to: '/log', name: 'Decision log', icon: 'log' },
 ];

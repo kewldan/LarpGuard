@@ -1,5 +1,6 @@
 // GET /api/audit: the console's change log. POST /api/audit/:id/revert
-// undoes a change that has an inverse (lists, attack mode, host modes).
+// undoes a change that has an inverse (lists, attack mode, host modes,
+// settings without secrets).
 
 import type { Hono } from 'hono';
 import { z } from 'zod';
@@ -17,6 +18,7 @@ import { requireRole } from '../roles.ts';
 import { actor, formatTtl } from './common.ts';
 import { applyMode } from './hosts.ts';
 import { describeEntry, restoreEntry } from './lists.ts';
+import { revertSettings, settingsStateSchema } from './settings.ts';
 
 const modeStateSchema = z.object({
   host: z.string(),
@@ -87,6 +89,19 @@ function planRevert(entry: StoredEntry): Revert | null {
         after: before.data,
       };
     };
+  }
+  if (entry.kind === 'settings') {
+    const before = settingsStateSchema.safeParse(entry.before);
+    const after = settingsStateSchema.safeParse(entry.after);
+    if (!before.success || !after.success) return null;
+    // Secret values are never logged, so they cannot be put back.
+    const states = [
+      ...Object.values(before.data),
+      ...Object.values(after.data),
+    ];
+    if (states.length === 0 || states.some((state) => state.set !== undefined))
+      return null;
+    return (deps) => revertSettings(deps, before.data, after.data);
   }
   return null;
 }

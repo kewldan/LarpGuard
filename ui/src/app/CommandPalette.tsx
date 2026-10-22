@@ -1,12 +1,13 @@
 // ⌘K: jump to an IP hash or network, a JA4, a host, an AS or a rule. The
-// kind of item follows from what is typed (the BFF decides); screens match
-// by name.
+// kind of item follows from what is typed (the BFF decides); screens,
+// settings sections and settings keys match by name.
 
 import { useNavigate } from '@tanstack/react-router';
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SearchResult } from '../../shared/api.ts';
-import { useSearch } from '../lib/queries.ts';
+import { useSearch, useSettings } from '../lib/queries.ts';
+import { matchKeys, SECTIONS, sectionOf } from '../lib/settings.ts';
 import { Kbd } from '../ui/controls.tsx';
 import { Icon } from '../ui/Icon.tsx';
 import { NAV } from './nav.ts';
@@ -30,6 +31,7 @@ export function CommandPalette({
   const [active, setActive] = useState(0);
   const deferred = useDeferredValue(q.trim());
   const search = useSearch(deferred);
+  const settings = useSettings(open && deferred.length >= 2);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -117,8 +119,31 @@ export function CommandPalette({
     const results = (needle ? (search.data?.results ?? []) : [])
       .map(fromResult)
       .filter((item): item is Item => item !== null);
-    return [...results, ...screens].slice(0, 12);
-  }, [q, search.data, navigate, onClose]);
+    const sections: Item[] = (needle.length >= 2 ? SECTIONS : [])
+      .filter((section) => section.name.toLowerCase().includes(needle))
+      .map((section) => ({
+        kind: 'settings',
+        value: section.name,
+        meta: 'configuration',
+        go: go(() =>
+          navigate({ to: '/config', search: { section: section.id } }),
+        ),
+      }));
+    const settingKeys: Item[] = matchKeys(settings.data?.keys ?? [], needle)
+      .slice(0, 6)
+      .map((key) => ({
+        kind: 'setting',
+        value: key.path,
+        meta: sectionOf(key.path).name,
+        go: go(() =>
+          navigate({
+            to: '/config',
+            search: { section: sectionOf(key.path).id, key: key.path },
+          }),
+        ),
+      }));
+    return [...results, ...screens, ...sections, ...settingKeys].slice(0, 12);
+  }, [q, search.data, settings.data, navigate, onClose]);
 
   const index = Math.min(active, Math.max(0, items.length - 1));
 

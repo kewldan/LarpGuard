@@ -24,6 +24,18 @@ for (const theme of ['dark', 'light'] as const) {
         });
       });
 
+      test(`configuration, ${name}`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await open(page, '/config?section=captcha');
+        await expect(
+          page.getByRole('heading', { name: 'CAPTCHA', exact: true }),
+        ).toBeVisible();
+        await expect(page).toHaveScreenshot(
+          `configuration-${name}-${theme}.png`,
+          { fullPage: name === 'desktop' },
+        );
+      });
+
       test(`attack mode, ${name}`, async ({ page }) => {
         await page.setViewportSize(size);
         await open(page, '/attack');

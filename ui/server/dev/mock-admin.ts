@@ -1,9 +1,13 @@
 // An in-memory gateway for development and browser tests: the admin API's
-// behaviour (lists, attack mode, console modes, rule tests) without a
-// gateway process.
+// behaviour (lists, attack mode, console modes, rule tests, settings)
+// without a gateway process.
 
-import type { GatewayConfig, ListEntry } from '../../shared/api.ts';
-import type { HostMode } from '../../shared/domain.ts';
+import type {
+  GatewayConfig,
+  ListEntry,
+  SettingsDiff,
+} from '../../shared/api.ts';
+import type { Action, HostMode } from '../../shared/domain.ts';
 import {
   type AdminApi,
   AdminError,
@@ -12,6 +16,7 @@ import {
 import { compileRule, RuleError } from './mini-rules.ts';
 import { MOCK_CONFIG } from './mock-config.ts';
 import { MOCK_ASNS, MOCK_HOSTS } from './mock-data.ts';
+import { createMockSettings } from './mock-settings.ts';
 
 export const MOCK_SHADOW_HOSTS = new Set([
   'shop.example.com',
@@ -30,6 +35,31 @@ export function createMockAdmin(now: () => number): AdminApi {
     ]),
   );
   const consoleModes = new Map<string, HostMode>();
+  const settings = createMockSettings(now);
+  // Live settings reach the verdict set, as in the gateway.
+  const applied = (diff: SettingsDiff): SettingsDiff => {
+    const value = settings.value;
+    config.policy = {
+      ...config.policy,
+      enforce: value('mode') === 'enforce',
+      suspicious_threshold: value('policy.thresholds.suspicious') as number,
+      bot_threshold: value('policy.thresholds.bot') as number,
+      suspicious_action: value('policy.actions.suspicious') as Action,
+      bot_action: value('policy.actions.bot') as Action,
+      verified_bot_action: value('policy.actions.verified_bot') as Action,
+      block_status: value('policy.block_status') as number,
+    };
+    config.rules = value('rules') as GatewayConfig['rules'];
+    config.honeypot_paths = value('honeypot.paths') as string[];
+    const ai = value('crawlers.ai');
+    config.crawlers = {
+      ...config.crawlers,
+      ai_action: ai === 'default' ? null : (ai as Action),
+    };
+    config.generation += 1;
+    config.built_at_ms = now();
+    return diff;
+  };
   const lists: ListEntry[] = [];
   let nextId = 1;
   const attack = new Map<
@@ -187,6 +217,14 @@ export function createMockAdmin(now: () => number): AdminApi {
     },
     asns: (numbers) =>
       Promise.resolve(MOCK_ASNS.filter((info) => numbers.includes(info.asn))),
+    settings: () => Promise.resolve(settings.view()),
+    validateSettings: (change) =>
+      Promise.resolve().then(() => settings.validate(change)),
+    applySettings: (change) =>
+      Promise.resolve().then(() => applied(settings.apply(change))),
+    settingsHistory: () => Promise.resolve(settings.history()),
+    rollbackSettings: (revision, base) =>
+      Promise.resolve().then(() => applied(settings.rollback(revision, base))),
     reload: () => {
       config.generation += 1;
       config.built_at_ms = now();

@@ -86,9 +86,24 @@ export const crawlersSearch = z.object({
 
 export const auditSearch = z.object({
   kind: z
-    .enum(['list', 'attack', 'mode', 'reload', 'auth'])
+    .enum(['list', 'attack', 'mode', 'reload', 'settings', 'auth'])
     .optional()
     .catch(undefined),
   q: z.string().max(200).optional().catch(undefined),
   entry: z.string().max(64).optional().catch(undefined),
+});
+
+export const configSearch = z.object({
+  section: z
+    .string()
+    .regex(/^[a-z0-9]+$/)
+    .max(40)
+    .optional()
+    .catch(undefined),
+  key: z
+    .string()
+    .regex(/^[a-z0-9_.]+$/)
+    .max(100)
+    .optional()
+    .catch(undefined),
 });

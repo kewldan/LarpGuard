@@ -14,6 +14,7 @@ import { registerOverview } from './overview.ts';
 import { registerRequests } from './requests.ts';
 import { registerRules } from './rules.ts';
 import { registerSearch } from './search.ts';
+import { registerSettings } from './settings.ts';
 import { registerStatus } from './status.ts';
 
 export function registerRoutes(app: Hono<AppEnv>): void {
@@ -28,5 +29,6 @@ export function registerRoutes(app: Hono<AppEnv>): void {
   registerCrawlers(app);
   registerAttack(app);
   registerAudit(app);
+  registerSettings(app);
   registerSearch(app);
 }

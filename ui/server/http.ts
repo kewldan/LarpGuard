@@ -77,6 +77,7 @@ export function errorResponse(error: unknown): Response {
           : 502;
     body = { error: error.message };
     if (error.column !== undefined) body['column'] = error.column;
+    if (error.path !== undefined) body['path'] = error.path;
   } else if (error instanceof AnalyticsError) {
     status = 503;
     body = { error: error.message };

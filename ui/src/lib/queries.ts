@@ -33,7 +33,11 @@ import {
   rulesSchema,
   ruleTestResultSchema,
   type SetMode,
+  type SettingsChange,
   searchSchema,
+  settingsDiffSchema,
+  settingsHistorySchema,
+  settingsSchema,
   statusSchema,
 } from '../../shared/api.ts';
 
@@ -58,6 +62,8 @@ export const keys = {
   audit: ['audit'] as const,
   search: (q: string) => ['search', q] as const,
   passkeys: ['passkeys'] as const,
+  settings: ['settings'] as const,
+  settingsHistory: ['settings', 'history'] as const,
 };
 
 const LIVE = 5000;
@@ -273,6 +279,37 @@ export function useSearch(q: string) {
   });
 }
 
+export function useSettings(enabled = true) {
+  return useQuery({
+    queryKey: keys.settings,
+    queryFn: ({ signal }) =>
+      getJson(settingsSchema, '/api/settings', undefined, signal),
+    staleTime: 10_000,
+    enabled,
+  });
+}
+
+export function useSettingsHistory() {
+  return useQuery({
+    queryKey: keys.settingsHistory,
+    queryFn: ({ signal }) =>
+      getJson(
+        settingsHistorySchema,
+        '/api/settings/history',
+        undefined,
+        signal,
+      ),
+  });
+}
+
+// A dry run: what a change would do, or why the gateway refuses it.
+export function useValidateSettings() {
+  return useMutation({
+    mutationFn: (change: SettingsChange) =>
+      sendJson(settingsDiffSchema, 'POST', '/api/settings/validate', change),
+  });
+}
+
 // --- Changes -----------------------------------------------------------------
 
 function useChange<T, R>(
@@ -346,7 +383,33 @@ export function useReload() {
 export function useRevert() {
   return useChange(
     (id: string) => send('POST', `/api/audit/${encodeURIComponent(id)}/revert`),
-    [keys.lists, keys.hosts, keys.attack],
+    [keys.lists, keys.hosts, keys.attack, keys.settings, keys.config],
+  );
+}
+
+// Everything that shows the configuration.
+const SETTINGS_VIEWS = [
+  keys.settings,
+  keys.config,
+  keys.rules,
+  keys.limits,
+  keys.hosts,
+  keys.crawlers,
+] as const;
+
+export function useApplySettings() {
+  return useChange(
+    (change: SettingsChange) =>
+      sendJson(settingsDiffSchema, 'POST', '/api/settings', change),
+    SETTINGS_VIEWS,
+  );
+}
+
+export function useRollbackSettings() {
+  return useChange(
+    (input: { revision: string; base_revision: string }) =>
+      sendJson(settingsDiffSchema, 'POST', '/api/settings/rollback', input),
+    SETTINGS_VIEWS,
   );
 }
 

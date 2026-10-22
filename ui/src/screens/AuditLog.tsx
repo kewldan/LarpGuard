@@ -21,12 +21,14 @@ const KINDS: { kind: AuditKind | undefined; name: string }[] = [
   { kind: 'list', name: 'Lists' },
   { kind: 'mode', name: 'Host mode' },
   { kind: 'attack', name: 'Attack mode' },
+  { kind: 'settings', name: 'Settings' },
   { kind: 'reload', name: 'Config reloads' },
   { kind: 'auth', name: 'Sign-in' },
 ];
 
 const KIND_LOOK: Record<AuditKind, [string, string]> = {
   reload: ['var(--color-surface-3)', 'var(--color-text)'],
+  settings: ['var(--color-surface-3)', 'var(--color-text)'],
   mode: ['var(--color-surface-3)', 'var(--color-text)'],
   list: ['var(--color-blocked-soft)', 'var(--color-blocked-text)'],
   auth: ['var(--color-verified-soft)', 'var(--color-verified)'],

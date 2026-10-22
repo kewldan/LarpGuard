@@ -37,6 +37,8 @@ export const errorSchema = z.object({
   error: z.string(),
   // Column (1-based, in the whole text) of a rule compile error.
   column: z.number().int().optional(),
+  // The settings key a refused change is about.
+  path: z.string().optional(),
 });
 export type ApiError = z.infer<typeof errorSchema>;
 
@@ -247,6 +249,151 @@ export const gatewayConfigSchema = z.object({
   model: z.object({ loaded: z.boolean(), threshold: z.number() }),
 });
 export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
+
+// --- Gateway settings (ADR-018) ---------------------------------------------
+// Every configuration key with its effective value and where it comes from;
+// changes go to the gateway's settings layer. Secrets carry only "set".
+
+export const SETTING_TYPES = [
+  'bool',
+  'int',
+  'number',
+  'string',
+  'duration',
+  'rate',
+  'endpoint',
+  'enum',
+  'strings',
+  'host_modes',
+  'rules',
+  'rate_limits',
+  'throttle',
+] as const;
+export type SettingType = (typeof SETTING_TYPES)[number];
+// live: applied at once; restart: after a restart; yaml: main file only.
+export const SETTING_APPLY = ['live', 'restart', 'yaml'] as const;
+export type SettingApply = (typeof SETTING_APPLY)[number];
+export const SETTING_SOURCES = ['default', 'file', 'console'] as const;
+export type SettingSource = (typeof SETTING_SOURCES)[number];
+export const settingSourceSchema = z.enum(SETTING_SOURCES);
+
+// A value as YAML holds it.
+export type SettingValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SettingValue[]
+  | { [key: string]: SettingValue };
+export const settingValueSchema: z.ZodType<SettingValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(settingValueSchema),
+    z.record(z.string(), settingValueSchema),
+  ]),
+);
+
+const settingPathSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[a-z0-9_]+(\.[a-z0-9_]+)*$/, 'invalid key');
+
+const settingKeyBase = z.object({
+  path: z.string(),
+  type: z.enum(SETTING_TYPES),
+  apply: z.enum(SETTING_APPLY),
+  source: settingSourceSchema,
+  pending_restart: z.boolean(),
+  options: z.array(z.string()).optional(),
+});
+
+// Unknown fields are dropped: a secret's schema has no value to keep.
+export const settingKeySchema = z.discriminatedUnion('secret', [
+  settingKeyBase.extend({
+    secret: z.literal(false),
+    value: settingValueSchema,
+    default: settingValueSchema,
+    // The main file's value under a console one.
+    file_value: settingValueSchema.optional(),
+  }),
+  settingKeyBase.extend({ secret: z.literal(true), set: z.boolean() }),
+]);
+export type SettingKey = z.infer<typeof settingKeySchema>;
+
+export const settingsSchema = z.object({
+  // False without admin.settings_file: read-only.
+  editable: z.boolean(),
+  revision: z.string(),
+  // Why the layer was set aside at startup.
+  error: z.string().nullable(),
+  pending_restart: z.boolean(),
+  keys: z.array(settingKeySchema),
+});
+export type Settings = z.infer<typeof settingsSchema>;
+
+export const settingsChangeSchema = z
+  .object({
+    base_revision: z.string().min(1).max(64),
+    // Secrets too, as strings ("" clears one).
+    set: z.record(settingPathSchema, settingValueSchema).default({}),
+    // Keys the main file decides again.
+    reset: z.array(settingPathSchema).max(200).default([]),
+  })
+  .refine(
+    (change) => Object.keys(change.set).length + change.reset.length > 0,
+    'nothing to change',
+  );
+export type SettingsChange = z.input<typeof settingsChangeSchema>;
+
+const settingChangeBase = z.object({
+  path: z.string(),
+  apply: z.enum(SETTING_APPLY),
+  source_before: settingSourceSchema,
+  source_after: settingSourceSchema,
+  pending_restart: z.boolean(),
+});
+
+export const settingChangeSchema = z.discriminatedUnion('secret', [
+  settingChangeBase.extend({
+    secret: z.literal(false),
+    before: settingValueSchema,
+    after: settingValueSchema,
+  }),
+  settingChangeBase.extend({
+    secret: z.literal(true),
+    set_before: z.boolean(),
+    set_after: z.boolean(),
+    value_changed: z.boolean(),
+  }),
+]);
+export type SettingChange = z.infer<typeof settingChangeSchema>;
+
+export const settingsDiffSchema = z.object({
+  revision: z.string(),
+  changes: z.array(settingChangeSchema),
+});
+export type SettingsDiff = z.infer<typeof settingsDiffSchema>;
+
+export const settingsHistorySchema = z.object({
+  revision: z.string(),
+  versions: z.array(
+    z.object({
+      revision: z.string(),
+      replaced_at_ms: z.number(),
+      keys: z.array(z.string()),
+    }),
+  ),
+});
+export type SettingsHistory = z.infer<typeof settingsHistorySchema>;
+
+export const settingsRollbackSchema = z.object({
+  revision: z.string().min(1).max(64),
+  base_revision: z.string().min(1).max(64),
+});
 
 // --- Overview ----------------------------------------------------------------
 
@@ -701,6 +848,7 @@ export const AUDIT_KINDS = [
   'attack',
   'mode',
   'reload',
+  'settings',
   'auth',
 ] as const;
 export const auditKindSchema = z.enum(AUDIT_KINDS);

@@ -57,6 +57,7 @@ test('every screen renders without errors', async ({ page }) => {
     ['/crawlers', 'Crawlers'],
     ['/attack', 'What attack mode does'],
     ['/log', 'Decision log'],
+    ['/config', 'Configuration'],
     ['/settings', 'Settings'],
   ];
   for (const [path, heading] of screens) {
@@ -151,4 +152,53 @@ test('the command palette jumps to a host', async ({ page }) => {
   ).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/requests\?host=api\.example\.com/);
+});
+
+test('a setting is checked as you type, applied and reverted in the log', async ({
+  page,
+}) => {
+  await open(page, '/config?section=captcha');
+  const rounds = page.getByLabel('captcha.rounds');
+  await rounds.fill('9');
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'expected 1..5' }),
+  ).toBeVisible();
+  await rounds.fill('3');
+  await expect(page.getByText('the gateway accepts them')).toBeVisible();
+  await page.getByRole('button', { name: 'Review' }).click();
+  const review = page.getByRole('dialog', { name: 'Review settings changes' });
+  await expect(review).toContainText('captcha.rounds');
+  await expect(review).toContainText('after a restart');
+  await review.getByRole('button', { name: 'Apply', exact: true }).click();
+  await expect(
+    page.getByText('1 saved setting waits for a restart'),
+  ).toBeVisible();
+
+  // Secrets show whether they are set, never their value.
+  await open(page, '/config?section=events');
+  await expect(page.getByText('set', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('dev-token')).toHaveCount(0);
+
+  await open(page, '/log?kind=settings');
+  await page
+    .getByRole('button', { name: /captcha\.rounds 2 → 3/ })
+    .first()
+    .click();
+  await page.getByRole('button', { name: 'Revert this change' }).click();
+  await open(page, '/config?section=captcha');
+  await expect(page.getByText(/waits? for a restart/)).toHaveCount(0);
+});
+
+test('the command palette jumps to a setting', async ({ page }) => {
+  await open(page, '/');
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByRole('combobox', { name: 'Search' }).fill('round_timeout');
+  await expect(
+    page.getByRole('option', { name: /captcha\.round_timeout/ }),
+  ).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(
+    /\/config\?section=captcha&key=captcha\.round_timeout/,
+  );
+  await expect(page.getByLabel('captcha.round_timeout')).toBeVisible();
 });

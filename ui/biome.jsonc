@@ -6,6 +6,7 @@
     "includes": [
       "**",
       "!src/design/tokens.css",
+      "!shared/settings-help.ts",
       "!tests/e2e/__screenshots__",
       "!package-lock.json"
     ]
