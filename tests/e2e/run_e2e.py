@@ -584,6 +584,7 @@ def main():
                                 f"bs-admin-{os.getpid()}.sock")
     lists_file = os.path.join(workdir, "lists.json")
     modes_file = os.path.join(workdir, "modes.json")
+    settings_file = os.path.join(workdir, "settings.yaml")
     config_path = os.path.join(workdir, "bot-shield.yaml")
     keys_path = os.path.join(workdir, "keys.json")
     model_path = os.path.join(workdir, "model.json")
@@ -725,6 +726,7 @@ admin:
   socket: {admin_socket}
   state_file: {lists_file}
   modes_file: {modes_file}
+  settings_file: {settings_file}
   decisions: 1000
 metrics:
   listen: 127.0.0.1:{metrics_port}
@@ -1448,6 +1450,28 @@ whoami: true
         expect(status == 200, status)
         status, _ = admin_call(admin_socket, "DELETE", "/policy/www.a.test")
         expect(status == 200, status)
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
+        expect(status == 403, status)
+
+        # Console settings (ADR-018): a live key applies at once from the
+        # layer file, a reset gives the main file back.
+        status, body = admin_call(admin_socket, "GET", "/settings")
+        expect(status == 200 and body["editable"], body)
+        status, body = admin_call(admin_socket, "POST", "/settings", {
+            "base_revision": body["revision"],
+            "set": {"policy.block_status": 451, "captcha.rounds": 3}})
+        expect(status == 200 and len(body["changes"]) == 2, body)
+        expect(os.stat(settings_file).st_mode & 0o777 == 0o600, "layer mode")
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
+        expect(status == 451, status)
+        _, body = admin_call(admin_socket, "GET", "/settings")
+        rounds = next(k for k in body["keys"] if k["path"] == "captcha.rounds")
+        expect(rounds["pending_restart"] and rounds["source"] == "console",
+               rounds)
+        status, body = admin_call(admin_socket, "POST", "/settings", {
+            "base_revision": body["revision"],
+            "reset": ["policy.block_status", "captcha.rounds"]})
+        expect(status == 200, body)
         status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/admin/panel")
         expect(status == 403, status)
 

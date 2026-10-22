@@ -32,6 +32,7 @@
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/modes.h"
+#include "admin/settings.h"
 #include "behavior/behavior.h"
 #include "challenge/captcha.h"
 #include "challenge/challenger.h"
@@ -169,9 +170,11 @@ int Run(int argc, char** argv) {
   Options options;
   if (const int code = ParseArgs(argc, argv, &options); code >= 0) return code;
 
+  // The main file plus the console's settings layer (ADR-018).
+  bot_shield::SettingsLayer settings(options.config_path);
   bot_shield::Config config;
   std::string error;
-  if (!bot_shield::LoadConfigFile(options.config_path, &config, &error)) {
+  if (!settings.Load(&config, options.check_config, &error)) {
     Error("config: {}", error);
     return 1;
   }
@@ -182,6 +185,12 @@ int Run(int argc, char** argv) {
   bot_shield::log::SetLevel(config.log_level);
   std::signal(SIGPIPE, SIG_IGN);
   Info("bot-shield {} starting", kVersion);
+  if (!settings.load_error().empty()) {
+    Error("settings layer rejected: {}", settings.load_error());
+  } else if (!settings.layer().empty()) {
+    Info("settings: console layer {} over {}", settings.revision(),
+         options.config_path);
+  }
 
   bot_shield::CertStore certificates;
   bot_shield::AcmeWatcher watcher(config.acme_json, config.acme_reload_interval,
@@ -245,7 +254,7 @@ int Run(int argc, char** argv) {
     const std::scoped_lock lock(reload_mutex);
     bot_shield::Config fresh;
     std::shared_ptr<const bot_shield::VerdictSet> next;
-    if (!bot_shield::LoadConfigFile(options.config_path, &fresh, summary) ||
+    if (!settings.Reload(&fresh, summary) ||
         !bot_shield::VerdictSet::Build(fresh, &next, summary)) {
       Error("reload failed, keeping the current configuration: {}", *summary);
       return false;
@@ -253,6 +262,22 @@ int Run(int argc, char** argv) {
     verdicts.set(bot_shield::WithConsoleModes(*next, modes.Entries()));
     *summary = VerdictSummary(*verdicts.snapshot(), fresh);
     Info("reloaded: {}", *summary);
+    return true;
+  };
+  // Applies a console settings change: the verdict set is built first, the
+  // layer written next, and the set published only when both worked.
+  const auto apply_settings = [&](const bot_shield::Config& next_config,
+                                  const std::function<bool()>& commit,
+                                  std::string* apply_error) {
+    const std::scoped_lock lock(reload_mutex);
+    std::shared_ptr<const bot_shield::VerdictSet> next;
+    if (!bot_shield::VerdictSet::Build(next_config, &next, apply_error) ||
+        !commit()) {
+      return false;
+    }
+    verdicts.set(bot_shield::WithConsoleModes(*next, modes.Entries()));
+    Info("settings applied: {}",
+         VerdictSummary(*verdicts.snapshot(), next_config));
     return true;
   };
   // Applies changed console modes; serialized with reloads so neither
@@ -391,6 +416,7 @@ int Run(int argc, char** argv) {
     settings.round_timeout = std::chrono::duration_cast<std::chrono::seconds>(
         config.captcha_round_timeout);
     settings.difficulty = config.captcha_difficulty;
+    settings.secret = config.captcha_secret;
     if (!config.captcha_secret_file.empty()) {
       std::ifstream secret_file(config.captcha_secret_file);
       if (!secret_file || !std::getline(secret_file, settings.secret) ||
@@ -434,6 +460,8 @@ int Run(int argc, char** argv) {
   services.reload = reload;
   services.modes = &modes;
   services.publish_modes = publish_modes;
+  services.settings = &settings;
+  services.apply_settings = apply_settings;
   services.labels = docker ? &labels : nullptr;
   services.lists = &lists;
   services.decisions = &decisions;

@@ -11,6 +11,8 @@ add_library(bot_shield_core STATIC
   admin/lists.cc
   admin/modes.cc
   admin/server.cc
+  admin/settings.cc
+  admin/settings_api.cc
   common/compress.cc
   common/hash.cc
   common/refresher.cc
@@ -22,6 +24,7 @@ add_library(bot_shield_core STATIC
   common/systemd.cc
   common/url.cc
   config/config.cc
+  config/settings.cc
   crawler/crawlers.cc
   crawler/ranges.cc
   crawler/verifier.cc

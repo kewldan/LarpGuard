@@ -437,6 +437,8 @@ bool Gateway::Start(std::string* error) {
     admin_.event_settings = services_.event_settings;
     admin_.modes = services_.modes;
     admin_.publish_modes = services_.publish_modes;
+    admin_.settings = services_.settings;
+    admin_.apply_settings = services_.apply_settings;
     admin_.asn = services_.asn;
     admin_.started_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::system_clock::now().time_since_epoch())

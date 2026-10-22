@@ -39,6 +39,8 @@
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/modes.h"
+#include "admin/settings.h"
+#include "admin/settings_api.h"
 #include "common/host.h"
 #include "common/log.h"
 #include "common/metrics.h"
@@ -99,7 +101,11 @@ AdminResponse Status(const AdminContext& context, int64_t now_seconds) {
                               : 0},
        {"nats_connected", metrics.nats_connected.Get() == 1},
        {"events_published", metrics.events_published.Get()},
-       {"events_dropped", metrics.events_dropped.Get()}}};
+       {"events_dropped", metrics.events_dropped.Get()},
+       {"settings_error",
+        context.settings != nullptr && !context.settings->load_error().empty()
+            ? nlohmann::json(context.settings->load_error())
+            : nlohmann::json(nullptr)}}};
 }
 
 AdminResponse HostPolicy(const AdminContext& context,
@@ -750,6 +756,10 @@ AdminResponse HandleAdminRequest(std::string_view method,
     std::string summary;
     if (!context.reload(&summary)) return Error(422, summary);
     return {200, {{"reloaded", true}, {"summary", summary}}};
+  }
+  if (path == "/settings" || path.starts_with("/settings/")) {
+    return HandleSettingsRequest(method, path.substr(9), body, context,
+                                 now_seconds * 1000);
   }
   if (path == "/lists" || path.starts_with("/lists/")) {
     return Lists(method, path.substr(6), body, context, now_seconds);

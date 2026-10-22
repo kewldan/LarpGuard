@@ -25,6 +25,7 @@ add_executable(bot_shield_tests
   ratelimit_test.cc
   rules_test.cc
   scoring_test.cc
+  settings_test.cc
   tcp_syn_test.cc
   verdicts_test.cc
   whoami_test.cc

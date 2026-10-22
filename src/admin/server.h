@@ -16,6 +16,7 @@
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/modes.h"
+#include "admin/settings.h"
 #include "config/config.h"
 #include "docker/labels.h"
 #include "events/events.h"
@@ -46,6 +47,13 @@ struct AdminContext {
   ModeOverrides* modes = nullptr;
   std::function<void()> publish_modes;
   const AsnStore* asn = nullptr;  // May be null.
+  // The console's settings layer (ADR-018); null: not available.
+  // `apply_settings` builds the verdict set from `config`, runs `commit` and
+  // publishes the set only when both succeed (serialized with reloads).
+  SettingsLayer* settings = nullptr;
+  std::function<bool(const Config& config, const std::function<bool()>& commit,
+                     std::string* error)>
+      apply_settings;
   int64_t started_ms = 0;
   int workers = 0;
 };
@@ -66,6 +74,8 @@ struct AdminResponse {
 //   POST   /rules/test       (a condition on sample events)
 //   GET    /asn?numbers=<n>,<n>
 //   POST   /reload           (rules, limits, policy, library, model)
+//   GET    /settings         POST /settings     POST /settings/validate
+//   GET    /settings/history POST /settings/rollback   (ADR-018)
 AdminResponse HandleAdminRequest(std::string_view method,
                                  std::string_view target, std::string_view body,
                                  const AdminContext& context,

@@ -116,8 +116,9 @@ rules: []
 #    score: -40
 
 # Everything that decides verdicts (library, policy, rules, rate limits,
-# throttle, honeypot paths, crawlers.ai, model) is reloaded without a
-# restart on SIGHUP or POST /reload; other sections need a restart.
+# throttle, honeypot paths, crawlers.ai, web_bot_auth.trusted,
+# model) is reloaded without a restart on SIGHUP, POST /reload or
+# a change in the console; other sections need a restart.
 
 # Request rate limits (GCRA). Every matching limit counts the request; over
 # a limit the answer is 429 with Retry-After on enforced hosts (shadow hosts
@@ -280,6 +281,10 @@ captcha:
   provider: ""
   site_key: ""
   secret_file: ""
+  # The secret itself instead of secret_file (one or the other). Meant for
+  # the console, which can replace it but never shows it.
+  secret: ""
+  # Only here, not in the console: the secret is sent to this URL.
   verify_url: ""        # "" = the provider's siteverify.
   check_hostname: true
   escalate: true
@@ -335,6 +340,8 @@ attack:
 # Admin API (JSON over a unix socket, mode 0600; no TCP port):
 #   curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
 # GET /status, GET /config, GET|POST /policy, DELETE /policy/<host>,
+# GET|POST /settings, POST /settings/validate, GET /settings/history,
+# POST /settings/rollback,
 # GET|POST /lists, DELETE /lists/<id>, GET /decisions[?limit=&host=&class=],
 # GET /decisions/<request id>, GET|POST /attack, DELETE /attack/<host>,
 # POST /rules/test, GET /asn?numbers=, POST /reload. The web console
@@ -346,6 +353,12 @@ admin:
   # Host modes set from the console (POST /policy) survive restarts here;
   # they beat policy.hosts and labels ("" = memory only).
   modes_file: /var/lib/bot-shield/modes.json   # Not a default.
+  # Settings changed in the console: a YAML layer over this file, written
+  # by the gateway (mode 0600, with <file>.history for rollback). Keys set
+  # there beat this file; the console shows where each value comes from.
+  # File paths, sockets, listen addresses and this section stay here only.
+  # "" = settings are read-only in the console.
+  settings_file: /var/lib/bot-shield/settings.yaml   # Not a default.
   # Recent decisions kept in memory for GET /decisions.
   decisions: 10000
 

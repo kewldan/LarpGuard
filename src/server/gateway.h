@@ -19,6 +19,7 @@
 #include "admin/lists.h"
 #include "admin/modes.h"
 #include "admin/server.h"
+#include "admin/settings.h"
 #include "challenge/captcha.h"
 #include "challenge/challenger.h"
 #include "config/config.h"
@@ -99,6 +100,11 @@ struct GatewayServices {
   // Console host modes (POST /policy) and how to apply them; may be null.
   ModeOverrides* modes = nullptr;
   std::function<void()> publish_modes;
+  // The console's settings layer and how to apply a change; may be null.
+  SettingsLayer* settings = nullptr;
+  std::function<bool(const Config& config, const std::function<bool()>& commit,
+                     std::string* error)>
+      apply_settings;
   const LabelStore* labels = nullptr;  // Null: Docker off.
   ListStore* lists = nullptr;
   DecisionLog* decisions = nullptr;

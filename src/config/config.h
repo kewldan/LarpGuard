@@ -153,8 +153,11 @@ struct Config {
   std::size_t tarpit_chunk = 16;
   std::size_t tarpit_max_active = 1000;
   // Action "decoy": templates with {{watermark}}; empty: built-in ones.
+  // The files they were read from are kept for the settings view.
   std::string decoy_html;
   std::string decoy_json;
+  std::string decoy_html_file;
+  std::string decoy_json_file;
   // Model signal ("model" section): gradient-boosted trees from
   // tools/train_model.py; "" = no model. Above `model_threshold` the
   // request gets signal "model". `model_log_features` puts the feature
@@ -180,6 +183,8 @@ struct Config {
   std::string captcha_provider;
   std::string captcha_site_key;
   std::string captcha_secret_file;
+  // The secret itself (the console's settings layer); not with secret_file.
+  std::string captcha_secret;
   std::string captcha_verify_url;  // "" = the provider's siteverify.
   bool captcha_check_hostname = true;
   bool captcha_escalate = true;
@@ -211,6 +216,9 @@ struct Config {
   // Host modes set through the admin API (the console) survive restarts in
   // this JSON file; empty: memory.
   std::string admin_modes_file;
+  // Settings changed through the admin API (the console): a YAML layer over
+  // this file, written by the gateway (ADR-018); empty: read-only.
+  std::string admin_settings_file;
   // Recent decisions kept for GET /decisions.
   std::size_t admin_decisions = 10000;
   // Docker Engine socket for botshield.* label policies; empty disables.

@@ -500,7 +500,10 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   if (const YAML::Node limits = root["rate_limits"]) {
     if (!ParseRateLimits(limits, config, error)) return false;
   }
-  if (const YAML::Node throttle = root["throttle"]) {
+  if (const YAML::Node throttle = root["throttle"];
+      throttle && throttle.IsNull()) {
+    config->throttle.reset();  // "throttle: ~" in a layer: no throttle.
+  } else if (throttle) {
     if (!CheckKeys(throttle, "throttle", {"rate", "burst", "key"}, error)) {
       return false;
     }
@@ -680,11 +683,20 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     if (!CheckKeys(decoy, "decoy", {"html_file", "json_file"}, error)) {
       return false;
     }
-    for (const auto& [key, out] :
-         {std::pair{"html_file", &config->decoy_html},
-          std::pair{"json_file", &config->decoy_json}}) {
-      if (!decoy[key] || decoy[key].IsNull()) continue;
-      const auto path = decoy[key].as<std::string>();
+    struct Template {
+      const char* key;
+      std::string* path;
+      std::string* contents;
+    };
+    for (const auto& [key, path_out, out] :
+         {Template{"html_file", &config->decoy_html_file, &config->decoy_html},
+          Template{"json_file", &config->decoy_json_file,
+                   &config->decoy_json}}) {
+      if (!decoy[key]) continue;
+      const auto path =
+          decoy[key].IsNull() ? std::string() : decoy[key].as<std::string>();
+      *path_out = path;
+      out->clear();
       if (path.empty()) continue;  // Built-in template.
       std::ifstream file(path);
       if (!file) {
@@ -796,7 +808,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   }
   if (const YAML::Node admin = root["admin"]) {
     if (!CheckKeys(admin, "admin",
-                   {"socket", "state_file", "modes_file", "decisions"},
+                   {"socket", "state_file", "modes_file", "settings_file",
+                    "decisions"},
                    error)) {
       return false;
     }
@@ -813,6 +826,12 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       config->admin_modes_file = admin["modes_file"].IsNull()
                                      ? ""
                                      : admin["modes_file"].as<std::string>();
+    }
+    if (admin["settings_file"]) {
+      config->admin_settings_file =
+          admin["settings_file"].IsNull()
+              ? ""
+              : admin["settings_file"].as<std::string>();
     }
     if (admin["decisions"]) {
       const auto value = admin["decisions"].as<int64_t>();
@@ -878,9 +897,9 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   }
   if (const YAML::Node captcha = root["captcha"]) {
     if (!CheckKeys(captcha, "captcha",
-                   {"provider", "site_key", "secret_file", "verify_url",
-                    "check_hostname", "escalate", "rounds", "round_timeout",
-                    "difficulty"},
+                   {"provider", "site_key", "secret_file", "secret",
+                    "verify_url", "check_hostname", "escalate", "rounds",
+                    "round_timeout", "difficulty"},
                    error) ||
         !ReadDuration(captcha, "captcha", "round_timeout",
                       &config->captcha_round_timeout, error)) {
@@ -895,6 +914,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     if (captcha["secret_file"]) {
       config->captcha_secret_file = text("secret_file");
     }
+    if (captcha["secret"]) config->captcha_secret = text("secret");
     if (captcha["verify_url"]) config->captcha_verify_url = text("verify_url");
     if (captcha["check_hostname"]) {
       config->captcha_check_hostname = captcha["check_hostname"].as<bool>();
@@ -924,11 +944,17 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
           "hcaptcha or recaptcha";
       return false;
     }
+    if (!config->captcha_secret.empty() &&
+        !config->captcha_secret_file.empty()) {
+      *error = "captcha.secret: set either secret or secret_file, not both";
+      return false;
+    }
     if (!provider.empty() && provider != "builtin" &&
         (config->captcha_site_key.empty() ||
-         config->captcha_secret_file.empty())) {
-      *error =
-          std::format("captcha: {} needs site_key and secret_file", provider);
+         (config->captcha_secret_file.empty() &&
+          config->captcha_secret.empty()))) {
+      *error = std::format(
+          "captcha: {} needs site_key and secret_file (or secret)", provider);
       return false;
     }
   }

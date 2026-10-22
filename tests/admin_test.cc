@@ -6,10 +6,13 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "admin/attack.h"
@@ -17,6 +20,7 @@
 #include "admin/lists.h"
 #include "admin/modes.h"
 #include "admin/server.h"
+#include "admin/settings.h"
 #include "common/network.h"
 #include "config/config.h"
 #include "events/events.h"
@@ -385,6 +389,159 @@ TEST_F(AdminServerTest, ConfigView) {
   EXPECT_FALSE(body.contains("captcha_secret_file"));
   EXPECT_FALSE(body["captcha"].contains("site_key"));
   EXPECT_EQ(Call("POST", "/config").status, 405);
+}
+
+TEST_F(AdminServerTest, Settings) {
+  EXPECT_EQ(Call("GET", "/settings").status, 404);  // Not wired.
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() / "bs_admin_settings";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const std::string main = (dir / "bot-shield.yaml").string();
+  const std::string layer = (dir / "settings.yaml").string();
+  std::ofstream(main) << "admin: {settings_file: " << layer << "}\n"
+                      << "events: {token: from-file}\n"
+                      << "policy: {thresholds: {bot: 75}}\n";
+  SettingsLayer settings(main);
+  std::string error;
+  ASSERT_TRUE(settings.Load(&config_, false, &error)) << error;
+  std::shared_ptr<const VerdictSet> initial;
+  ASSERT_TRUE(VerdictSet::Build(config_, &initial, &error)) << error;
+  verdicts_.set(initial);
+  int published = 0;
+  bool build_ok = true;
+  context_.settings = &settings;
+  context_.apply_settings = [&](const Config& next,
+                                const std::function<bool()>& commit,
+                                std::string* apply_error) {
+    std::shared_ptr<const VerdictSet> set;
+    if (!build_ok) {
+      *apply_error = "fingerprints: cannot open library";
+      return false;
+    }
+    if (!VerdictSet::Build(next, &set, apply_error) || !commit()) return false;
+    verdicts_.set(set);
+    ++published;
+    return true;
+  };
+
+  AdminResponse response = Call("GET", "/settings");
+  ASSERT_EQ(response.status, 200);
+  EXPECT_TRUE(response.body["editable"]);
+  EXPECT_TRUE(response.body["error"].is_null());
+  EXPECT_FALSE(response.body["pending_restart"]);
+  const std::string revision = response.body["revision"];
+  const auto key = [&](const nlohmann::json& body, std::string_view path) {
+    for (const auto& item : body["keys"]) {
+      if (item["path"] == path) return item;
+    }
+    return nlohmann::json();
+  };
+  nlohmann::json bot = key(response.body, "policy.thresholds.bot");
+  EXPECT_EQ(bot["value"], 75);
+  EXPECT_EQ(bot["default"], 70);
+  EXPECT_EQ(bot["source"], "file");
+  EXPECT_EQ(bot["apply"], "live");
+  EXPECT_EQ(key(response.body, "captcha.rounds")["source"], "default");
+  EXPECT_EQ(key(response.body, "captcha.provider")["options"][1], "builtin");
+  EXPECT_EQ(key(response.body, "admin.socket")["apply"], "yaml");
+  // Secrets: whether they are set, never the value.
+  const nlohmann::json token = key(response.body, "events.token");
+  EXPECT_TRUE(token["secret"]);
+  EXPECT_TRUE(token["set"]);
+  EXPECT_FALSE(token.contains("value"));
+  EXPECT_FALSE(token.contains("default"));
+  EXPECT_EQ(response.body.dump().find("from-file"), std::string::npos);
+
+  // Dry run: a diff, nothing written or published.
+  const std::string change =
+      R"({"base_revision": ")" + revision +
+      R"(", "set": {"policy.thresholds.bot": 80, "captcha.rounds": 3,
+          "events.token": "new-token"}})";
+  response = Call("POST", "/settings/validate", change);
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(published, 0);
+  EXPECT_FALSE(std::filesystem::exists(layer));
+  const nlohmann::json& changes = response.body["changes"];
+  ASSERT_EQ(changes.size(), 3u);
+  EXPECT_EQ(changes[0]["path"], "events.token");
+  EXPECT_TRUE(changes[0]["value_changed"]);
+  EXPECT_FALSE(changes[0].contains("after"));
+  EXPECT_EQ(changes[1]["path"], "policy.thresholds.bot");
+  EXPECT_EQ(changes[1]["before"], 75);
+  EXPECT_EQ(changes[1]["after"], 80);
+  EXPECT_EQ(changes[1]["source_after"], "console");
+  EXPECT_EQ(changes[2]["path"], "captcha.rounds");
+  EXPECT_TRUE(changes[2]["pending_restart"]);
+  EXPECT_EQ(response.body.dump().find("new-token"), std::string::npos);
+
+  // Apply: written, published, restart keys pending.
+  response = Call("POST", "/settings", change);
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(published, 1);
+  EXPECT_EQ(verdicts_.snapshot()->policy->settings().bot_threshold, 80);
+  std::stringstream written;
+  written << std::ifstream(layer).rdbuf();
+  EXPECT_NE(written.str().find("new-token"), std::string::npos);
+  response = Call("GET", "/settings");
+  EXPECT_TRUE(response.body["pending_restart"]);
+  EXPECT_TRUE(key(response.body, "captcha.rounds")["pending_restart"]);
+  EXPECT_FALSE(key(response.body, "policy.thresholds.bot")["pending_restart"]);
+  bot = key(response.body, "policy.thresholds.bot");
+  EXPECT_EQ(bot["source"], "console");
+  EXPECT_EQ(bot["file_value"], 75);
+  const std::string applied = response.body["revision"];
+  EXPECT_NE(applied, revision);
+
+  // The old revision conflicts; bad values name their key.
+  EXPECT_EQ(Call("POST", "/settings", change).status, 409);
+  response = Call("POST", "/settings",
+                  R"({"base_revision": ")" + applied +
+                      R"(", "set": {"policy.thresholds.bot": 10}})");
+  EXPECT_EQ(response.status, 422);
+  EXPECT_EQ(response.body["path"], "policy.thresholds.bot");
+  response = Call("POST", "/settings/validate",
+                  R"({"base_revision": ")" + applied +
+                      R"(", "set": {"decoy.html_file": "/etc/shadow"}})");
+  EXPECT_EQ(response.status, 422);
+  EXPECT_EQ(response.body["path"], "decoy.html_file");
+  EXPECT_EQ(Call("POST", "/settings", R"({"set": {}})").status, 400);
+  EXPECT_EQ(
+      Call("POST", "/settings", R"({"base_revision": ")" + applied + R"("})")
+          .status,
+      400);
+  // A verdict set that does not build leaves everything as it was.
+  build_ok = false;
+  response = Call("POST", "/settings",
+                  R"({"base_revision": ")" + applied +
+                      R"(", "reset": ["policy.thresholds.bot"]})");
+  EXPECT_EQ(response.status, 422);
+  EXPECT_EQ(settings.revision(), applied);
+  build_ok = true;
+
+  // Reset, history and rollback.
+  response = Call("POST", "/settings",
+                  R"({"base_revision": ")" + applied +
+                      R"(", "reset": ["policy.thresholds.bot"]})");
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(verdicts_.snapshot()->policy->settings().bot_threshold, 75);
+  response = Call("GET", "/settings/history");
+  ASSERT_EQ(response.status, 200);
+  ASSERT_EQ(response.body["versions"].size(), 2u);
+  EXPECT_EQ(response.body["versions"][0]["revision"], applied);
+  EXPECT_EQ(response.body["versions"][0]["replaced_at_ms"], kNow * 1000);
+  response = Call("POST", "/settings/rollback",
+                  R"({"revision": ")" + applied + R"("})");
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(verdicts_.snapshot()->policy->settings().bot_threshold, 80);
+  EXPECT_EQ(settings.revision(), applied);
+  EXPECT_EQ(Call("POST", "/settings/rollback", R"({"revision": "x"})").status,
+            404);
+  EXPECT_EQ(Call("POST", "/settings/rollback", "{}").status, 400);
+  EXPECT_EQ(Call("DELETE", "/settings").status, 405);
+  EXPECT_EQ(Call("GET", "/settings/nope").status, 404);
+  EXPECT_TRUE(Call("GET", "/status").body["settings_error"].is_null());
+  std::filesystem::remove_all(dir);
 }
 
 TEST_F(AdminServerTest, RulesTest) {
