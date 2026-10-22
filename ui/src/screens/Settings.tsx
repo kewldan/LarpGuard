@@ -20,7 +20,7 @@ export function Settings() {
     [
       'Role',
       session.user.role === 'operator'
-        ? 'operator: can change lists, modes, attack mode and reload'
+        ? 'operator: can change lists, modes, attack mode, settings and reload'
         : 'viewer: read-only',
     ],
     ['Session ends', dateTime(session.expires_at)],

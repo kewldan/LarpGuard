@@ -103,6 +103,13 @@ over ports 443/80, and Traefik moves to loopback behind it.
 - 🔥 **Hot reload.** `SIGHUP` or `POST /reload` swaps the fingerprint
   library, policy, rules, limits and model atomically. A broken config is
   never applied.
+- 🎚️ **Settings from the console.** Every key of the config, CAPTCHA and
+  challenge included, can be viewed and changed in the console. Changes go
+  to a YAML layer over your file (`admin.settings_file`). The gateway checks
+  them with the same parser it starts with, applies live keys at once and
+  flags the rest as waiting for a restart. Secrets are write-only, and every
+  change is in the audit log and can be rolled back. The YAML alone still
+  configures everything.
 - 🧯 **Fail-open.** Workers send heartbeats, systemd runs a watchdog, and
   nftables redirects traffic straight to Traefik if the gateway dies. Adding
   LarpGuard should never take your sites down.
@@ -112,8 +119,8 @@ over ports 443/80, and Traefik moves to loopback behind it.
 - 🖥️ **Web console.** Overview, a requests explorer with the reasons behind
   each verdict, fingerprints, a rule editor that type-checks with the
   gateway's own parser and tests drafts on the last hour of traffic, lists,
-  rate limits, host modes, crawlers, attack mode and an audit log with
-  revert. Dark and light, works on a phone.
+  rate limits, host modes, crawlers, attack mode, every setting of the
+  gateway and an audit log with revert. Dark and light, works on a phone.
 
 ## 🏗️ How it fits
 
@@ -281,6 +288,9 @@ curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
 | `POST /rules/test` | Compile a rule condition and run it on sample events |
 | `GET /asn?numbers=…` | AS names from the ASN database |
 | `POST /reload` | Hot-reload verdict settings |
+| `GET /settings` | Every config key: value, default, source (default, file, console), whether it applies live (secrets: only whether they are set) |
+| `POST /settings/validate`, `POST /settings` | Check, or check and apply, a change to the console layer (`admin.settings_file`) |
+| `GET /settings/history`, `POST /settings/rollback` | Earlier console layers, and going back to one |
 
 Prometheus metrics and `/health` are served on `127.0.0.1:9900`.
 `/health` returns 503 when a worker loop stalls.

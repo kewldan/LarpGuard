@@ -38,6 +38,7 @@ npm --prefix ui test                       # vitest: web (jsdom) и node
 npm --prefix ui run build && (cd ui && npx playwright test)
 npm --prefix ui run e2e:docker             # со скриншотами, как в CI (-- --update-snapshots)
 npm --prefix ui run tokens                 # tokens.css из tokens.ts
+npm --prefix ui run settings-help          # справка настроек из deploy/bot-shield.yaml
 ```
 
 Санитайзеры: отдельный каталог `build-asan` с
@@ -131,9 +132,11 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   `ip_prefix`/`ip_hash` как в событиях), режимы хостов из консоли
   (`modes`: главнее `policy.hosts` и лейблов, `admin.modes_file`,
   применяются пересборкой `VerdictSet` через `WithConsoleModes`), режим
-  «под атакой» (`attack`). Новый эндпоинт — в `HandleAdminRequest` + тест в
-  `admin_test.cc`; если он нужен консоли — метод в
-  `ui/server/gateway/admin.ts` со схемой ответа.
+  «под атакой» (`attack`), настройки из консоли (`settings`: слой
+  `admin.settings_file` поверх основного YAML с историей и откатом,
+  ADR-018; эндпоинты — `settings_api`). Новый эндпоинт — в
+  `HandleAdminRequest` + тест в `admin_test.cc`; если он нужен консоли —
+  метод в `ui/server/gateway/admin.ts` со схемой ответа.
 - `src/watchdog/` — `bot-shield-watchdog` (fail-open, ADR-012): опрос
   `/health` и команды nftables из `deploy/failopen/`. `src/common/systemd` —
   `sd_notify` без libsystemd.
@@ -167,7 +170,11 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в
   `Config`, разбор в `config.cc`, тест в `config_test.cc`, описание в
-  `deploy/bot-shield.yaml`.
+  `deploy/bot-shield.yaml`, строка в реестре `settings.cc` (класс
+  `live`/`restart`/`yaml`, секрет; тесты `SettingsRegistryTest` сверяют с
+  файлом и проверяют запись и чтение) и в моке `ui/server/dev/mock-settings.ts`,
+  затем `npm --prefix ui run settings-help`. Пути к файлам, сокеты и адреса —
+  класс `yaml`: консоль не должна направлять шлюз на файлы.
 - `ui/` — веб-консоль (ADR-017), один npm-пакет, версии точные
   (`.npmrc`: `save-exact`). `shared/` — контракт API (схемы zod, их же
   проверяет BFF и берёт SPA). `server/` — BFF на Hono: `auth/` (scrypt,
@@ -176,8 +183,12 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   `X-CSRF-Token` + `Origin`), `roles.ts`, `gateway/` (admin-сокет только
   белым списком вызовов, полный IP отбрасывается схемой; `/metrics`),
   `analytics/` (ClickHouse: только параметризованные запросы из `sql.ts`),
-  `audit.ts` (JSONL с цепочкой SHA-256, откат), `routes/`, `dev/` (моки:
-  шлюз в памяти и синтетический трафик — только для разработки и тестов).
+  `audit.ts` (JSONL с цепочкой SHA-256, откат), `routes/` (`settings.ts` —
+  настройки шлюза: аудит без секретов, откат обратным диффом), `dev/` (моки:
+  шлюз в памяти, его настройки и синтетический трафик — только для
+  разработки и тестов). `shared/settings-help.ts` генерируется из
+  комментариев `deploy/bot-shield.yaml` (`npm run settings-help`, тест
+  сверяет).
   `src/` — SPA: `design/tokens.ts` — единственный источник значений из
   дизайна (`tokens.css` генерируется, тест сверяет), `ui/` примитивы,
   `domain/` доменные компоненты, `screens/`, `app/` (роутер, оболочка,
@@ -216,6 +227,9 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 - Горячий путь без синхронного сетевого I/O и без глобальных блокировок
   (кроме взятия снапшотов). Всё сетевое (siteverify, ключи Web Bot Auth,
   загрузки) — в фоновых потоках; запрос только читает кеш.
+- Секреты настроек (`events.token`, `events.password`, `events.ip_salt`,
+  `captcha.secret`) только записываются: admin API отдаёт `set`, схема zod
+  не пропускает значение, в аудит и логи идёт лишь «заменён/очищен».
 - Консоль не видит полный IP: из `/decisions` BFF оставляет только
   `ip_prefix`/`ip_hash`, браузер не ходит ни в admin-сокет, ни в ClickHouse.
   Изменяющий маршрут BFF — с `requireRole('operator')` и записью в аудит.
