@@ -12,7 +12,11 @@ WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /src/dist ./dist
-RUN mkdir -p /var/lib/larpguard && chown node:node /var/lib/larpguard
+# Writable by node and by group root: compose runs the console as 0:0 with
+# all capabilities dropped, and root without CAP_DAC_OVERRIDE gets only the
+# group bits. A new named volume copies this ownership and mode.
+RUN mkdir -p /var/lib/larpguard && chown node:root /var/lib/larpguard \
+  && chmod 0775 /var/lib/larpguard
 # The node user by default; to reach the gateway's admin socket (mode 0600)
 # run as the socket's owner (see deploy/docker-compose.yml).
 USER node

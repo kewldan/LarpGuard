@@ -61,6 +61,8 @@ services:
     image: ghcr.io/kewldan/larpguard-console:latest
     network_mode: host
     restart: unless-stopped
+    # The admin socket's owner (0600). With no capabilities root writes
+    # console-state through the group bits the image sets.
     user: "0:0"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
