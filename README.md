@@ -43,6 +43,13 @@ it claims to be?**
 You don't touch your Traefik routers or container labels. The gateway takes
 over ports 443/80, and Traefik moves to loopback behind it.
 
+<p align="center">
+  <img alt="Live request stream in the web console: a blocked request opens with what the client claimed versus what its TLS, HTTP and TCP showed" src="docs/media/console-live.gif" width="100%">
+  <br>
+  <sub>🖥️ The web console on demo traffic: a live request stream, and a fake
+  Bingbot caught by its fingerprints.</sub>
+</p>
+
 ## ✨ Highlights
 
 - 🔍 **Fingerprints at every layer.** TCP SYN (Linux), JA4, HTTP/2
@@ -316,6 +323,17 @@ browser never reaches either directly. Sign-in takes a password and a TOTP
 code, or a passkey each user adds in Settings; roles are `viewer` and
 `operator`, every change lands in a hash-chained audit log, and full client
 addresses never leave the gateway.
+
+<table>
+  <tr>
+    <td width="50%"><img alt="Command palette jumping to an AS number" src="docs/media/console-palette.gif"><br><sub>⌘K jumps to an AS number, /24, JA4, host or rule.</sub></td>
+    <td width="50%"><img alt="Testing a rule against the last hour of traffic" src="docs/media/console-rules.gif"><br><sub>🧪 Test a rule against the last hour of traffic before reloading.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="Turning attack mode on for an hour and back off" src="docs/media/console-attack.gif"><br><sub>🚨 Attack mode: on for a fixed time, or automatically above a threshold.</sub></td>
+    <td width="50%"><img alt="Switching between dark and light themes" src="docs/media/console-theme.gif"><br><sub>🌗 Dark and light themes.</sub></td>
+  </tr>
+</table>
 
 ```bash
 echo 'a long password' | docker run --rm -i ghcr.io/kewldan/larpguard-console hash-password
