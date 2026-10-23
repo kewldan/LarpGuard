@@ -20,6 +20,7 @@
 
 #include "common/host.h"
 #include "common/log.h"
+#include "net/http_client.h"
 #include "ratelimit/limits.h"
 #include "score/policy.h"
 #include "score/rules.h"
@@ -387,6 +388,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "admin",
                   "challenge",
                   "attack",
+                  "notify",
                   "crawlers",
                   "behavior",
                   "honeypot",
@@ -804,6 +806,53 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
         *error = "attack.auto_rps: expected >= 0 (0 = off)";
         return false;
       }
+    }
+  }
+  if (const YAML::Node notify = root["notify"]) {
+    if (!CheckKeys(
+            notify, "notify",
+            {"name", "webhook", "telegram", "nats_down_after", "repeat_after"},
+            error) ||
+        !ReadDuration(notify, "notify", "nats_down_after",
+                      &config->notify_nats_down_after, error) ||
+        !ReadDuration(notify, "notify", "repeat_after",
+                      &config->notify_repeat_after, error)) {
+      return false;
+    }
+    const auto text = [](const YAML::Node& node) {
+      return !node || node.IsNull() ? std::string() : node.as<std::string>();
+    };
+    if (notify["name"]) config->notify_name = text(notify["name"]);
+    if (notify["webhook"]) {
+      config->notify_webhook = text(notify["webhook"]);
+      ParsedUrl url;
+      if (!config->notify_webhook.empty() &&
+          !ParseUrl(config->notify_webhook, &url)) {
+        // The URL is a secret (Slack-style webhooks carry a token).
+        *error = "notify.webhook: expected an http:// or https:// URL";
+        return false;
+      }
+    }
+    if (const YAML::Node telegram = notify["telegram"]) {
+      if (!CheckKeys(telegram, "notify.telegram", {"token", "chat_id"},
+                     error)) {
+        return false;
+      }
+      if (telegram["token"]) {
+        config->notify_telegram_token = text(telegram["token"]);
+      }
+      if (telegram["chat_id"]) {
+        config->notify_telegram_chat_id = text(telegram["chat_id"]);
+      }
+    }
+    if (config->notify_telegram_token.empty() !=
+        config->notify_telegram_chat_id.empty()) {
+      *error = "notify.telegram: set both token and chat_id, or neither";
+      return false;
+    }
+    if (config->notify_telegram_token.find('/') != std::string::npos) {
+      *error = "notify.telegram.token: expected a bot token like 123:ABC";
+      return false;
     }
   }
   if (const YAML::Node admin = root["admin"]) {

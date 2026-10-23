@@ -10,7 +10,8 @@ ExecStart=/usr/local/bin/bot-shield-watchdog \
   --fail-after 3 --recover-after 5 \
   --on-fail "/usr/sbin/nft -f /etc/bot-shield/failopen/failopen-on.nft" \
   --on-recover "/usr/sbin/nft -f /etc/bot-shield/failopen/failopen-off.nft" \
-  --state-file /var/lib/node_exporter/textfile/bot_shield_failopen.prom
+  --state-file /var/lib/node_exporter/textfile/bot_shield_failopen.prom \
+  --config /etc/bot-shield/bot-shield.yaml
 Restart=always
 RestartSec=1
 # nft needs CAP_NET_ADMIN; nothing else.

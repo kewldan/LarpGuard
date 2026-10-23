@@ -137,6 +137,41 @@ TEST(ConfigTest, ParsesAttack) {
   EXPECT_FALSE(ParseConfig("attack: {rps: 1}\n", &config, &error));
 }
 
+TEST(ConfigTest, ParsesNotify) {
+  Config config;
+  std::string error;
+  ASSERT_TRUE(ParseConfig(R"(
+notify:
+  name: edge-1
+  webhook: https://hooks.example.com/T0/B0/x
+  telegram: {token: "123:ABC", chat_id: "-100200"}
+  nats_down_after: 2m
+  repeat_after: 30s
+)",
+                          &config, &error))
+      << error;
+  EXPECT_EQ(config.notify_name, "edge-1");
+  EXPECT_EQ(config.notify_webhook, "https://hooks.example.com/T0/B0/x");
+  EXPECT_EQ(config.notify_telegram_token, "123:ABC");
+  EXPECT_EQ(config.notify_telegram_chat_id, "-100200");
+  EXPECT_EQ(config.notify_nats_down_after, std::chrono::minutes(2));
+  EXPECT_EQ(config.notify_repeat_after, std::chrono::seconds(30));
+
+  Config other;
+  EXPECT_FALSE(
+      ParseConfig("notify: {telegram: {token: \"1:A\"}}\n", &other, &error));
+  EXPECT_EQ(error, "notify.telegram: set both token and chat_id, or neither");
+  EXPECT_FALSE(
+      ParseConfig("notify: {telegram: {token: \"1/A\", chat_id: \"2\"}}\n",
+                  &other, &error));
+  EXPECT_FALSE(
+      ParseConfig("notify: {webhook: ftp://x/secret-token}\n", &other, &error));
+  // The error never carries the URL (it may hold a token).
+  EXPECT_EQ(error.find("secret-token"), std::string::npos);
+  EXPECT_FALSE(ParseConfig("notify: {email: x}\n", &other, &error));
+  EXPECT_FALSE(ParseConfig("notify: {repeat_after: 0s}\n", &other, &error));
+}
+
 TEST(ConfigTest, ParsesEvents) {
   const char* yaml = R"(
 events:

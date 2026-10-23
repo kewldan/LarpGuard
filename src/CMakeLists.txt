@@ -34,6 +34,7 @@ add_library(bot_shield_core STATIC
   docker/watcher.cc
   events/events.cc
   events/nats_publisher.cc
+  notify/notifier.cc
   fp/h1_tap.cc
   fp/h2_fingerprint.cc
   fp/h2_tap.cc

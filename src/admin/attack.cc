@@ -62,10 +62,12 @@ bool AttackMode::CountRequest(std::string_view host, int64_t now,
   entry.since = now;
   entry.until = now + auto_duration_seconds_;
   std::string error;
+  const AttackEntry enabled = entry;
   if (!Enable(std::move(entry), now, &error)) return false;
   GlobalMetrics().attack_auto_activations.Inc();
   log::Warn("under-attack mode on for {} for {}s: over {} requests/s", host,
             auto_duration_seconds_, auto_rps_);
+  if (on_auto_) on_auto_(enabled);
   return true;
 }
 

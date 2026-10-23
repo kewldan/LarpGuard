@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include "admin/attack.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/modes.h"
@@ -46,6 +47,7 @@
 #include "common/systemd.h"
 #include "common/version.h"
 #include "config/config.h"
+#include "config/settings.h"
 #include "crawler/ranges.h"
 #include "crawler/verifier.h"
 #include "crawler/web_bot_auth.h"
@@ -55,6 +57,7 @@
 #include "events/nats_publisher.h"
 #include "net/asn.h"
 #include "net/http_client.h"
+#include "notify/notifier.h"
 #include "score/policy.h"
 #include "server/gateway.h"
 #include "server/verdicts.h"
@@ -227,6 +230,32 @@ int Run(int argc, char** argv) {
          config.events_subject_prefix);
   }
 
+  // Operator notifications ("notify"); a no-op without a destination. The
+  // NATS watch outlives the notifier, whose thread samples it.
+  std::optional<bot_shield::NatsWatch> nats_watch;
+  bot_shield::OperatorNotifier notifier(bot_shield::NotifySettingsFrom(config));
+  if (config.events_nats) {
+    nats_watch.emplace(config.events_nats->ToString(),
+                       config.notify_nats_down_after);
+    notifier.Every(std::chrono::seconds(5), [&nats_watch, &notifier] {
+      const auto& metrics = bot_shield::GlobalMetrics();
+      if (auto message = nats_watch->Observe(
+              metrics.nats_connected.Get() == 1,
+              static_cast<int64_t>(metrics.events_dropped.Get()),
+              std::chrono::steady_clock::now())) {
+        notifier.Send(std::move(*message));
+      }
+    });
+  }
+  notifier.Start();
+  if (!config.notify_webhook.empty() || !config.notify_telegram_token.empty()) {
+    const bool both =
+        !config.notify_webhook.empty() && !config.notify_telegram_token.empty();
+    Info("notify: {}", both                            ? "webhook and telegram"
+                       : config.notify_webhook.empty() ? "telegram"
+                                                       : "webhook");
+  }
+
   // Host modes set from the console (POST /policy); applied on top of
   // every verdict set.
   bot_shield::ModeOverrides modes(config.admin_modes_file);
@@ -257,6 +286,10 @@ int Run(int argc, char** argv) {
     if (!settings.Reload(&fresh, summary) ||
         !bot_shield::VerdictSet::Build(fresh, &next, summary)) {
       Error("reload failed, keeping the current configuration: {}", *summary);
+      notifier.Send({"reload_failed", "",
+                     std::format("reload rejected, the current configuration "
+                                 "stays: {}",
+                                 *summary)});
       return false;
     }
     verdicts.set(bot_shield::WithConsoleModes(*next, modes.Entries()));
@@ -458,6 +491,16 @@ int Run(int argc, char** argv) {
   services.event_settings = &event_settings;
   services.verdicts = &verdicts;
   services.reload = reload;
+  services.on_attack_auto = [&notifier,
+                             &config](const bot_shield::AttackEntry& entry) {
+    notifier.Send(
+        {"attack_auto", entry.host,
+         std::format("under-attack mode on for {} for {}: over {} requests/s",
+                     entry.host,
+                     bot_shield::FormatDuration(
+                         std::chrono::seconds(entry.until - entry.since)),
+                     config.attack_auto_rps)});
+  };
   services.modes = &modes;
   services.publish_modes = publish_modes;
   services.settings = &settings;
@@ -591,6 +634,7 @@ int Run(int argc, char** argv) {
   xdp.reset();  // Detaches before the workers go.
   gateway.Join();
   if (publisher) publisher->Stop();
+  notifier.Stop();
   if (docker) docker->Stop();
   watcher.Stop();
   Info("stopped");

@@ -337,6 +337,28 @@ attack:
   auto_rps: 0
   auto_duration: 10m
 
+# Notifications to the operator, sent from a background thread: under-attack
+# mode switched on automatically (attack_auto), NATS unreachable and back
+# (nats_down, nats_up), a rejected reload (reload_failed), and from
+# bot-shield-watchdog --config, fail-open on and off (failopen_on,
+# failopen_off). Webhook and/or Telegram; neither = off.
+notify:
+  # Name in every message, to tell gateways apart; "" = the host name.
+  name: ""
+  # POST of {"event", "host", "text", "name", "ts"} as JSON; "text" is the
+  # whole message, so Slack and Mattermost incoming webhooks work as is.
+  # Only here, not in the console: notifications go to this URL. "" = off.
+  webhook: ""
+  # Telegram bot (token from @BotFather) and the chat it writes to; both or
+  # neither. Only here, not in the console.
+  telegram:
+    token: ""
+    chat_id: ""
+  # NATS unreachable this long before nats_down is sent.
+  nats_down_after: 1m
+  # The same event for the same host is not sent again sooner.
+  repeat_after: 5m
+
 # Admin API (JSON over a unix socket, mode 0600; no TCP port):
 #   curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
 # GET /status, GET /config, GET|POST /policy, DELETE /policy/<host>,

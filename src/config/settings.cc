@@ -129,6 +129,11 @@ constexpr SettingKey Secret(std::string_view path, Getter get) {
   return {path, SettingType::kString, SettingApply::kRestart, true, {}, get};
 }
 
+// Secrets that also say where the gateway sends things: main file only.
+constexpr SettingKey YamlSecret(std::string_view path, Getter get) {
+  return {path, SettingType::kString, SettingApply::kYaml, true, {}, get};
+}
+
 constexpr SettingKey Enum(SettingApply apply, std::string_view path,
                           std::span<const std::string_view> options,
                           Getter get) {
@@ -349,6 +354,17 @@ constexpr SettingKey kKeys[] = {
             [](C c) -> Json { return c.attack_auto_rps; }),
     Restart("attack.auto_duration", T::kDuration,
             [](C c) { return Duration(c.attack_auto_duration); }),
+    Restart("notify.name", T::kString,
+            [](C c) -> Json { return c.notify_name; }),
+    YamlSecret("notify.webhook", [](C c) -> Json { return c.notify_webhook; }),
+    YamlSecret("notify.telegram.token",
+               [](C c) -> Json { return c.notify_telegram_token; }),
+    Yaml("notify.telegram.chat_id", T::kString,
+         [](C c) -> Json { return c.notify_telegram_chat_id; }),
+    Restart("notify.nats_down_after", T::kDuration,
+            [](C c) { return Duration(c.notify_nats_down_after); }),
+    Restart("notify.repeat_after", T::kDuration,
+            [](C c) { return Duration(c.notify_repeat_after); }),
     Yaml("admin.socket", T::kString,
          [](C c) -> Json { return c.admin_socket; }),
     Yaml("admin.state_file", T::kString,

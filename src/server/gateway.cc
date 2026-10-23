@@ -347,7 +347,9 @@ Gateway::Gateway(const Config& config, const CertStore* certificates,
       attack_(config.attack_auto_rps,
               std::chrono::duration_cast<std::chrono::seconds>(
                   config.attack_auto_duration)
-                  .count()) {}
+                  .count()) {
+  if (services_.on_attack_auto) attack_.set_on_auto(services_.on_attack_auto);
+}
 
 Gateway::~Gateway() {
   Stop();

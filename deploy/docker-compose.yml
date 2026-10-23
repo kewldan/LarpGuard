@@ -45,6 +45,9 @@ services:
     cap_add: [NET_ADMIN]
     security_opt: ["no-new-privileges:true"]
     read_only: true
+    volumes:
+      # Only for notify: fail-open on and off go to its destinations.
+      - ./bot-shield.yaml:/etc/bot-shield/bot-shield.yaml:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
@@ -52,6 +55,7 @@ services:
         exec bot-shield-watchdog --health 127.0.0.1:9900
         --on-fail 'nft -f /etc/bot-shield/failopen/failopen-on.nft'
         --on-recover 'nft -f /etc/bot-shield/failopen/failopen-off.nft'
+        --config /etc/bot-shield/bot-shield.yaml
 
   # Web console (ui/, deploy/console.yaml). Listens on 127.0.0.1:9901; publish
   # it through a Traefik router of its own. Runs as root to reach the admin

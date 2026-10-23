@@ -4,9 +4,11 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "ratelimit/gcra.h"
@@ -56,6 +58,12 @@ class AttackMode {
 
   int64_t auto_rps() const { return auto_rps_; }
 
+  // Called on the worker that switched a host on automatically (once per
+  // switch); must not block. Set before traffic starts.
+  void set_on_auto(std::function<void(const AttackEntry& entry)> on_auto) {
+    on_auto_ = std::move(on_auto);
+  }
+
  private:
   // Drops expired entries; needs `mutex_`.
   void SweepLocked(int64_t now) const;
@@ -63,6 +71,7 @@ class AttackMode {
   const int64_t auto_rps_;
   const int64_t auto_duration_seconds_;
   const GcraParams auto_params_;
+  std::function<void(const AttackEntry& entry)> on_auto_;
   mutable std::mutex mutex_;
   mutable std::vector<AttackEntry> entries_;
   mutable std::atomic<std::size_t> count_{0};

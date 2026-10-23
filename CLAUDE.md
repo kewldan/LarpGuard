@@ -166,6 +166,10 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   throttle, honeypot, crawlers.ai, модель). Новая перезагружаемая настройка —
   сюда и в `VerdictSet::Build`; в `OnProxyRequest` — через `verdicts_`
   (снапшот на запрос), не через `context_.config`.
+- `src/notify/` — уведомления оператору (`OperatorNotifier`: вебхук и
+  Telegram, свой поток, `Send` только ставит в очередь; `NatsWatch`). Новое
+  событие — `Send` в месте, где оно случилось, имя в комментарии раздела
+  `notify` в `deploy/bot-shield.yaml`; fail-open шлёт сам watchdog.
 - `src/events/` — JSON-события и NATS-публикатор (свой поток и очередь).
   В событиях никогда нет полного IP, query-строк и значений cookie.
 - `src/config/` — YAML-конфиг; неизвестные ключи — ошибка. Новый ключ: поле в
@@ -228,7 +232,7 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   (кроме взятия снапшотов). Всё сетевое (siteverify, ключи Web Bot Auth,
   загрузки) — в фоновых потоках; запрос только читает кеш.
 - Секреты настроек (`events.token`, `events.password`, `events.ip_salt`,
-  `captcha.secret`) только записываются: admin API отдаёт `set`, схема zod
+  `captcha.secret`, `notify.webhook`, `notify.telegram.token`) только записываются: admin API отдаёт `set`, схема zod
   не пропускает значение, в аудит и логи идёт лишь «заменён/очищен».
 - Консоль не видит полный IP: из `/decisions` BFF оставляет только
   `ip_prefix`/`ip_hash`, браузер не ходит ни в admin-сокет, ни в ClickHouse.

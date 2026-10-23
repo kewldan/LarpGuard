@@ -1929,7 +1929,9 @@ whoami: true
              "--recover-after", "2",
              "--on-fail", f"echo open > {state}",
              "--on-recover", f"echo closed > {state}",
-             "--state-file", textfile],
+             "--state-file", textfile,
+             # An unreadable config costs only the notifications.
+             "--config", os.path.join(workdir, "missing.yaml")],
             stdout=log_file, stderr=subprocess.STDOUT)
 
         def wait_state(expected):
@@ -2008,6 +2010,111 @@ metrics:
             limited.wait(timeout=10)
 
     checks.run("connection limits: new connections per IP", connection_limits)
+
+    def notifications():
+        hook = FakeHttp({"/hook": lambda method, query, body:
+                         (200, "text/plain", b"ok")})
+
+        def events():
+            return [json.loads(body) for method, path, body in hook.requests
+                    if method == "POST" and path == "/hook"]
+
+        def wait_event(name, timeout=10):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                found = [e for e in events() if e["event"] == name]
+                if found:
+                    return found
+                time.sleep(0.05)
+            raise AssertionError(f"no {name} notification: {events()}")
+
+        port, metrics = free_port(), free_port()
+        notify_acme = os.path.join(workdir, "notify-acme.json")
+        write_atomic(notify_acme, acme_json([(*gw_a, "a.test")]))
+        notify_config = os.path.join(workdir, "notify.yaml")
+        config_text = f"""
+listen:
+  https: 127.0.0.1:{port}
+  http: ""
+traefik:
+  acme_json: {notify_acme}
+  upstream_https: 127.0.0.1:{tls_port}
+attack:
+  auto_rps: 5
+  auto_duration: 1m
+notify:
+  name: e2e
+  webhook: http://127.0.0.1:{hook.port}/hook
+  repeat_after: 1h
+metrics:
+  listen: 127.0.0.1:{metrics}
+{OFFLINE}"""
+        with open(notify_config, "w") as f:
+            f.write(config_text)
+        notifying = subprocess.Popen([binary, "--config", notify_config],
+                                     stdout=log_file, stderr=subprocess.STDOUT)
+        watchdog = None
+        try:
+            wait_port(port)
+            # A flood well past auto_rps (a burst of ten seconds' worth)
+            # switches the host on: one notification, not one per request.
+            # The reader holds the socket open: closed with it.
+            with tls_socket(port, "a.test", ca_a, ["http/1.1"]) as tls, \
+                    tls.makefile("rb") as reader:
+                for _ in range(90):
+                    tls.sendall(b"GET /flood HTTP/1.1\r\nHost: a.test\r\n\r\n")
+                    response = http.client.HTTPResponse(_Buffered(reader))
+                    response.begin()
+                    response.read()
+            attack = wait_event("attack_auto")[0]
+            expect(attack["host"] == "a.test", attack)
+            expect(attack["name"] == "e2e", attack)
+            expect(attack["text"].startswith(
+                "bot-shield e2e: under-attack mode on for a.test for 1m"),
+                attack)
+            expect(isinstance(attack["ts"], int), attack)
+
+            # A broken file on SIGHUP: rejected, and the operator hears.
+            with open(notify_config, "w") as f:
+                f.write(config_text + "rules: [{name: x}]\n")
+            notifying.send_signal(signal.SIGHUP)
+            failed = wait_event("reload_failed")[0]
+            expect("rules" in failed["text"], failed)
+            expect(failed["host"] is None, failed)
+            with open(notify_config, "w") as f:
+                f.write(config_text)
+
+            # The watchdog tells about fail-open itself (the gateway is
+            # down then); its start is no news.
+            watchdog = subprocess.Popen(
+                [os.path.join(os.path.dirname(binary), "bot-shield-watchdog"),
+                 "--health", f"127.0.0.1:{metrics}", "--interval", "100ms",
+                 "--timeout", "300ms", "--fail-after", "3",
+                 "--recover-after", "2", "--on-fail", "true",
+                 "--on-recover", "true", "--config", notify_config],
+                stdout=log_file, stderr=subprocess.STDOUT)
+            time.sleep(1)
+            expect(not [e for e in events() if e["event"].startswith(
+                "failopen")], events())
+            notifying.send_signal(signal.SIGSTOP)
+            try:
+                on = wait_event("failopen_on")[0]
+                expect("without filtering" in on["text"], on)
+            finally:
+                notifying.send_signal(signal.SIGCONT)
+            off = wait_event("failopen_off")[0]
+            expect("bypassed for" in off["text"], off)
+            expect(len([e for e in events()
+                        if e["event"] == "attack_auto"]) == 1, events())
+        finally:
+            if watchdog:
+                watchdog.terminate()
+                watchdog.wait(timeout=5)
+            notifying.send_signal(signal.SIGTERM)
+            notifying.wait(timeout=10)
+            hook.server.shutdown()
+
+    checks.run("notifications: attack, reload, fail-open", notifications)
 
     # A gateway with tight protection settings of its own.
     guarded_port, guarded_metrics = free_port(), free_port()

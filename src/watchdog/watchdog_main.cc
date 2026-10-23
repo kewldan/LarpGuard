@@ -12,14 +12,19 @@
 #include <exception>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <utility>
 
 #include "common/log.h"
 #include "common/version.h"
 #include "config/config.h"
+#include "config/settings.h"
+#include "net/http_client.h"
+#include "notify/notifier.h"
 #include "watchdog/fail_open.h"
 
 namespace {
@@ -35,6 +40,9 @@ constexpr char kUsage[] =
   --on-fail CMD         shell command that sends traffic to Traefik
   --on-recover CMD      shell command that sends it back to the gateway
   --state-file PATH     Prometheus textfile with the current state
+  --config PATH         bot-shield.yaml: fail-open on and off go to its
+                        "notify" destinations (webhook, Telegram); a bad
+                        file only turns the notifications off
 )";
 
 std::atomic<bool> stop{false};
@@ -86,6 +94,7 @@ int Run(int argc, char** argv) {
   std::string on_fail;
   std::string on_recover;
   std::string state_file;
+  std::string config_path;
 
   for (int i = 1; i < argc; ++i) {
     const std::string_view flag = argv[i];
@@ -119,6 +128,8 @@ int Run(int argc, char** argv) {
       on_recover = value;
     } else if (flag == "--state-file") {
       state_file = value;
+    } else if (flag == "--config") {
+      config_path = value;
     } else {
       ok = false;
     }
@@ -132,6 +143,28 @@ int Run(int argc, char** argv) {
     return 2;
   }
 
+  // Fail-open means the gateway is down, so the watchdog tells the
+  // operator itself.
+  std::unique_ptr<bot_shield::OperatorNotifier> notifier;
+  if (!config_path.empty()) {
+    bot_shield::Config config;
+    std::string error;
+    // A bad file costs the notifications, never the fail-open itself.
+    if (!bot_shield::LoadConfigFile(config_path, &config, &error)) {
+      Error("config: {}; running without notifications", error);
+    } else {
+      if (!config.ca_file.empty()) {
+        bot_shield::SetHttpClientCaFile(config.ca_file);
+      }
+      notifier = std::make_unique<bot_shield::OperatorNotifier>(
+          bot_shield::NotifySettingsFrom(config));
+      notifier->Start();
+    }
+  }
+  const auto notify = [&notifier](const char* event, std::string text) {
+    if (notifier) notifier->Send({event, "", std::move(text), false});
+  };
+
   std::signal(SIGINT, OnSignal);
   std::signal(SIGTERM, OnSignal);
   Info(
@@ -142,6 +175,7 @@ int Run(int argc, char** argv) {
   bot_shield::FailOpenSwitch fail_open(fail_after, recover_after);
   int64_t switches = 0;
   std::string last_detail;
+  std::chrono::steady_clock::time_point opened_at;
   while (!stop.load()) {
     const auto started = std::chrono::steady_clock::now();
     std::string detail;
@@ -154,13 +188,31 @@ int Run(int argc, char** argv) {
     const Change change = fail_open.Observe(healthy);
     if (change != Change::kNone) {
       const bool open = change == Change::kOpen;
+      const bool was_open = fail_open.open().value_or(false);
       if (RunCommand(open ? on_fail : on_recover)) {
         fail_open.Applied(change);
         ++switches;
+        const auto now = std::chrono::steady_clock::now();
         if (open) {
           Warn("gateway unhealthy: traffic now goes straight to Traefik");
+          opened_at = now;
+          notify("failopen_on",
+                 std::format("gateway unhealthy ({}): fail-open, traffic goes "
+                             "straight to Traefik without filtering",
+                             last_detail.empty() ? "no answer" : last_detail));
         } else {
           Info("gateway healthy: traffic goes through bot-shield");
+          // The first decision at start also closes; only a real recovery
+          // is news.
+          if (was_open) {
+            notify("failopen_off",
+                   std::format(
+                       "gateway healthy again: traffic goes through "
+                       "bot-shield (bypassed for {})",
+                       bot_shield::FormatDuration(
+                           std::chrono::duration_cast<std::chrono::seconds>(
+                               now - opened_at))));
+          }
         }
       } else {
         Error("{} command failed; retrying", open ? "on-fail" : "on-recover");
@@ -169,6 +221,7 @@ int Run(int argc, char** argv) {
     WriteState(state_file, fail_open.open().value_or(false), switches);
     std::this_thread::sleep_until(started + interval);
   }
+  if (notifier) notifier->Stop();
   // The redirect stays as it is: availability over protection (ADR-012).
   Info("stopped (fail-open {})",
        fail_open.open().value_or(false) ? "active" : "inactive");

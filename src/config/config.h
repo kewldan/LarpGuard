@@ -209,6 +209,15 @@ struct Config {
   // API) and keeps it for `attack_auto_duration`.
   int64_t attack_auto_rps = 0;
   std::chrono::milliseconds attack_auto_duration{std::chrono::minutes(10)};
+  // Operator notifications ("notify" section, src/notify): a webhook
+  // and/or a Telegram chat; neither = off. `notify_name` tells gateways
+  // apart ("" = the host name).
+  std::string notify_name;
+  std::string notify_webhook;
+  std::string notify_telegram_token;
+  std::string notify_telegram_chat_id;
+  std::chrono::milliseconds notify_nats_down_after{std::chrono::minutes(1)};
+  std::chrono::milliseconds notify_repeat_after{std::chrono::minutes(5)};
   // Admin API on a unix socket (mode 0600); empty disables.
   std::string admin_socket;
   // Operational lists survive restarts in this JSON file; empty: memory.

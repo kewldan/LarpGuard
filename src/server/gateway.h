@@ -97,6 +97,9 @@ struct GatewayServices {
   const VerdictStore* verdicts = nullptr;
   // POST /reload in the admin API; may be empty.
   std::function<bool(std::string* summary)> reload;
+  // A host switched to under-attack mode by attack.auto_rps (on a worker;
+  // must not block); may be empty.
+  std::function<void(const AttackEntry& entry)> on_attack_auto;
   // Console host modes (POST /policy) and how to apply them; may be null.
   ModeOverrides* modes = nullptr;
   std::function<void()> publish_modes;

@@ -1137,6 +1137,24 @@ SYN-cookie в XDP требуют ядро ≥ 6.0 — не сделаны: яд�
   curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/policy?host=shop.example.com
   curl --unix-socket /run/bot-shield/admin.sock -d '{"kind":"ip","value":"203.0.113.0/24","action":"block","ttl":"1h"}' http://bot-shield/lists
   ```
+- **Уведомления** ✅ (раздел `notify`, `src/notify`): вебхук (POST JSON
+  `{event, host, text, name, ts}`; `text` — готовое сообщение, поэтому
+  входящие вебхуки Slack и Mattermost работают без адаптера) и/или
+  Telegram-бот (`sendMessage` простым текстом, без разметки: имя хоста из
+  запроса никогда не становится ссылкой или форматированием). События:
+  `attack_auto` — хост включился «под атакой» по `attack.auto_rps`;
+  `nats_down` / `nats_up` — NATS недоступен дольше `nats_down_after` и снова
+  на связи (сколько событий потеряно); `reload_failed` — горячая
+  перезагрузка отклонена; `failopen_on` / `failopen_off` — шлёт
+  `bot-shield-watchdog --config <bot-shield.yaml>`, потому что при fail-open
+  шлюз лежит. Отправка — свой поток (`HttpFetch`, три попытки), воркер только
+  ставит сообщение в ограниченную очередь; одно событие для одного хоста не
+  повторяется чаще `repeat_after`, парные «упал/поднялся» не глушатся (они
+  уже сглажены у источника). Адреса доставки (`webhook`, токен и `chat_id`)
+  — только в YAML, не из консоли: консоль не перенаправляет уведомления;
+  вебхук и токен — секреты (в URL Slack-вебхука есть токен), в логи и
+  ошибки не попадают. ClickHouse шлюз не видит (пишет только в NATS), его
+  отставание показывает консоль.
 - **Деплой**: docker-compose рядом с Traefik (`network_mode: host`, монтируются
   `acme.json` read-only и `docker.sock` read-only).
 - **Безопасность шлюза**: процесс без root (`CAP_NET_BIND_SERVICE`), ключи
