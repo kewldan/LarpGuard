@@ -4,12 +4,18 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 
 import { serveStatic } from '@hono/node-server/serve-static';
 import { type Context, Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 
-import { loginSchema, sessionSchema, whoamiSchema } from '../shared/api.ts';
+import {
+  loginSchema,
+  pingSchema,
+  sessionSchema,
+  whoamiSchema,
+} from '../shared/api.ts';
 import { type SessionData, safeEqual } from './auth/sessions.ts';
 import { SignInGuard } from './auth/signin.ts';
 import { type ConsoleUser, secureCookies } from './config.ts';
@@ -63,6 +69,57 @@ function clientAddress(c: Context<AppEnv>): string {
     if (hop && !loopback(hop)) return hop;
   }
   return peer;
+}
+
+// The connection check's server side. The gateway is asked at most every
+// few seconds whoever probes, so anonymous probes cannot flood its admin
+// socket; a call that hangs counts as no answer.
+const kGatewayCheckEvery = 5_000;
+const kGatewayTimeout = 2_000;
+// Event-loop lag is a recent figure: the histogram restarts this often.
+const kLoopWindow = 10_000;
+const kLoopResolution = 20;
+
+function createServerProbe(deps: Deps): () => Promise<{
+  loop_ms: number;
+  gateway_ms: number | null;
+}> {
+  const loop = monitorEventLoopDelay({ resolution: kLoopResolution });
+  loop.enable();
+  let loopSince = performance.now();
+  let gateway: { at: number; ms: Promise<number | null> } | null = null;
+  return async () => {
+    const now = performance.now();
+    if (gateway === null || now - gateway.at >= kGatewayCheckEvery) {
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(null);
+        }, kGatewayTimeout);
+      });
+      const answer = deps.admin.status().then(
+        () => performance.now() - now,
+        () => null,
+      );
+      gateway = {
+        at: now,
+        ms: Promise.race([answer, timeout]).finally(() => {
+          clearTimeout(timer);
+        }),
+      };
+    }
+    // Delays are measured against the sampling interval; only the excess
+    // is lag. No samples yet reads as NaN.
+    const p99 = loop.percentile(99) / 1e6 - kLoopResolution;
+    if (now - loopSince >= kLoopWindow) {
+      loop.reset();
+      loopSince = now;
+    }
+    return {
+      loop_ms: Number.isFinite(p99) ? Math.max(0, p99) : 0,
+      gateway_ms: await gateway.ms,
+    };
+  };
 }
 
 export function createApp(deps: Deps): Hono<AppEnv> {
@@ -199,6 +256,17 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       request_id: c.req.header('x-bot-request-id') ?? null,
       ip_prefix: prefix || null,
       passkeys: deps.passkeys !== null,
+    });
+  });
+
+  // The connection check on the sign-in screen (shared/api.ts pingSchema).
+  const probeServer = createServerProbe(deps);
+  app.get('/api/ping', async (c) => {
+    const started = performance.now();
+    const server = await probeServer();
+    return send(c, pingSchema, {
+      server_ms: performance.now() - started,
+      ...server,
     });
   });
 

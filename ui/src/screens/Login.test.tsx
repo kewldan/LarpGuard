@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -108,5 +108,43 @@ describe('sign-in', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'The user name, password or code is wrong.',
     );
+  });
+
+  it('tells a slow server from a slow network', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url === '/api/whoami'
+            ? json({
+                score: 15,
+                class: 'human',
+                reasons: ['relayed_connection'],
+                request_id: null,
+                ip_prefix: null,
+                passkeys: false,
+              })
+            : json({ server_ms: 1, loop_ms: 240, gateway_ms: null }),
+        ),
+      ),
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Login />
+      </QueryClientProvider>,
+    );
+    const check = screen.getByRole('region', { name: 'Connection check' });
+    expect(check).toHaveTextContent('Checking your connection');
+    expect(
+      await within(check).findByText(
+        'The server is slow, not your connection.',
+        {},
+        { timeout: 3000 },
+      ),
+    ).toBeInTheDocument();
+    expect(check).toHaveTextContent('admin API does not answer');
+    expect(check).toHaveTextContent('ran 240 ms late');
+    expect(check).toHaveTextContent('Answered6 of 6');
+    expect(check).toHaveTextContent('connection relayed');
   });
 });

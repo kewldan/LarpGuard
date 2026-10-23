@@ -1,7 +1,8 @@
 // Sign-in: user name and password, then the authenticator code. Both go
 // to the server together, so a wrong password is never confirmed on its
 // own. Or a passkey, which stands for both. The aside shows what the
-// gateway decided about this very request.
+// gateway decided about this very request; under the form a connection
+// check tells a slow network from a slow server.
 
 import { browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +14,11 @@ import { ReasonChip } from '../domain/ReasonChip.tsx';
 import { ScoreCell } from '../domain/ScoreBar.tsx';
 import { ClassBadge } from '../domain/verdict.tsx';
 import { ApiError, getJson, sendJson, setCsrfToken } from '../lib/api.ts';
+import {
+  checkConnection,
+  type Diagnosis,
+  kHeadline,
+} from '../lib/connection.ts';
 import { passkeyErrorText, signInWithPasskey } from '../lib/passkeys.ts';
 import { useTheme } from '../lib/theme.ts';
 import { Button, IconButton } from '../ui/Button.tsx';
@@ -114,6 +120,98 @@ function Verdict() {
         five minutes. Every attempt is written to the decision log.
       </div>
     </aside>
+  );
+}
+
+function msText(value: number | null): string {
+  if (value === null) return '–';
+  return value < 1 ? '<1 ms' : `${Math.round(value)} ms`;
+}
+
+function CheckRows({ diagnosis }: { diagnosis: Diagnosis }) {
+  const rows: [string, string][] = [
+    [
+      'Network',
+      diagnosis.network_ms === null
+        ? 'no answer'
+        : `${msText(diagnosis.network_ms)} (${msText(diagnosis.fastest_ms)}–${msText(diagnosis.slowest_ms)})`,
+    ],
+    ['Answered', `${diagnosis.sent - diagnosis.lost} of ${diagnosis.sent}`],
+    ['Console', msText(diagnosis.server_ms)],
+    [
+      'Gateway',
+      diagnosis.gateway_ms === undefined
+        ? '–'
+        : diagnosis.gateway_ms === null
+          ? 'no answer'
+          : msText(diagnosis.gateway_ms),
+    ],
+  ];
+  return (
+    <dl className={styles.checkRows}>
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd className="mono">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+// "Is it me or the server": timed calls to the console, split into the
+// network's share and the server's.
+function ConnectionCheck() {
+  const check = useQuery({
+    queryKey: ['connection-check'],
+    queryFn: ({ signal }) => checkConnection(signal),
+    staleTime: Infinity,
+    retry: false,
+  });
+  const relayed = useWhoami()?.reasons.includes('relayed_connection') === true;
+  const diagnosis = check.data;
+  const tone = check.isFetching
+    ? 'pending'
+    : diagnosis?.culprit === 'none'
+      ? 'ok'
+      : 'bad';
+  return (
+    <section className={styles.check} aria-label="Connection check">
+      <div className={styles.checkHead}>
+        <span className={styles.checkDot} data-tone={tone} aria-hidden="true" />
+        <span role="status" className={styles.checkTitle}>
+          {check.isFetching || !diagnosis
+            ? 'Checking your connection to the console…'
+            : kHeadline[diagnosis.culprit]}
+        </span>
+        <button
+          type="button"
+          className={styles.link}
+          disabled={check.isFetching}
+          onClick={() => void check.refetch()}
+        >
+          Check again
+        </button>
+      </div>
+      {diagnosis && !check.isFetching ? (
+        <>
+          <CheckRows diagnosis={diagnosis} />
+          {diagnosis.findings.length > 0 || relayed ? (
+            <ul className={styles.checkFindings}>
+              {diagnosis.findings.map((finding) => (
+                <li key={finding}>{finding}</li>
+              ))}
+              {relayed ? (
+                <li>
+                  The gateway sees your connection relayed: a VPN or proxy sits
+                  between you and it, which adds its own delay.
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+    </section>
   );
 }
 
@@ -407,6 +505,7 @@ export function Login() {
                 </div>
               </form>
             )}
+            <ConnectionCheck />
           </div>
         </div>
       </main>

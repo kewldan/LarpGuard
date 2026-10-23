@@ -174,6 +174,46 @@ describe('sign-in', () => {
     expect((await signIn(app)).response.status).toBe(200);
   });
 
+  it('answers the connection check without a session', async () => {
+    let calls = 0;
+    const admin = createMockAdmin(() => clock);
+    const app = build({
+      admin: {
+        ...admin,
+        status: () => {
+          calls += 1;
+          return admin.status();
+        },
+      },
+    });
+    for (let i = 0; i < 3; i += 1) {
+      const response = await app.request('/api/ping');
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(Object.keys(body).sort()).toEqual([
+        'gateway_ms',
+        'loop_ms',
+        'server_ms',
+      ]);
+      expect(body['gateway_ms']).toEqual(expect.any(Number));
+    }
+    // Anonymous probes do not reach the admin socket each time.
+    expect(calls).toBe(1);
+  });
+
+  it('says when the gateway does not answer the connection check', async () => {
+    const app = build({
+      admin: {
+        ...createMockAdmin(() => clock),
+        status: () => Promise.reject(new Error('socket gone')),
+      },
+    });
+    const body = (await (await app.request('/api/ping')).json()) as {
+      gateway_ms: unknown;
+    };
+    expect(body.gateway_ms).toBeNull();
+  });
+
   it('signs out', async () => {
     const app = build();
     const session = await signIn(app);

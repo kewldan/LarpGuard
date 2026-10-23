@@ -71,6 +71,18 @@ export const whoamiSchema = z.object({
 });
 export type Whoami = z.infer<typeof whoamiSchema>;
 
+// The sign-in screen's connection check: the browser times these calls
+// for the network; the answer is the server side of it. `server_ms` is
+// the time spent answering (subtracted from the round trip), `loop_ms`
+// how far the console's event loop lagged recently, `gateway_ms` how long
+// the gateway's admin API took (null: it did not answer).
+export const pingSchema = z.object({
+  server_ms: z.number(),
+  loop_ms: z.number(),
+  gateway_ms: z.number().nullable(),
+});
+export type Ping = z.infer<typeof pingSchema>;
+
 // --- Passkeys ----------------------------------------------------------------
 
 // WebAuthn JSON (PublicKeyCredential*OptionsJSON, *ResponseJSON) is checked
