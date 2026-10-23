@@ -48,6 +48,37 @@ export function withQuery(path: string, query?: Query): string {
   return text ? `${path}?${text}` : path;
 }
 
+// The bot-shield gateway in front of the console answers an API call it
+// wants checked (attack mode, a rule) with 403 {"error":
+// "challenge_required"} instead of the BFF's answer. A fetch cannot solve
+// it, so the whole page goes through the gateway's challenge and comes
+// back to the same screen with a clearance cookie.
+export const GATEWAY_CHALLENGE_PATH = '/__bs/challenge';
+
+export function isGatewayChallenge(data: unknown): boolean {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as { error?: unknown }).error === 'challenge_required'
+  );
+}
+
+// Where the browser goes: back to the current screen, never to the API path
+// in the gateway's link (that would show JSON).
+export function gatewayChallengeUrl(current: Location): string {
+  const back = `${current.pathname}${current.search}`;
+  return `${GATEWAY_CHALLENGE_PATH}?r=${encodeURIComponent(back)}`;
+}
+
+let challengeStarted = false;
+
+function solveGatewayChallenge(): void {
+  // Several queries fail at once; navigate once.
+  if (challengeStarted) return;
+  challengeStarted = true;
+  window.location.assign(gatewayChallengeUrl(window.location));
+}
+
 async function request(
   method: string,
   path: string,
@@ -76,7 +107,11 @@ async function request(
     let column: number | undefined;
     let key: string | undefined;
     try {
-      const parsed = errorSchema.safeParse(await response.json());
+      const data: unknown = await response.json();
+      if (response.status === 403 && isGatewayChallenge(data)) {
+        solveGatewayChallenge();
+      }
+      const parsed = errorSchema.safeParse(data);
       if (parsed.success) {
         message = parsed.data.error;
         column = parsed.data.column;
