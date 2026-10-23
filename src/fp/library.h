@@ -46,6 +46,8 @@ class FingerprintLibrary {
                    std::string* error);
 
   const BrowserProfile* ProfileForEngine(std::string_view engine) const;
+  // The browser whose cipher suites hash to `ciphers` (JA4 part b).
+  const BrowserProfile* ProfileForJa4Ciphers(std::string_view ciphers) const;
   const std::vector<AutomationSignature>& automation() const {
     return automation_;
   }

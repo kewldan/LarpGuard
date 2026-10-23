@@ -6,6 +6,8 @@
 #include <string>
 #include <string_view>
 
+#include "fp/library.h"
+
 namespace bot_shield {
 
 // HMAC keys for challenge nonces and clearance tokens. Several keys can be
@@ -28,12 +30,25 @@ class TokenKeys {
   std::map<std::string, std::string, std::less<>> secrets_;
 };
 
+// The TLS stack a token or nonce is bound to, as text: what stays the same
+// for one browser across TLS session resumption (an extra pre_shared_key
+// extension) and across TCP and QUIC (a browser switches to HTTP/3 after
+// Alt-Svc, with a very different ClientHello):
+//   - cipher suites of a library browser: "browser:<profile id>";
+//   - QUIC, where every client offers the same TLS 1.3 suites: the browser
+//     the User-Agent's engine names, when the library knows it;
+//   - otherwise the JA4 without its extension count and hash.
+// "" without TLS. `ua_engine` is ParseUserAgent(...).engine.
+std::string BindingStack(std::string_view ja4, std::string_view ua_engine,
+                         const FingerprintLibrary& library);
+
 // What a token or nonce is bound to: the client's TLS stack and network.
 struct ClientBinding {
-  std::string ja4_hash;  // 8 hex chars of SHA-256(ja4); "-" without TLS.
-  std::string ip_hash;   // 8 hex chars of SHA-256(ip prefix).
+  std::string stack_hash;  // 8 hex chars of SHA-256(BindingStack); "-" x 8
+                           // without TLS.
+  std::string ip_hash;     // 8 hex chars of SHA-256(ip prefix).
 
-  static ClientBinding For(std::string_view ja4, std::string_view ip_prefix);
+  static ClientBinding For(std::string_view stack, std::string_view ip_prefix);
   friend bool operator==(const ClientBinding&, const ClientBinding&) = default;
 };
 

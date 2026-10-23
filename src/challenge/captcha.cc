@@ -106,7 +106,7 @@ struct PuzzleClaims {
 std::string SealPuzzle(const TokenKeys& keys, const PuzzleClaims& claims) {
   const std::string plain =
       std::format("{}|{}|{}|{}|{}|{}|{}|{}", claims.issued_ms, claims.round,
-                  claims.binding.ja4_hash, claims.binding.ip_hash, claims.x,
+                  claims.binding.stack_hash, claims.binding.ip_hash, claims.x,
                   claims.y, claims.radius, Base64UrlEncode(claims.return_path));
   const std::string& id = keys.active_id();
   const std::array<uint8_t, 32> key = PuzzleKey(keys.Secret(id));

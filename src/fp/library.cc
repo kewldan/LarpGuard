@@ -239,6 +239,18 @@ const BrowserProfile* FingerprintLibrary::ProfileForEngine(
   return nullptr;
 }
 
+const BrowserProfile* FingerprintLibrary::ProfileForJa4Ciphers(
+    std::string_view ciphers) const {
+  if (ciphers.empty()) return nullptr;
+  for (const BrowserProfile& profile : browsers_) {
+    if (std::ranges::find(profile.ja4_ciphers, ciphers) !=
+        profile.ja4_ciphers.end()) {
+      return &profile;
+    }
+  }
+  return nullptr;
+}
+
 int FingerprintLibrary::Weight(std::string_view signal) const {
   const auto it = weights_.find(signal);
   return it == weights_.end() ? 0 : it->second;

@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "common/hash.h"
+#include "fp/library.h"
 
 namespace bot_shield {
 namespace {
@@ -145,9 +146,30 @@ std::string_view TokenKeys::Secret(std::string_view id) const {
                               : std::string_view(it->second);
 }
 
-ClientBinding ClientBinding::For(std::string_view ja4,
+std::string BindingStack(std::string_view ja4, std::string_view ua_engine,
+                         const FingerprintLibrary& library) {
+  // t13d1518h2_8daaf6152771_e2d80978ab2e: part a is protocol, version, SNI,
+  // cipher count, extension count and ALPN; b hashes the ciphers, c the
+  // extensions.
+  const std::size_t first = ja4.find('_');
+  const std::size_t second =
+      first == std::string_view::npos ? first : ja4.find('_', first + 1);
+  if (second == std::string_view::npos || first != 10) return std::string(ja4);
+  const std::string_view ciphers = ja4.substr(first + 1, second - first - 1);
+  const BrowserProfile* profile = nullptr;
+  if (ja4.front() == 'q') {
+    profile = library.ProfileForEngine(ua_engine);
+  } else {
+    profile = library.ProfileForJa4Ciphers(ciphers);
+  }
+  if (profile != nullptr) return "browser:" + profile->id;
+  // Without the extension count (ja4[6..7]) and the extension hash.
+  return std::format("{}{}_{}", ja4.substr(0, 6), ja4.substr(8, 2), ciphers);
+}
+
+ClientBinding ClientBinding::For(std::string_view stack,
                                  std::string_view ip_prefix) {
-  return {ja4.empty() ? std::string(8, '-') : Sha256Hex(ja4, 8),
+  return {stack.empty() ? std::string(8, '-') : Sha256Hex(stack, 8),
           Sha256Hex(ip_prefix, 8)};
 }
 
@@ -155,10 +177,10 @@ std::string IssueToken(const TokenKeys& keys, const TokenClaims& claims) {
   const std::string payload =
       claims.level == kTokenLevelJs
           ? std::format("v1.{}.{}.{}.{}.{}", claims.issued, claims.expires,
-                        claims.binding.ja4_hash, claims.binding.ip_hash,
+                        claims.binding.stack_hash, claims.binding.ip_hash,
                         keys.active_id())
           : std::format("v2.{}.{}.{}.{}.{}.{}", claims.issued, claims.expires,
-                        claims.binding.ja4_hash, claims.binding.ip_hash,
+                        claims.binding.stack_hash, claims.binding.ip_hash,
                         claims.level, keys.active_id());
   return payload + "." + Mac(keys.Secret(keys.active_id()), payload);
 }
@@ -189,7 +211,7 @@ std::string IssueNonce(const TokenKeys& keys, const NonceClaims& claims,
                        std::string_view kind) {
   const std::string payload = std::format(
       "{}.{}.{}.{}.{}.{}.{}", kind, claims.issued, claims.difficulty,
-      claims.binding.ja4_hash, claims.binding.ip_hash,
+      claims.binding.stack_hash, claims.binding.ip_hash,
       Base64UrlEncode(claims.return_path), keys.active_id());
   return payload + "." + Mac(keys.Secret(keys.active_id()), payload);
 }

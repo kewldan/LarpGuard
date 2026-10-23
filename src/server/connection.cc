@@ -34,6 +34,7 @@
 #include "challenge/captcha.h"
 #include "challenge/challenger.h"
 #include "challenge/token.h"
+#include "common/hash.h"
 #include "common/host.h"
 #include "common/log.h"
 #include "common/metrics.h"
@@ -300,8 +301,15 @@ class ConnectionObserver {
     exchange.request.headers.emplace_back("x-bot-request-id",
                                           exchange.request_id);
     const int64_t now = UnixMillis() / 1000;
-    const ClientBinding binding =
-        ClientBinding::For(record_.ja4, IpPrefix(record_.peer));
+    // One snapshot for the whole request, even if a reload lands meanwhile.
+    if (context_.verdicts != nullptr) verdicts_ = context_.verdicts->snapshot();
+    const ClientBinding binding = ClientBinding::For(
+        BindingStack(
+            record_.ja4,
+            ParseUserAgent(exchange.observed.Header("user-agent")).engine,
+            verdicts_ != nullptr ? *verdicts_->library
+                                 : FingerprintLibrary::BuiltIn()),
+        IpPrefix(record_.peer));
     const std::string_view target = exchange.request.path;
     const bool whoami =
         target.substr(0, target.find('?')) == kWhoamiPath && WhoamiEnabled();
@@ -321,8 +329,6 @@ class ConnectionObserver {
       }
     }
     if (context_.verdicts == nullptr) return;
-    // One snapshot for the whole request, even if a reload lands meanwhile.
-    verdicts_ = context_.verdicts->snapshot();
     clearance_ = context_.challenger != nullptr
                      ? context_.challenger->FindClearance(exchange.observed,
                                                           binding, now)
@@ -708,11 +714,15 @@ class ConnectionObserver {
     const int64_t now_ms = SteadyMillis();
     const std::string_view target = exchange.request.path;
     const std::string_view path = target.substr(0, target.find('?'));
+    // Behavior and honeypot marks follow the exact JA4, not the coarser
+    // clearance binding: one browser family behind a /24 is many clients.
+    const std::string ja4_hash =
+        record_.ja4.empty() ? std::string(8, '-') : Sha256Hex(record_.ja4, 8);
     exchange.behavior_client =
-        std::format("{}|{}|{}", host, binding.ja4_hash, binding.ip_hash);
+        std::format("{}|{}|{}", host, ja4_hash, binding.ip_hash);
     const std::vector<std::string> trap_keys = {
         "ip|" + record_.peer.to_string(),
-        std::format("fp|{}|{}", binding.ja4_hash, binding.ip_hash)};
+        std::format("fp|{}|{}", ja4_hash, binding.ip_hash)};
     std::vector<std::string> signals;
     const Config& config = *context_.config;
     const auto matches = [path](const std::vector<std::string>& globs) {

@@ -13,6 +13,7 @@
 #include "challenge/token.h"
 #include "common/url.h"
 #include "fp/http_request.h"
+#include "fp/library.h"
 #include "score/scorer.h"
 
 namespace bot_shield {
@@ -55,6 +56,43 @@ std::string Solve(std::string_view nonce, int difficulty) {
 std::string NonceFromPage(const std::string& page) {
   const std::size_t start = page.find("var N=\"") + 7;
   return page.substr(start, page.find('"', start) - start);
+}
+
+// JA4s one Chrome 155 on macOS showed a gateway: a fresh TLS connection, a
+// resumed one (pre_shared_key: one extension more) and HTTP/3 after Alt-Svc.
+constexpr std::string_view kChromeFresh =
+    "t13d1517h2_8daaf6152771_cb7bf5808d99";
+constexpr std::string_view kChromeResumed =
+    "t13d1518h2_8daaf6152771_e2d80978ab2e";
+constexpr std::string_view kChromeQuic = "q13d0313h3_55b375c5d22e_b0954bf1abdf";
+
+TEST(BindingStackTest, OneBrowserAcrossResumptionAndQuic) {
+  const FingerprintLibrary& library = FingerprintLibrary::BuiltIn();
+  const std::string chrome = BindingStack(kChromeFresh, "chromium", library);
+  EXPECT_EQ(chrome, "browser:chromium");
+  EXPECT_EQ(BindingStack(kChromeResumed, "chromium", library), chrome);
+  EXPECT_EQ(BindingStack(kChromeQuic, "chromium", library), chrome);
+  // The TCP stack decides, not the claim.
+  EXPECT_EQ(BindingStack(kChromeFresh, "", library), chrome);
+  EXPECT_EQ(
+      BindingStack("t13d1715h2_5b57614c22b0_3d5424432f57", "chromium", library),
+      "browser:firefox");
+}
+
+TEST(BindingStackTest, OtherStacksKeepTheirCiphers) {
+  const FingerprintLibrary& library = FingerprintLibrary::BuiltIn();
+  // An HTTP library reusing a browser's token, whatever it claims.
+  const std::string tool =
+      BindingStack("t13d3112h2_e8f1e7e78f70_6bebaf5329ac", "chromium", library);
+  EXPECT_EQ(tool, "t13d31h2_e8f1e7e78f70");
+  EXPECT_NE(tool, "browser:chromium");
+  // Resumption does not change it either.
+  EXPECT_EQ(BindingStack("t13d3113h2_e8f1e7e78f70_0f2cb44170f4", "", library),
+            tool);
+  // QUIC without a known engine: the QUIC stack itself.
+  EXPECT_EQ(BindingStack(kChromeQuic, "", library), "q13d03h3_55b375c5d22e");
+  EXPECT_EQ(BindingStack("", "chromium", library), "");
+  EXPECT_EQ(BindingStack("garbage", "chromium", library), "garbage");
 }
 
 TEST(TokenTest, RoundTripsAndRejectsTampering) {
