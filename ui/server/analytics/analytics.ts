@@ -6,6 +6,8 @@ import { z } from 'zod';
 
 import {
   type FingerprintKind,
+  READINESS_EVIDENCE,
+  type Readiness,
   type RequestFilterParsed,
   type RequestRow,
   requestDetailSchema,
@@ -125,6 +127,14 @@ export interface FingerprintStats {
   ua_sample: string;
 }
 
+// Enforce readiness without the parts the route adds (mode, AS names).
+export type ReadinessData = Omit<
+  Readiness,
+  'host' | 'mode' | 'range' | 'suspects'
+> & {
+  suspects: Omit<Readiness['suspects'][number], 'as_name'>[];
+};
+
 export interface Analytics {
   verdictSeries(range: Range, now: number): Promise<VerdictPoint[]>;
   topHosts(
@@ -194,6 +204,7 @@ export interface Analytics {
     token: number;
     verified_or_listed: number;
   }>;
+  readiness(host: string, seconds: number): Promise<ReadinessData>;
   search(
     kind: 'host' | 'ja4' | 'ip_prefix' | 'ip_hash',
     q: string,
@@ -419,6 +430,75 @@ export function createAnalytics(database: string, run: Run): Analytics {
         z.object({ host: z.string(), rps: num }),
       );
       return row ?? null;
+    },
+
+    async readiness(host, seconds) {
+      const flag = z.coerce.number().transform((value) => value !== 0);
+      const [summary, reasons, suspects] = await Promise.all([
+        run(
+          sql.readinessSummary(host, seconds),
+          z.object({
+            requests: num,
+            clients: num,
+            block_requests: num,
+            block_clients: num,
+            legit_requests: num,
+            legit_clients: num,
+            challenge_requests: num,
+            challenge_clients: num,
+          }),
+        ),
+        run(
+          sql.readinessReasons(host, seconds, 15),
+          z.object({
+            reason: z.string(),
+            requests: num,
+            clients: num,
+            legit_clients: num,
+          }),
+        ),
+        run(
+          sql.readinessSuspects(host, seconds, 20),
+          z.object({
+            ip_hash: z.string(),
+            ip_prefix: z.string(),
+            asn: num,
+            user_agent: z.string(),
+            requests: num,
+            block_reasons: z.array(z.string()),
+            passed_challenge: flag,
+            verified_crawler: flag,
+            classed_human: flag,
+            last_seen: num,
+          }),
+        ),
+      ]);
+      const row = summary[0];
+      return {
+        requests: row?.requests ?? 0,
+        clients: row?.clients ?? 0,
+        block: {
+          requests: row?.block_requests ?? 0,
+          clients: row?.block_clients ?? 0,
+          legit_requests: row?.legit_requests ?? 0,
+          legit_clients: row?.legit_clients ?? 0,
+        },
+        challenge: {
+          requests: row?.challenge_requests ?? 0,
+          clients: row?.challenge_clients ?? 0,
+        },
+        reasons,
+        suspects: suspects.map((suspect) => ({
+          ip_hash: suspect.ip_hash,
+          ip_prefix: suspect.ip_prefix,
+          asn: suspect.asn,
+          user_agent: suspect.user_agent,
+          requests: suspect.requests,
+          reasons: suspect.block_reasons,
+          evidence: READINESS_EVIDENCE.filter((name) => suspect[name]),
+          last_seen: suspect.last_seen,
+        })),
+      };
     },
 
     async attackImpact(seconds) {

@@ -20,6 +20,10 @@ import type { MockEvent } from './mock-data.ts';
 const blocked = (e: MockEvent) => BLOCKING_ACTIONS.includes(e.action as Action);
 const challenged = (e: MockEvent) =>
   CHALLENGING_ACTIONS.includes(e.action as Action);
+const enforceBlocks = (e: MockEvent) =>
+  BLOCKING_ACTIONS.includes(e.would_action as Action);
+const enforceChallenges = (e: MockEvent) =>
+  CHALLENGING_ACTIONS.includes(e.would_action as Action);
 const wouldBlock = (e: MockEvent) =>
   BLOCKING_ACTIONS.includes(e.would_action as Action) && !blocked(e);
 
@@ -344,6 +348,83 @@ export function createMockAnalytics(
       return Promise.resolve(
         row ? { host: row.host, rps: row.requests / seconds } : null,
       );
+    },
+    readiness(host, seconds) {
+      const list = since(seconds).filter((e) => e.host === host);
+      const clientsOf = (events: MockEvent[]) =>
+        new Set(events.map((e) => e.ip_hash)).size;
+      const passed = new Set<string>();
+      const verified = new Set<string>();
+      for (const e of list) {
+        if (e.reasons.includes('token_valid')) passed.add(e.ip_hash);
+        if (e.class === 'verified_bot') verified.add(e.ip_hash);
+      }
+      const legit = (e: MockEvent) =>
+        e.class === 'human' ||
+        e.class === 'verified_bot' ||
+        passed.has(e.ip_hash) ||
+        verified.has(e.ip_hash);
+      const blocks = list.filter(enforceBlocks);
+      const challenges = list.filter(enforceChallenges);
+      const byReason = new Map<string, MockEvent[]>();
+      for (const e of blocks) {
+        for (const reason of e.reasons) {
+          byReason.set(reason, [...(byReason.get(reason) ?? []), e]);
+        }
+      }
+      const suspects = [
+        ...groupBy(
+          blocks.filter((e) => e.ip_hash !== ''),
+          (e) => e.ip_hash,
+        ),
+      ].flatMap(([ip_hash, group]) => {
+        const evidence = [
+          ...(passed.has(ip_hash) ? (['passed_challenge'] as const) : []),
+          ...(verified.has(ip_hash) ? (['verified_crawler'] as const) : []),
+          ...(group.some((e) => e.class === 'human')
+            ? (['classed_human'] as const)
+            : []),
+        ];
+        const first = group[0];
+        if (!first || evidence.length === 0) return [];
+        return [
+          {
+            ip_hash,
+            ip_prefix: first.ip_prefix,
+            asn: first.asn,
+            user_agent: first.user_agent,
+            requests: group.length,
+            reasons: [...new Set(group.flatMap((e) => e.reasons))].slice(0, 6),
+            evidence,
+            last_seen: Math.max(...group.map((e) => e.ts)),
+          },
+        ];
+      });
+      return Promise.resolve({
+        requests: list.length,
+        clients: clientsOf(list),
+        block: {
+          requests: blocks.length,
+          clients: clientsOf(blocks),
+          legit_requests: blocks.filter(legit).length,
+          legit_clients: clientsOf(blocks.filter(legit)),
+        },
+        challenge: {
+          requests: challenges.length,
+          clients: clientsOf(challenges),
+        },
+        reasons: top(
+          [...byReason].map(([reason, events]) => ({
+            reason,
+            requests: events.length,
+            clients: clientsOf(events),
+            legit_clients: clientsOf(events.filter(legit)),
+          })),
+          (row) => row.requests,
+          15,
+        ),
+        suspects: top(suspects, (row) => row.requests, 20),
+      });
     },
     attackImpact(seconds) {
       const list = since(seconds);

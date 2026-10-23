@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import type { Readiness } from '../shared/api.ts';
 import type { Analytics } from './analytics/analytics.ts';
 import { createApp } from './app.ts';
 import { AuditLog } from './audit.ts';
@@ -446,6 +447,43 @@ describe('settings', () => {
 });
 
 describe('data', () => {
+  it('reports enforce readiness of a host', async () => {
+    const app = build();
+    const session = await signIn(app);
+    const response = await send(
+      app,
+      session,
+      'GET',
+      '/api/hosts/readiness?host=Shop.Example.com.&range=24h',
+    );
+    expect(response.status).toBe(200);
+    const report = (await response.json()) as Readiness;
+    expect(report).toMatchObject({
+      host: 'shop.example.com',
+      mode: 'shadow',
+      range: '24h',
+    });
+    expect(report.requests).toBeGreaterThan(0);
+    expect(report.block.legit_clients).toBeLessThanOrEqual(
+      report.block.clients,
+    );
+    expect(report.block.clients).toBeLessThanOrEqual(report.clients);
+    for (const suspect of report.suspects) {
+      expect(suspect.evidence.length).toBeGreaterThan(0);
+      expect(suspect).not.toHaveProperty('ip');
+    }
+    expect(
+      (await send(app, session, 'GET', '/api/hosts/readiness?range=24h'))
+        .status,
+    ).toBe(400);
+    const without = build({ analytics: null });
+    const viewer = await signIn(without, 'watcher');
+    expect(
+      (await send(without, viewer, 'GET', '/api/hosts/readiness?host=a.b'))
+        .status,
+    ).toBe(503);
+  });
+
   it('never passes full addresses through', async () => {
     const leaky: Analytics = {
       ...createMockAnalytics(events, () => clock),

@@ -23,6 +23,19 @@ const list = (values: readonly string[]) =>
 const BLOCKED = `action IN (${list(BLOCKING_ACTIONS)})`;
 const CHALLENGED = `action IN (${list(CHALLENGING_ACTIONS)})`;
 const WOULD_BLOCK = `(would_action IN (${list(BLOCKING_ACTIONS)}) AND NOT ${BLOCKED})`;
+// What enforce mode does: on a shadow host would_action, on an enforce
+// host the same as action.
+const ENFORCE_BLOCKS = `would_action IN (${list(BLOCKING_ACTIONS)})`;
+const ENFORCE_CHALLENGES = `would_action IN (${list(CHALLENGING_ACTIONS)})`;
+// Clients of the host that look legitimate anywhere in the window: they
+// passed a challenge or are verified crawlers (CTE \`legit\`). A request
+// looks legitimate when its client does or it was classed human.
+const LEGIT_CLIENTS = `legit AS (
+  SELECT ip_hash FROM {table}
+  WHERE {where} AND ip_hash != ''
+  GROUP BY ip_hash
+  HAVING max(has(reasons, 'token_valid')) OR max(class = 'verified_bot'))`;
+const LEGIT_REQUEST = `(class IN ('human', 'verified_bot') OR ip_hash IN legit)`;
 
 export const TONE_COLUMNS = `countIf(${BLOCKED}) AS blocked,
   countIf(${CHALLENGED}) AS challenged,
@@ -382,6 +395,63 @@ GROUP BY host ORDER BY rps DESC LIMIT 1`,
 FROM ${this.table}
 WHERE ${since(seconds)}`,
       params: {},
+    };
+  }
+
+  // Enforce readiness of one host (shared/api.ts readinessSchema).
+  private legitClients(where: string): string {
+    return LEGIT_CLIENTS.replace('{table}', this.table).replace(
+      '{where}',
+      where,
+    );
+  }
+
+  readinessSummary(host: string, seconds: number): Query {
+    const where = `${since(seconds)} AND host = {host:String}`;
+    return {
+      sql: `WITH ${this.legitClients(where)}
+SELECT count() AS requests, uniq(ip_hash) AS clients,
+  countIf(${ENFORCE_BLOCKS}) AS block_requests,
+  uniqIf(ip_hash, ${ENFORCE_BLOCKS}) AS block_clients,
+  countIf(${ENFORCE_BLOCKS} AND ${LEGIT_REQUEST}) AS legit_requests,
+  uniqIf(ip_hash, ${ENFORCE_BLOCKS} AND ${LEGIT_REQUEST}) AS legit_clients,
+  countIf(${ENFORCE_CHALLENGES}) AS challenge_requests,
+  uniqIf(ip_hash, ${ENFORCE_CHALLENGES}) AS challenge_clients
+FROM ${this.table}
+WHERE ${where}`,
+      params: { host },
+    };
+  }
+
+  readinessReasons(host: string, seconds: number, limit: number): Query {
+    const where = `${since(seconds)} AND host = {host:String}`;
+    return {
+      sql: `WITH ${this.legitClients(where)}
+SELECT reason, count() AS requests, uniq(ip_hash) AS clients,
+  uniqIf(ip_hash, ${LEGIT_REQUEST}) AS legit_clients
+FROM ${this.table} ARRAY JOIN reasons AS reason
+WHERE ${where} AND ${ENFORCE_BLOCKS}
+GROUP BY reason ORDER BY requests DESC LIMIT {limit:UInt32}`,
+      params: { host, limit },
+    };
+  }
+
+  readinessSuspects(host: string, seconds: number, limit: number): Query {
+    return {
+      sql: `SELECT ip_hash, any(ip_prefix) AS ip_prefix, any(asn) AS asn,
+  anyIf(user_agent, ${ENFORCE_BLOCKS}) AS user_agent,
+  countIf(${ENFORCE_BLOCKS}) AS requests,
+  groupUniqArrayArrayIf(6)(reasons, ${ENFORCE_BLOCKS}) AS block_reasons,
+  max(has(reasons, 'token_valid')) AS passed_challenge,
+  max(class = 'verified_bot') AS verified_crawler,
+  maxIf(class = 'human', ${ENFORCE_BLOCKS}) AS classed_human,
+  toUnixTimestamp64Milli(maxIf(ts, ${ENFORCE_BLOCKS})) AS last_seen
+FROM ${this.table}
+WHERE ${since(seconds)} AND host = {host:String} AND ip_hash != ''
+GROUP BY ip_hash
+HAVING requests > 0 AND (passed_challenge OR verified_crawler OR classed_human)
+ORDER BY requests DESC LIMIT {limit:UInt32}`,
+      params: { host, limit },
     };
   }
 

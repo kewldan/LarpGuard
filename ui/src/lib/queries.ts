@@ -24,8 +24,10 @@ import {
   type NewListEntry,
   overviewSchema,
   passkeyListSchema,
+  type ReadinessRange,
   type RequestFilter,
   type RuleTestRequest,
+  readinessSchema,
   reloadResultSchema,
   requestDetailSchema,
   requestPageSchema,
@@ -57,6 +59,9 @@ export const keys = {
   lists: ['lists'] as const,
   limits: ['limits'] as const,
   hosts: ['hosts'] as const,
+  // Under `hosts`: a mode change refreshes it too.
+  readiness: (host: string, range: ReadinessRange) =>
+    ['hosts', 'readiness', host, range] as const,
   crawlers: ['crawlers'] as const,
   attack: ['attack'] as const,
   audit: ['audit'] as const,
@@ -200,6 +205,16 @@ export function useHosts() {
     queryFn: ({ signal }) =>
       getJson(hostsSchema, '/api/hosts', undefined, signal),
     refetchInterval: 15_000,
+  });
+}
+
+export function useReadiness(host: string, range: ReadinessRange) {
+  return useQuery({
+    queryKey: keys.readiness(host, range),
+    queryFn: ({ signal }) =>
+      getJson(readinessSchema, '/api/hosts/readiness', { host, range }, signal),
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
   });
 }
 

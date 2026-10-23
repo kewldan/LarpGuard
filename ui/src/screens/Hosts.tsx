@@ -8,6 +8,10 @@ import { useState } from 'react';
 import type { GatewayConfig, HostRow } from '../../shared/api.ts';
 import type { HostMode } from '../../shared/domain.ts';
 import { useCanOperate } from '../app/session.ts';
+import {
+  EnforceReadiness,
+  ReadinessLine,
+} from '../domain/EnforceReadiness.tsx';
 import { ActionChip, ModeBadge } from '../domain/verdict.tsx';
 import { compact, count, duration } from '../lib/format.ts';
 import {
@@ -561,6 +565,7 @@ export function Hosts() {
                   </div>
                 ) : null}
               </section>
+              <EnforceReadiness host={current.host} />
               {config ? <PolicySettings config={config} /> : null}
             </div>
             <div style={{ flex: '1 1 260px', minWidth: 0 }}>
@@ -638,6 +643,9 @@ export function Hosts() {
                   : 'The host will be proxied without verdicts or rate limits.'}{' '}
               The change is a console override and shows in the decision log.
             </p>
+            {pending === 'enforce' ? (
+              <ReadinessLine host={current.host} />
+            ) : null}
             <div
               style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}
             >

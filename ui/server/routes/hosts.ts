@@ -1,14 +1,21 @@
 // GET /api/hosts: every known host with its mode, route and traffic.
+// GET /api/hosts/readiness?host=&range=: is the host ready for enforce.
 // POST /api/hosts/mode, DELETE /api/hosts/mode/:host: console host modes.
 
 import type { Hono } from 'hono';
 
-import { type HostRow, hostsSchema, setModeSchema } from '../../shared/api.ts';
-import type { HostMode } from '../../shared/domain.ts';
+import {
+  type HostRow,
+  hostsSchema,
+  readinessQuerySchema,
+  readinessSchema,
+  setModeSchema,
+} from '../../shared/api.ts';
+import { type HostMode, RANGE_SECONDS } from '../../shared/domain.ts';
 import type { AppEnv, Deps } from '../deps.ts';
 import { fail, jsonBody, parseOr400, send } from '../http.ts';
 import { requireRole } from '../roles.ts';
-import { actor } from './common.ts';
+import { actor, analytics, asnNames } from './common.ts';
 
 const MAX_HOSTS = 200;
 
@@ -74,6 +81,30 @@ export function registerHosts(app: Hono<AppEnv>): void {
     return send(c, hostsSchema, {
       default_mode: overview.default,
       hosts: rows,
+    });
+  });
+
+  app.get('/api/hosts/readiness', async (c) => {
+    const deps = c.get('deps');
+    const { host, range } = parseOr400(readinessQuerySchema, c.req.query());
+    const name = host.toLowerCase().replace(/\.$/, '');
+    const [policy, data] = await Promise.all([
+      deps.admin.policy(name),
+      analytics(deps).readiness(name, RANGE_SECONDS[range]),
+    ]);
+    const names = await asnNames(
+      deps,
+      data.suspects.map((suspect) => suspect.asn),
+    );
+    return send(c, readinessSchema, {
+      ...data,
+      host: name,
+      mode: policy.mode,
+      range,
+      suspects: data.suspects.map((suspect) => ({
+        ...suspect,
+        as_name: names.get(suspect.asn)?.org ?? null,
+      })),
     });
   });
 

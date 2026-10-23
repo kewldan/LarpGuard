@@ -772,6 +772,64 @@ export const hostsSchema = z.object({
 });
 export type Hosts = z.infer<typeof hostsSchema>;
 
+// Enforce readiness of one host: what enforce mode would do (on a shadow
+// host) or does (on an enforce host) to its traffic, and which clients it
+// blocks that look legitimate: they passed a challenge elsewhere in the
+// window, are verified crawlers, or the blocked request was classed human.
+export const READINESS_RANGES = ['1h', '24h', '7d'] as const;
+export type ReadinessRange = (typeof READINESS_RANGES)[number];
+
+export const readinessQuerySchema = z.object({
+  host: z.string().min(1).max(253),
+  range: z.enum(READINESS_RANGES).default('24h'),
+});
+
+export const READINESS_EVIDENCE = [
+  'passed_challenge',
+  'verified_crawler',
+  'classed_human',
+] as const;
+export type ReadinessEvidence = (typeof READINESS_EVIDENCE)[number];
+
+export const readinessSchema = z.object({
+  host: z.string(),
+  mode: hostModeSchema,
+  range: z.enum(READINESS_RANGES),
+  requests: z.number(),
+  clients: z.number(),
+  block: z.object({
+    requests: z.number(),
+    clients: z.number(),
+    legit_requests: z.number(),
+    legit_clients: z.number(),
+  }),
+  challenge: z.object({ requests: z.number(), clients: z.number() }),
+  // Signals of the blocked requests.
+  reasons: z.array(
+    z.object({
+      reason: z.string(),
+      requests: z.number(),
+      clients: z.number(),
+      legit_clients: z.number(),
+    }),
+  ),
+  // Blocked clients that look legitimate, most requests first.
+  suspects: z.array(
+    z.object({
+      ip_prefix: z.string(),
+      ip_hash: z.string(),
+      asn: z.number(),
+      as_name: z.string().nullable(),
+      user_agent: z.string(),
+      requests: z.number(),
+      reasons: z.array(z.string()),
+      evidence: z.array(z.enum(READINESS_EVIDENCE)),
+      last_seen: z.number(),
+    }),
+  ),
+});
+export type Readiness = z.infer<typeof readinessSchema>;
+
 export const setModeSchema = z.object({
   host: hostSchema,
   mode: hostModeSchema,
