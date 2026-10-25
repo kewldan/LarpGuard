@@ -246,6 +246,7 @@ function mainFile(): Map<string, SettingValue> {
         key: limit.key,
         rate: rate(limit.count, limit.period_ms),
         burst: limit.burst,
+        ...(limit.statuses.length ? { statuses: limit.statuses } : {}),
       })),
     ],
     [

@@ -343,7 +343,7 @@ bool ParseRateLimits(const YAML::Node& node, Config* config,
   for (const auto& item : node) {
     if (!CheckKeys(item, "rate_limits[]",
                    {"name", "hosts", "paths", "methods", "classes", "key",
-                    "rate", "burst"},
+                    "rate", "burst", "statuses"},
                    error)) {
       return false;
     }
@@ -361,6 +361,17 @@ bool ParseRateLimits(const YAML::Node& node, Config* config,
       return false;
     }
     spec.burst = item["burst"] ? item["burst"].as<int64_t>() : spec.count;
+    if (const YAML::Node statuses = item["statuses"]) {
+      if (!statuses.IsSequence()) {
+        *error = std::format(
+            "rate_limits '{}': statuses must be a list like [401, 403]",
+            spec.name);
+        return false;
+      }
+      for (const auto& status : statuses) {
+        spec.statuses.push_back(status.as<int>());
+      }
+    }
     config->rate_limits.push_back(std::move(spec));
   }
   RateLimitSet compiled;

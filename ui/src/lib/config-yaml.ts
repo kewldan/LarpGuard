@@ -27,6 +27,8 @@ export function limitYaml(limit: Limit, rps: number, burst: number): string {
   lines.push(
     `    key: [${limit.key.map((k) => (k.includes(':') ? `"${k}"` : k)).join(', ')}]`,
   );
+  if (limit.statuses.length)
+    lines.push(`    statuses: [${limit.statuses.join(', ')}]`);
   lines.push(
     `    rate: ${rps >= 1 ? `${Math.round(rps)}/s` : `${Math.round(rps * 60)}/m`}`,
   );

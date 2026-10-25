@@ -355,6 +355,17 @@ connection_limits:
       ParseConfig("rate_limits: [{name: a, key: [ip]}]\n", &config, &error));
   EXPECT_FALSE(ParseConfig("rate_limits: [{name: a, key: [mac], rate: 1/s}]\n",
                            &config, &error));
+  ASSERT_TRUE(ParseConfig(
+      "rate_limits: [{name: f, key: [ip], rate: 5/h, statuses: [401, 403]}]\n",
+      &config, &error))
+      << error;
+  EXPECT_EQ(config.rate_limits[0].statuses, (std::vector<int>{401, 403}));
+  EXPECT_FALSE(ParseConfig(
+      "rate_limits: [{name: f, key: [ip], rate: 5/h, statuses: 401}]\n",
+      &config, &error));
+  EXPECT_FALSE(ParseConfig(
+      "rate_limits: [{name: f, key: [ip], rate: 5/h, statuses: [42]}]\n",
+      &config, &error));
   EXPECT_FALSE(
       ParseConfig("connection_limits: {new_per_ip: fast}\n", &config, &error));
   EXPECT_FALSE(

@@ -30,6 +30,10 @@ class RateLimitStore {
 
   GcraResult Check(std::string_view key, const GcraParams& params,
                    int64_t now_ns);
+  // Whether a request would be allowed now, without counting it (limits
+  // that count responses, not requests).
+  GcraResult Peek(std::string_view key, const GcraParams& params,
+                  int64_t now_ns) const;
 
   std::size_t size() const;
   uint64_t untracked() const { return untracked_.load(); }

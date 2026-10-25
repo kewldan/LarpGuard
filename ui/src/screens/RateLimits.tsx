@@ -23,6 +23,9 @@ function scope(limit: Limit): string {
     ...(limit.paths.length ? [limit.paths.join(', ')] : []),
     ...(limit.methods.length ? [limit.methods.join(',')] : []),
     ...(limit.classes.length ? [`class ${limit.classes.join(',')}`] : []),
+    ...(limit.statuses.length
+      ? [`counts ${limit.statuses.join('/')} responses`]
+      : []),
   ];
   return parts.join(' · ');
 }

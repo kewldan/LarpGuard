@@ -50,6 +50,7 @@ export const MOCK_CONFIG: GatewayConfig = {
       count: 5,
       period_ms: 60_000,
       burst: 5,
+      statuses: [],
     },
     {
       name: 'search_api',
@@ -61,6 +62,7 @@ export const MOCK_CONFIG: GatewayConfig = {
       count: 10,
       period_ms: 1000,
       burst: 20,
+      statuses: [],
     },
     {
       name: 'api_default',
@@ -72,6 +74,7 @@ export const MOCK_CONFIG: GatewayConfig = {
       count: 50,
       period_ms: 1000,
       burst: 100,
+      statuses: [],
     },
   ],
   throttle: {
@@ -84,6 +87,7 @@ export const MOCK_CONFIG: GatewayConfig = {
     count: 2,
     period_ms: 1000,
     burst: 5,
+    statuses: [],
   },
   honeypot_paths: ['/.env', '/.git/*', '/wp-config.php*'],
   crawlers: {

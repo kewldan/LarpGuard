@@ -114,6 +114,7 @@ rules:
 rate_limits:
   - {name: login, paths: [/login], methods: [POST], key: [ip], rate: 5/m}
   - {name: api, key: ["header:x-api-key"], rate: 100/s, burst: 200}
+  - {name: failures, key: [ip], rate: 5/h, statuses: [401, 403]}
 throttle: {rate: 30/m, burst: 10, key: [ip_prefix]}
 connection_limits: {new_per_ip: 30/s, new_burst_per_ip: 5}
 crawlers: {ai: block}

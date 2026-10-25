@@ -376,7 +376,7 @@ nlohmann::json LimitJson(const RateLimitSpec& spec) {
           {"paths", spec.paths},     {"methods", spec.methods},
           {"classes", spec.classes}, {"key", spec.key},
           {"count", spec.count},     {"period_ms", Millis(spec.period)},
-          {"burst", spec.burst}};
+          {"burst", spec.burst},     {"statuses", spec.statuses}};
 }
 
 // GET /config: what decides verdicts right now (the last successful load

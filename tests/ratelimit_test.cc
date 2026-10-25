@@ -180,6 +180,51 @@ TEST_F(RateLimitSetTest, FiltersAndRefusal) {
   EXPECT_FALSE(Check(limits));
 }
 
+TEST_F(RateLimitSetTest, CountsOnlyMatchingResponses) {
+  RateLimitSpec failures = Spec("failures", {"ip"}, 2, 2);
+  failures.statuses = {401, 403};
+  RateLimitSet limits;
+  std::string error;
+  ASSERT_TRUE(RateLimitSet::Compile({failures}, &limits, &error)) << error;
+
+  // Requests alone never use the limit up.
+  std::vector<ResponseCount> counts;
+  for (int i = 0; i < 10; ++i) {
+    counts.clear();
+    EXPECT_FALSE(limits.Check(request_, &store_, now_, &counts));
+    ASSERT_EQ(counts.size(), 1u);
+    CountResponse(counts, 200, &store_, now_);
+  }
+  // Two failures do; the third request is refused before it is sent.
+  for (int i = 0; i < 2; ++i) {
+    counts.clear();
+    EXPECT_FALSE(limits.Check(request_, &store_, now_, &counts));
+    CountResponse(counts, i == 0 ? 401 : 403, &store_, now_);
+  }
+  counts.clear();
+  const auto hit = limits.Check(request_, &store_, now_, &counts);
+  ASSERT_TRUE(hit);
+  EXPECT_EQ(hit->name, "failures");
+  EXPECT_TRUE(counts.empty());  // A refused request counts nothing more.
+  // The bucket refills at the sustained rate (2/m).
+  EXPECT_FALSE(limits.Check(request_, &store_, now_ + 31 * kSecond, &counts));
+
+  failures.statuses = {99};
+  EXPECT_FALSE(RateLimitSet::Compile({failures}, &limits, &error));
+}
+
+TEST(RateLimitStoreTest, PeekDoesNotCount) {
+  RateLimitStore store;
+  const GcraParams params = GcraParams::FromRate(1, kSecond * 60, 1);
+  EXPECT_TRUE(store.Peek("k", params, kSecond).allowed);
+  EXPECT_TRUE(store.Peek("k", params, kSecond).allowed);
+  EXPECT_TRUE(store.Check("k", params, kSecond).allowed);
+  EXPECT_FALSE(store.Peek("k", params, kSecond).allowed);
+  EXPECT_EQ(store.size(), 1u);  // Peek never inserts.
+  EXPECT_TRUE(store.Peek("other", params, kSecond).allowed);
+  EXPECT_EQ(store.size(), 1u);
+}
+
 TEST_F(RateLimitSetTest, KeysSeparateClientsAndSkipMissingParts) {
   RateLimitSet limits;
   std::string error;

@@ -145,6 +145,9 @@ describe('config snippets', () => {
       limitYaml({ ...limit, key: ['header:x-api-key'] }, 0.5, 1),
     ).toContain('key: ["header:x-api-key"]');
     expect(limitYaml(limit, 0.5, 1)).toContain('rate: 30/m');
+    expect(limitYaml({ ...limit, statuses: [401, 403] }, 1, 1)).toContain(
+      'statuses: [401, 403]',
+    );
   });
 });
 

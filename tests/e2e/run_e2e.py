@@ -680,6 +680,12 @@ rate_limits:
     paths: ["/api/*"]
     key: ["header:x-api-key"]
     rate: 2/m
+  - name: failed-logins
+    hosts: [www.a.test]
+    paths: ["/status/*"]
+    key: [ip, host]
+    statuses: [401]
+    rate: 2/m
 timeouts:
   client_hello: 1s
 events:
@@ -1286,6 +1292,25 @@ whoami: true
         status, body = admin_call(admin_socket, "POST", "/reload")
         expect(status == 200, body)
 
+    def rate_limits_on_responses():
+        # Successful answers never use the limit up.
+        for _ in range(5):
+            status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/status/200")
+            expect(status == 200, status)
+        # Two failures from the origin do; then any request is refused
+        # before it reaches the origin.
+        for _ in range(2):
+            status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/status/401")
+            expect(status == 401, status)
+        status, headers, _ = h1_get(https_port, "www.a.test", ca_a,
+                                    "/status/200")
+        expect(status == 429, status)
+        expect(headers["ratelimit-policy"] == '"failed-logins";q=2;w=60',
+               headers)
+        event = nats.find("e2e.events.req",
+                          lambda e: e.get("rate_limit") == "failed-logins")
+        expect(event["local"] and event["status"] == 429, event)
+
     def rate_limits():
         statuses = [h1_get(https_port, "www.a.test", ca_a, "/limited")
                     for _ in range(4)]
@@ -1887,6 +1912,8 @@ whoami: true
         ("whoami: text, JSON, page; answered, not blocked; reloadable",
          whoami),
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
+        ("rate limits on origin responses: only 401s count",
+         rate_limits_on_responses),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),
         ("admin API: status, policy, lists, decisions, console modes",

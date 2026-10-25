@@ -86,14 +86,18 @@ Json Rules(const std::vector<RuleSpec>& rules) {
 Json RateLimits(const std::vector<RateLimitSpec>& limits) {
   Json out = Json::array();
   for (const RateLimitSpec& spec : limits) {
-    out.push_back({{"name", spec.name},
-                   {"hosts", spec.hosts},
-                   {"paths", spec.paths},
-                   {"methods", spec.methods},
-                   {"classes", spec.classes},
-                   {"key", spec.key},
-                   {"rate", FormatRate(spec.count, spec.period)},
-                   {"burst", spec.burst}});
+    Json limit = {{"name", spec.name},
+                  {"hosts", spec.hosts},
+                  {"paths", spec.paths},
+                  {"methods", spec.methods},
+                  {"classes", spec.classes},
+                  {"key", spec.key},
+                  {"rate", FormatRate(spec.count, spec.period)},
+                  {"burst", spec.burst}};
+    // Only when set: limits written before statuses existed stay as they
+    // are.
+    if (!spec.statuses.empty()) limit["statuses"] = spec.statuses;
+    out.push_back(std::move(limit));
   }
   return out;
 }
@@ -716,7 +720,18 @@ bool CheckSettingValue(const SettingKey& key, const Json& value,
     case T::kRateLimits:
       ok =
           value.is_array() && std::ranges::all_of(value, [](const Json& limit) {
-            return CheckFields(limit, {"name", "rate"},
+            if (!limit.is_object()) return false;
+            Json rest = limit;
+            if (const auto it = rest.find("statuses"); it != rest.end()) {
+              const bool integers =
+                  it->is_array() &&
+                  std::ranges::all_of(*it, [](const Json& status) {
+                    return status.is_number_integer();
+                  });
+              if (!integers) return false;
+              rest.erase(it);
+            }
+            return CheckFields(rest, {"name", "rate"},
                                {"hosts", "paths", "methods", "classes", "key"},
                                {"burst"});
           });

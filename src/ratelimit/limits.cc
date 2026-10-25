@@ -110,6 +110,11 @@ bool RateLimitSet::Compile(const std::vector<RateLimitSpec>& specs,
     }
     if (spec.burst < 1) return fail("burst must be at least 1");
     if (spec.key.empty()) return fail("key needs at least one component");
+    for (const int status : spec.statuses) {
+      if (status < 100 || status > 599) {
+        return fail(std::format("status {} is not an HTTP status", status));
+      }
+    }
     for (const std::string& component : spec.key) {
       if (!IsKnownComponent(component)) {
         return fail(std::format("unknown key component '{}'", component));
@@ -223,15 +228,22 @@ std::vector<std::string> RateLimitSet::NamesForHost(
   return names;
 }
 
-std::optional<RateLimitHit> RateLimitSet::Check(const RateLimitRequest& request,
-                                                RateLimitStore* store,
-                                                int64_t now_ns) const {
+std::optional<RateLimitHit> RateLimitSet::Check(
+    const RateLimitRequest& request, RateLimitStore* store, int64_t now_ns,
+    std::vector<ResponseCount>* on_response) const {
   std::optional<RateLimitHit> hit;
   for (const Limit& limit : limits_) {
     if (!Matches(limit, request)) continue;
-    const std::string key = BuildKey(limit, request);
+    std::string key = BuildKey(limit, request);
     if (key.empty()) continue;
-    const GcraResult result = store->Check(key, limit.params, now_ns);
+    const bool by_response = !limit.spec.statuses.empty();
+    const GcraResult result = by_response
+                                  ? store->Peek(key, limit.params, now_ns)
+                                  : store->Check(key, limit.params, now_ns);
+    if (by_response && result.allowed && on_response != nullptr) {
+      on_response->push_back(
+          ResponseCount{std::move(key), limit.params, limit.spec.statuses});
+    }
     if (!result.allowed && !hit) {
       hit = RateLimitHit{
           limit.spec.name, result, limit.spec.burst,
@@ -240,6 +252,15 @@ std::optional<RateLimitHit> RateLimitSet::Check(const RateLimitRequest& request,
     }
   }
   return hit;
+}
+
+void CountResponse(const std::vector<ResponseCount>& counts, int status,
+                   RateLimitStore* store, int64_t now_ns) {
+  for (const ResponseCount& count : counts) {
+    if (std::ranges::find(count.statuses, status) != count.statuses.end()) {
+      store->Check(count.key, count.params, now_ns);
+    }
+  }
 }
 
 }  // namespace bot_shield

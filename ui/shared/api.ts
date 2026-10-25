@@ -185,6 +185,8 @@ const limitSchema = z.object({
   count: z.number(),
   period_ms: z.number(),
   burst: z.number(),
+  // Origin response statuses the limit counts; empty: every request.
+  statuses: z.array(z.number()).default([]),
 });
 export type Limit = z.infer<typeof limitSchema>;
 

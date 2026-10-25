@@ -126,12 +126,22 @@ rules: []
 # ip, ip_prefix, ja4, fp, host, session (challenge clearance token), asn
 # (needs the asn database), header:<name>, cookie:<name>; a request
 # missing a part is not limited by that rule. burst defaults to the count.
+# statuses: count only origin responses with these statuses (e.g. failed
+# logins: 401, 403) instead of every request; once they use up the limit,
+# requests are refused. The gateway's own answers never count.
 rate_limits: []
 #  - name: login
 #    paths: [/login]
 #    methods: [POST]
 #    key: [ip]
 #    rate: 5/m
+#  - name: login-failures
+#    paths: [/login]
+#    methods: [POST]
+#    key: [ip_prefix]
+#    statuses: [401, 403]
+#    rate: 10/h
+#    burst: 10
 #  - name: bots
 #    classes: [bot]
 #    key: [ip_prefix]

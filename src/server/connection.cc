@@ -25,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -1051,7 +1052,7 @@ class ConnectionObserver {
   // 429 when the host is enforced, otherwise only recorded.
   void CheckRateLimits(Exchange& exchange, const Verdict& verdict,
                        std::string_view host, const PolicyDecision& decision,
-                       const LabelPolicies* labels) const {
+                       const LabelPolicies* labels) {
     const bool configured = !verdicts_->rate_limits.empty();
     const bool labelled = labels != nullptr && !labels->rate_limits().empty();
     // Action "throttle": the throttle limit applies on top of the others.
@@ -1075,16 +1076,21 @@ class ConnectionObserver {
     if (throttled) {
       hit = verdicts_->throttle.Check(request, context_.rate_limit_store, now);
     }
+    // Limits on origin responses (statuses): counted in OnProxyDone.
+    std::vector<ResponseCount> counts;
     if (configured) {
-      std::optional<RateLimitHit> limit_hit =
-          verdicts_->rate_limits.Check(request, context_.rate_limit_store, now);
+      std::optional<RateLimitHit> limit_hit = verdicts_->rate_limits.Check(
+          request, context_.rate_limit_store, now, &counts);
       if (!hit) hit = std::move(limit_hit);
     }
     if (labelled) {
       // Label limits count the request too; the first refusal is reported.
-      std::optional<RateLimitHit> label_hit =
-          labels->rate_limits().Check(request, context_.rate_limit_store, now);
+      std::optional<RateLimitHit> label_hit = labels->rate_limits().Check(
+          request, context_.rate_limit_store, now, &counts);
       if (!hit) hit = std::move(label_hit);
+    }
+    if (!counts.empty()) {
+      response_counts_.insert_or_assign(exchange.request_id, std::move(counts));
     }
     if (!hit) return;
 
@@ -1166,6 +1172,16 @@ class ConnectionObserver {
 
   void OnProxyDone(const Exchange& exchange) {
     ++record_.requests;
+    if (const auto it = response_counts_.find(exchange.request_id);
+        it != response_counts_.end()) {
+      // Only the origin's answers count: the gateway's own 403 and 429
+      // would otherwise feed the limit that produced them.
+      if (exchange.response_started && !exchange.local) {
+        CountResponse(it->second, exchange.response.status,
+                      context_.rate_limit_store, SteadyNanos());
+      }
+      response_counts_.erase(it);
+    }
     GlobalMetrics().http_requests_observed.Inc();
     if (!exchange.h2_fingerprint.empty()) {
       record_.h2_fingerprint = exchange.h2_fingerprint;
@@ -1254,6 +1270,9 @@ class ConnectionObserver {
   // Its clearance token, if any (session id and level).
   std::optional<Clearance> clearance_;
   std::optional<std::string> session_;
+  // Response-counting limits of the requests in flight, by request id;
+  // settled in OnProxyDone.
+  std::unordered_map<std::string, std::vector<ResponseCount>> response_counts_;
   // From the ASN database (LookupAsn).
   std::string asn_org_;
   std::string asn_country_;
