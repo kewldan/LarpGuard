@@ -11,6 +11,7 @@ import {
 } from '../../shared/api.ts';
 import { Sparkline } from '../domain/charts.tsx';
 import { DiffLine, FingerprintPill } from '../domain/Fingerprint.tsx';
+import { LibraryCandidates } from '../domain/LibraryCandidates.tsx';
 import { diffSegments, separatorFor } from '../lib/diff.ts';
 import { ago, compact, count } from '../lib/format.ts';
 import { useFingerprints, useGatewayConfig } from '../lib/queries.ts';
@@ -499,6 +500,8 @@ export function Fingerprints() {
         </div>
         <Compare kind={kind} a={rowA} b={rowB} />
       </Card>
+
+      <LibraryCandidates />
     </>
   );
 }

@@ -455,6 +455,36 @@ ORDER BY requests DESC LIMIT {limit:UInt32}`,
     };
   }
 
+  // Network stacks of clients that passed the challenge, by the engine
+  // their User-Agent implies (the gateway's rules: iOS and Safari WebKit,
+  // Firefox, other browsers Chromium; tools and crawlers none).
+  libraryCandidates(seconds: number, minClients: number, limit: number): Query {
+    return {
+      sql: `SELECT engine, ciphers, pseudo_order, uniq(ip_hash) AS clients,
+  count() AS requests, any(user_agent) AS ua_sample,
+  toUnixTimestamp64Milli(min(seen)) AS first_seen,
+  toUnixTimestamp64Milli(max(seen)) AS last_seen
+FROM (
+  SELECT multiIf(
+      match(user_agent, '(?i)curl|wget|python|go-http|okhttp|java/|node-fetch|axios|bot|spider|crawl'), '',
+      match(user_agent, 'iPhone|iPad|iPod'), 'webkit',
+      match(user_agent, '(Firefox|FxiOS)/'), 'firefox',
+      match(user_agent, '(Chrome|Chromium|CriOS|Edg|OPR)/'), 'chromium',
+      match(user_agent, 'Version/[0-9]+.*Safari/'), 'webkit',
+      '') AS engine,
+    splitByChar('_', ja4)[2] AS ciphers, pseudo_order, ip_hash, user_agent,
+    req.ts AS seen
+  FROM ${this.table}
+  WHERE ${since(seconds)} AND ja4 != '' AND has(reasons, 'token_valid')
+)
+WHERE engine != '' AND ciphers != ''
+GROUP BY engine, ciphers, pseudo_order
+HAVING clients >= {min_clients:UInt32}
+ORDER BY clients DESC LIMIT {limit:UInt32}`,
+      params: { min_clients: minClients, limit },
+    };
+  }
+
   hostsLike(q: string, limit: number): Query {
     return {
       sql: `SELECT host, count() AS requests

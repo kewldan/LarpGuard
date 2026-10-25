@@ -413,6 +413,13 @@ AdminResponse ConfigView(const AdminContext& context) {
     crawlers.push_back(std::move(json));
   }
   nlohmann::json automation = nlohmann::json::array();
+  nlohmann::json browsers = nlohmann::json::array();
+  for (const BrowserProfile& profile : verdicts->library->browsers()) {
+    browsers.push_back({{"id", profile.id},
+                        {"engines", profile.engines},
+                        {"ja4_ciphers", profile.ja4_ciphers},
+                        {"h2_pseudo_orders", profile.h2_pseudo_orders}});
+  }
   for (const AutomationSignature& signature : verdicts->library->automation()) {
     automation.push_back({{"id", signature.id},
                           {"weight", signature.weight},
@@ -467,6 +474,7 @@ AdminResponse ConfigView(const AdminContext& context) {
            {"library",
             {{"version", verdicts->library->version()},
              {"profiles", verdicts->library->profile_count()},
+             {"browsers", browsers},
              {"weights", weights},
              {"automation", automation}}},
            {"model",

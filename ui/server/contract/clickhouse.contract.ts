@@ -583,4 +583,75 @@ describe.skipIf(!ready)('ClickHouse analytics contract', () => {
       { value: 'bbbb2222', requests: 1, asn: 13335 },
     ]);
   });
+
+  // Last: its rows are two days old, outside every window above.
+  it('libraryCandidates', async () => {
+    const chrome =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    const iphone =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0 Mobile/15E148 Safari/604.1';
+    const rows = [
+      ...[1, 2, 3].map((n) => ({
+        ua: chrome,
+        hash: `c${n}`,
+        ja4: 't13d1516h2_8daaf6152771_02713d6af862',
+        token: true,
+      })),
+      // Not passed the challenge: ignored.
+      {
+        ua: chrome,
+        hash: 'c9',
+        ja4: 't13d1516h2_ffffffffffff_x',
+        token: false,
+      },
+      ...[1, 2].map((n) => ({
+        ua: iphone,
+        hash: `i${n}`,
+        ja4: 't13d2014h2_a09f3c656075_y',
+        token: true,
+      })),
+      // curl that somehow holds a token: no engine.
+      {
+        ua: 'curl/8.0',
+        hash: 'k1',
+        ja4: 't13d0000h1_000000000000_z',
+        token: true,
+      },
+    ];
+    await root.insert({
+      table: `${DATABASE}.req`,
+      values: rows.map((row, i) => {
+        const { _ts, ...base } = event(900 + i, 2 * 24 * 60 * MINUTE, {
+          host: 'lib.test',
+          ip_hash: row.hash,
+          user_agent: row.ua,
+          ja4: row.ja4,
+          pseudo_order: 'm,a,s,p',
+          reasons: row.token ? ['token_valid'] : [],
+        });
+        return base;
+      }),
+      format: 'JSONEachRow',
+    });
+    const stacks = await analytics.libraryCandidates(7 * 86_400, 2);
+    expect(
+      stacks.map(({ first_seen, last_seen, ua_sample, ...s }) => s),
+    ).toEqual([
+      {
+        engine: 'chromium',
+        ciphers: '8daaf6152771',
+        pseudo_order: 'm,a,s,p',
+        clients: 3,
+        requests: 3,
+      },
+      {
+        engine: 'webkit',
+        ciphers: 'a09f3c656075',
+        pseudo_order: 'm,a,s,p',
+        clients: 2,
+        requests: 2,
+      },
+    ]);
+    expect(await analytics.libraryCandidates(86_400, 2)).toEqual([]);
+  });
 });

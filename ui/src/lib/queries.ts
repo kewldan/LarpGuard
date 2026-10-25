@@ -12,6 +12,8 @@ import { useSyncExternalStore } from 'react';
 import {
   attackSchema,
   auditSchema,
+  type CandidateRange,
+  candidatesSchema,
   crawlersSchema,
   type EnableAttack,
   type FingerprintKind,
@@ -55,6 +57,7 @@ export const keys = {
   request: (id: string) => ['request', id] as const,
   fingerprints: (kind: FingerprintKind, q: string) =>
     ['fingerprints', kind, q] as const,
+  candidates: (range: CandidateRange) => ['candidates', range] as const,
   rules: ['rules'] as const,
   lists: ['lists'] as const,
   limits: ['limits'] as const,
@@ -155,6 +158,21 @@ export function useFingerprints(kind: FingerprintKind, q: string) {
       getJson(fingerprintsSchema, '/api/fingerprints', { kind, q }, signal),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
+  });
+}
+
+export function useCandidates(range: CandidateRange) {
+  return useQuery({
+    queryKey: keys.candidates(range),
+    queryFn: ({ signal }) =>
+      getJson(
+        candidatesSchema,
+        '/api/fingerprints/candidates',
+        { range },
+        signal,
+      ),
+    placeholderData: keepPreviousData,
+    staleTime: 5 * 60_000,
   });
 }
 

@@ -135,6 +135,18 @@ export type ReadinessData = Omit<
   suspects: Omit<Readiness['suspects'][number], 'as_name'>[];
 };
 
+// One network stack of challenge-passing clients (libraryCandidates).
+export interface StackRow {
+  engine: string;
+  ciphers: string;
+  pseudo_order: string;
+  clients: number;
+  requests: number;
+  ua_sample: string;
+  first_seen: number;
+  last_seen: number;
+}
+
 export interface Analytics {
   verdictSeries(range: Range, now: number): Promise<VerdictPoint[]>;
   topHosts(
@@ -205,6 +217,7 @@ export interface Analytics {
     verified_or_listed: number;
   }>;
   readiness(host: string, seconds: number): Promise<ReadinessData>;
+  libraryCandidates(seconds: number, minClients: number): Promise<StackRow[]>;
   search(
     kind: 'host' | 'ja4' | 'ip_prefix' | 'ip_hash',
     q: string,
@@ -431,6 +444,21 @@ export function createAnalytics(database: string, run: Run): Analytics {
       );
       return row ?? null;
     },
+
+    libraryCandidates: (seconds, minClients) =>
+      run(
+        sql.libraryCandidates(seconds, minClients, 200),
+        z.object({
+          engine: z.string(),
+          ciphers: z.string(),
+          pseudo_order: z.string(),
+          clients: num,
+          requests: num,
+          ua_sample: z.string(),
+          first_seen: num,
+          last_seen: num,
+        }),
+      ),
 
     async readiness(host, seconds) {
       const flag = z.coerce.number().transform((value) => value !== 0);

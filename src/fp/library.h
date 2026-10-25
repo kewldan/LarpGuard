@@ -58,6 +58,7 @@ class FingerprintLibrary {
   }
   const std::string& version() const { return version_; }
   std::size_t profile_count() const { return browsers_.size(); }
+  const std::vector<BrowserProfile>& browsers() const { return browsers_; }
 
  private:
   std::string version_;

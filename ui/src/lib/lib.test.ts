@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { MOCK_CONFIG } from '../../server/dev/mock-config.ts';
 import { niceCeil, sparkPoints } from './chart-math.ts';
-import { limitYaml, perSecond, ruleYaml } from './config-yaml.ts';
+import {
+  candidateYaml,
+  limitYaml,
+  perSecond,
+  ruleYaml,
+} from './config-yaml.ts';
 import { diffLines, diffSegments } from './diff.ts';
 import { filterToText, parseFilterText } from './filter-text.ts';
 import {
@@ -152,6 +157,26 @@ describe('config snippets', () => {
     expect(limitYaml(limit, 0.5, 1)).toContain('rate: 30/m');
     expect(limitYaml({ ...limit, statuses: [401, 403] }, 1, 1)).toContain(
       'statuses: [401, 403]',
+    );
+    expect(
+      candidateYaml(
+        {
+          engine: 'chromium',
+          profile: 'chromium',
+          ciphers: 'aaaaaaaaaaaa',
+          pseudo_order: 'm,a,s,p',
+          new_ciphers: true,
+          new_pseudo_order: false,
+          clients: 3,
+          requests: 3,
+          ua_sample: '',
+          first_seen: 0,
+          last_seen: 0,
+        },
+        MOCK_CONFIG.library.browsers,
+      ),
+    ).toBe(
+      'browsers:\n  - id: chromium\n    engines: [chromium]\n    ja4_ciphers: [8daaf6152771, aaaaaaaaaaaa]\n    h2_pseudo_orders: ["m,a,s,p"]',
     );
   });
 });

@@ -15,7 +15,9 @@ import { parseConsoleConfig } from './config.ts';
 import type { Deps } from './deps.ts';
 import { createMockAdmin, MOCK_SHADOW_HOSTS } from './dev/mock-admin.ts';
 import { createMockAnalytics } from './dev/mock-analytics.ts';
+import { MOCK_CONFIG } from './dev/mock-config.ts';
 import { generateEvents, type MockEvent } from './dev/mock-data.ts';
+import { libraryCandidates } from './routes/fingerprints.ts';
 
 const ORIGIN = 'https://console.example.com';
 const SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
@@ -447,6 +449,48 @@ describe('settings', () => {
 });
 
 describe('data', () => {
+  it('offers only stacks the library lacks for their engine', async () => {
+    const row = {
+      engine: 'chromium',
+      ciphers: '8daaf6152771',
+      pseudo_order: 'm,a,s,p',
+      clients: 9,
+      requests: 40,
+      ua_sample: 'Chrome/131',
+      first_seen: 1,
+      last_seen: 2,
+    };
+    const browsers = MOCK_CONFIG.library.browsers;
+    const out = libraryCandidates(
+      [
+        row,
+        { ...row, ciphers: 'aaaaaaaaaaaa' },
+        { ...row, engine: 'firefox', pseudo_order: 'm,a,s,p' },
+        { ...row, engine: 'webkit', ciphers: 'a09f3c656075', pseudo_order: '' },
+      ],
+      browsers,
+    );
+    expect(
+      out.map((c) => [c.engine, c.new_ciphers, c.new_pseudo_order]),
+    ).toEqual([
+      ['chromium', true, false],
+      ['firefox', true, true],
+    ]);
+    const app = build();
+    const session = await signIn(app);
+    const response = await send(
+      app,
+      session,
+      'GET',
+      '/api/fingerprints/candidates?range=7d',
+    );
+    expect(response.status).toBe(200);
+    expect(
+      (await send(app, session, 'GET', '/api/fingerprints/candidates?range=1h'))
+        .status,
+    ).toBe(400);
+  });
+
   it('reports enforce readiness of a host', async () => {
     const app = build();
     const session = await signIn(app);

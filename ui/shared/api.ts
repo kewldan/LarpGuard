@@ -250,6 +250,17 @@ export const gatewayConfigSchema = z.object({
   library: z.object({
     version: z.string(),
     profiles: z.number(),
+    // Network stacks of real browsers, by engine (deploy/fingerprints.yaml).
+    browsers: z
+      .array(
+        z.object({
+          id: z.string(),
+          engines: z.array(z.string()),
+          ja4_ciphers: z.array(z.string()),
+          h2_pseudo_orders: z.array(z.string()),
+        }),
+      )
+      .default([]),
     weights: z.record(z.string(), z.number()),
     automation: z.array(
       z.object({
@@ -622,6 +633,36 @@ export const fingerprintsSchema = z.object({
   ),
 });
 export type Fingerprints = z.infer<typeof fingerprintsSchema>;
+
+// Network stacks of clients that passed the challenge which the library
+// does not know for their engine: candidates for deploy/fingerprints.yaml,
+// to be checked before adding (the library takes verified values only).
+export const CANDIDATE_RANGES = ['24h', '7d'] as const;
+export type CandidateRange = (typeof CANDIDATE_RANGES)[number];
+export const candidateQuerySchema = z.object({
+  range: z.enum(CANDIDATE_RANGES).default('7d'),
+});
+export const candidatesSchema = z.object({
+  range: z.enum(CANDIDATE_RANGES),
+  min_clients: z.number(),
+  candidates: z.array(
+    z.object({
+      engine: z.string(),
+      // Library profile of the engine; null when none covers it.
+      profile: z.string().nullable(),
+      ciphers: z.string(),
+      pseudo_order: z.string(),
+      new_ciphers: z.boolean(),
+      new_pseudo_order: z.boolean(),
+      clients: z.number(),
+      requests: z.number(),
+      ua_sample: z.string(),
+      first_seen: z.number(),
+      last_seen: z.number(),
+    }),
+  ),
+});
+export type Candidates = z.infer<typeof candidatesSchema>;
 
 // --- Rules -------------------------------------------------------------------
 

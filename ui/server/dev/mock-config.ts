@@ -135,6 +135,27 @@ export const MOCK_CONFIG: GatewayConfig = {
   library: {
     version: 'dev',
     profiles: 4,
+    // As in deploy/fingerprints.yaml.
+    browsers: [
+      {
+        id: 'chromium',
+        engines: ['chromium'],
+        ja4_ciphers: ['8daaf6152771'],
+        h2_pseudo_orders: ['m,a,s,p'],
+      },
+      {
+        id: 'firefox',
+        engines: ['firefox'],
+        ja4_ciphers: ['5b57614c22b0'],
+        h2_pseudo_orders: ['m,p,a,s'],
+      },
+      {
+        id: 'webkit',
+        engines: ['webkit'],
+        ja4_ciphers: ['a09f3c656075'],
+        h2_pseudo_orders: ['m,s,p,a', 'm,s,a,p'],
+      },
+    ],
     weights: {
       ua_tls_mismatch: 32,
       headless_user_agent: 28,

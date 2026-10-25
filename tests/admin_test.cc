@@ -472,6 +472,12 @@ TEST_F(AdminServerTest, ConfigView) {
   EXPECT_TRUE(body["throttle"].is_null());
   EXPECT_FALSE(body["library"]["weights"].empty());
   EXPECT_TRUE(body["library"]["automation"].is_array());
+  // Browser profiles, for the console's library candidates.
+  const nlohmann::json& browsers = body["library"]["browsers"];
+  ASSERT_EQ(browsers.size(), 3u);
+  EXPECT_EQ(browsers[0]["id"], "chromium");
+  EXPECT_EQ(browsers[0]["ja4_ciphers"], nlohmann::json({"8daaf6152771"}));
+  EXPECT_EQ(browsers[0]["h2_pseudo_orders"], nlohmann::json({"m,a,s,p"}));
   EXPECT_FALSE(body["crawlers"]["catalog"].empty());
   EXPECT_FALSE(body["model"]["loaded"]);
   // No secrets or paths.

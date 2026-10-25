@@ -349,6 +349,52 @@ export function createMockAnalytics(
         row ? { host: row.host, rps: row.requests / seconds } : null,
       );
     },
+    libraryCandidates(seconds, minClients) {
+      // The engine as sql.ts libraryCandidates derives it.
+      const engine = (ua: string) =>
+        /curl|wget|python|go-http|okhttp|java\/|node-fetch|axios|bot|spider|crawl/i.test(
+          ua,
+        )
+          ? ''
+          : /iPhone|iPad|iPod/.test(ua)
+            ? 'webkit'
+            : /(Firefox|FxiOS)\//.test(ua)
+              ? 'firefox'
+              : /(Chrome|Chromium|CriOS|Edg|OPR)\//.test(ua)
+                ? 'chromium'
+                : /Version\/\d+.*Safari\//.test(ua)
+                  ? 'webkit'
+                  : '';
+      const groups = new Map<string, MockEvent[]>();
+      for (const e of since(seconds)) {
+        if (!e.ja4 || !e.reasons.includes('token_valid')) continue;
+        const key = `${engine(e.user_agent)}|${e.ja4.split('_')[1] ?? ''}|${e.pseudo_order}`;
+        if (key.startsWith('|') || key.split('|')[1] === '') continue;
+        groups.set(key, [...(groups.get(key) ?? []), e]);
+      }
+      return Promise.resolve(
+        top(
+          [...groups]
+            .map(([key, events]) => {
+              const [eng = '', ciphers = '', pseudo_order = ''] =
+                key.split('|');
+              return {
+                engine: eng,
+                ciphers,
+                pseudo_order,
+                clients: new Set(events.map((e) => e.ip_hash)).size,
+                requests: events.length,
+                ua_sample: events[0]?.user_agent ?? '',
+                first_seen: Math.min(...events.map((e) => e.ts)),
+                last_seen: Math.max(...events.map((e) => e.ts)),
+              };
+            })
+            .filter((row) => row.clients >= minClients),
+          (row) => row.clients,
+          200,
+        ),
+      );
+    },
     readiness(host, seconds) {
       const list = since(seconds).filter((e) => e.host === host);
       const clientsOf = (events: MockEvent[]) =>

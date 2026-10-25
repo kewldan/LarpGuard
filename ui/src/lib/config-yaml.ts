@@ -1,7 +1,7 @@
 // Snippets of the gateway's YAML for changes the console cannot make itself
 // (the configuration file is the source of truth).
 
-import type { Limit } from '../../shared/api.ts';
+import type { Candidates, GatewayConfig, Limit } from '../../shared/api.ts';
 import type { Action } from '../../shared/domain.ts';
 
 export interface RuleDraft {
@@ -44,4 +44,28 @@ export function ruleYaml(draft: RuleDraft): string {
   ];
   if (draft.action === 'score') lines.push(`    score: ${draft.score}`);
   return `rules:\n${lines.join('\n')}`;
+}
+
+// The engine's profile with the candidate's values added.
+export function candidateYaml(
+  candidate: Candidates['candidates'][number],
+  browsers: GatewayConfig['library']['browsers'],
+): string {
+  const profile = browsers.find((b) => b.id === candidate.profile);
+  const ciphers = [...(profile?.ja4_ciphers ?? [])];
+  if (candidate.new_ciphers) ciphers.push(candidate.ciphers);
+  const orders = [...(profile?.h2_pseudo_orders ?? [])];
+  if (candidate.new_pseudo_order) orders.push(candidate.pseudo_order);
+  const lines = [
+    'browsers:',
+    `  - id: ${candidate.profile ?? candidate.engine}`,
+    `    engines: [${(profile?.engines ?? [candidate.engine]).join(', ')}]`,
+    `    ja4_ciphers: [${ciphers.join(', ')}]`,
+  ];
+  if (orders.length) {
+    lines.push(
+      `    h2_pseudo_orders: [${orders.map((o) => `"${o}"`).join(', ')}]`,
+    );
+  }
+  return lines.join('\n');
 }
