@@ -17,12 +17,22 @@ export function isAction(value: string): value is Action {
   return (ACTIONS as readonly string[]).includes(value);
 }
 
-// Seven actions fold into three tones ("03 Actions, classes, modes").
+// What a request's event records as its action: the actions above, and
+// rate_limit for a request a limit refused (429). Not a policy action.
+export const OUTCOMES = [...ACTIONS, 'rate_limit'] as const;
+export type Outcome = (typeof OUTCOMES)[number];
+
+export function isOutcome(value: string): value is Outcome {
+  return (OUTCOMES as readonly string[]).includes(value);
+}
+
+// Seven actions fold into three tones ("03 Actions, classes, modes"); a
+// rate-limit refusal counts as blocked.
 export type ActionTone = 'allowed' | 'challenged' | 'blocked';
 export type ActionStyle = 'soft' | 'outline' | 'filled';
 
 export const ACTION_LOOK: Record<
-  Action,
+  Outcome,
   { tone: ActionTone; style: ActionStyle }
 > = {
   allow: { tone: 'allowed', style: 'soft' },
@@ -32,11 +42,16 @@ export const ACTION_LOOK: Record<
   tarpit: { tone: 'challenged', style: 'outline' },
   decoy: { tone: 'blocked', style: 'outline' },
   block: { tone: 'blocked', style: 'filled' },
+  rate_limit: { tone: 'blocked', style: 'outline' },
 };
 
 // Actions counted as "blocked" and "challenged" in charts and KPIs: the
 // same split as the tones.
-export const BLOCKING_ACTIONS: readonly Action[] = ['block', 'decoy'];
+export const BLOCKING_ACTIONS: readonly Outcome[] = [
+  'block',
+  'decoy',
+  'rate_limit',
+];
 export const CHALLENGING_ACTIONS: readonly Action[] = [
   'challenge',
   'captcha',

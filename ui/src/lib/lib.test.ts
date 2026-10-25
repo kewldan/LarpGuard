@@ -73,6 +73,11 @@ describe('filter text', () => {
 
   it('refuses typos instead of widening the result', () => {
     expect(parseFilterText('hots:a').ok).toBe(false);
+    // Rate-limit refusals are recorded as their own action.
+    expect(parseFilterText('action:rate_limit')).toEqual({
+      ok: true,
+      filter: { action: ['rate_limit'] },
+    });
     expect(parseFilterText('action:explode').ok).toBe(false);
     expect(parseFilterText('asn:ASx').ok).toBe(false);
     expect(parseFilterText('score>200').ok).toBe(false);

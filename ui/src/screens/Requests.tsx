@@ -13,9 +13,9 @@ import type {
 } from '../../shared/api.ts';
 import {
   ACTION_LOOK,
-  type Action,
   type BotClass,
-  isAction,
+  isOutcome,
+  type Outcome,
   RANGES,
 } from '../../shared/domain.ts';
 import type { RequestsSearch } from '../app/search.ts';
@@ -207,7 +207,7 @@ function Facets({
           {facets[group.key].map((item) => {
             const on = group.selected.includes(item.value);
             const tone =
-              group.key === 'action' && isAction(item.value)
+              group.key === 'action' && isOutcome(item.value)
                 ? ACTION_LOOK[item.value].tone
                 : null;
             return (
@@ -862,7 +862,7 @@ export function Requests() {
   };
   const filter: FilterFields = {
     ...(search.host ? { host: search.host } : {}),
-    ...(search.action ? { action: split(search.action) as Action[] } : {}),
+    ...(search.action ? { action: split(search.action) as Outcome[] } : {}),
     ...(search.class ? { class: split(search.class) as BotClass[] } : {}),
     ...(search.reason ? { reason: search.reason } : {}),
     ...(search.asn !== undefined ? { asn: search.asn } : {}),

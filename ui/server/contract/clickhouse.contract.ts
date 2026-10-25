@@ -322,10 +322,10 @@ describe.skipIf(!ready)('ClickHouse analytics contract', () => {
     const hour = await analytics.verdictSeries('1h', NOW);
     const total = (key: 'allowed' | 'challenged' | 'blocked' | 'would_block') =>
       Math.round(sum(hour.map((point) => point[key])) * step);
-    expect(total('blocked')).toBe(1);
+    // A rate-limit refusal (429) counts as blocked, like block and decoy.
+    expect(total('blocked')).toBe(2);
     expect(total('challenged')).toBe(1);
-    // rate_limit is neither a blocking nor a challenging action.
-    expect(total('allowed')).toBe(5);
+    expect(total('allowed')).toBe(4);
     expect(total('would_block')).toBe(2);
     const week = await analytics.verdictSeries('7d', NOW);
     expect(week.length).toBeGreaterThan(0);
@@ -346,7 +346,7 @@ describe.skipIf(!ready)('ClickHouse analytics contract', () => {
     expect(reasons[0]).toEqual({ reason: 'ua_mismatch', requests: 2 });
     expect(reasons).toContainEqual({ reason: 'rule:admin', requests: 1 });
     expect(await analytics.topAsns('1h')).toEqual([
-      { asn: 13335, requests: 4, blocked: 1, challenged: 1 },
+      { asn: 13335, requests: 4, blocked: 2, challenged: 1 },
       { asn: 64500, requests: 2, blocked: 0, challenged: 0 },
       { asn: 15169, requests: 1, blocked: 0, challenged: 0 },
     ]);
@@ -508,9 +508,9 @@ describe.skipIf(!ready)('ClickHouse analytics contract', () => {
       {
         host: 'b.test',
         requests: 2,
-        blocked: 0,
+        blocked: 1,
         challenged: 1,
-        allowed: 1,
+        allowed: 0,
         would_block: 0,
       },
     ]);

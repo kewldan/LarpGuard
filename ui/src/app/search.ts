@@ -5,9 +5,9 @@ import { z } from 'zod';
 
 import { FINGERPRINT_KINDS } from '../../shared/api.ts';
 import {
-  ACTIONS,
   BOT_CLASSES,
   LIST_KINDS,
+  OUTCOMES,
   RANGES,
 } from '../../shared/domain.ts';
 
@@ -33,7 +33,7 @@ export const overviewSearch = z.object({
 export const requestsSearch = z.object({
   range: z.enum(RANGES).optional().catch(undefined),
   host: z.string().max(500).optional().catch(undefined),
-  action: csvOf(ACTIONS),
+  action: csvOf(OUTCOMES),
   class: csvOf(BOT_CLASSES),
   reason: z.string().max(200).optional().catch(undefined),
   asn: z.coerce.number().int().min(1).optional().catch(undefined),

@@ -3,15 +3,15 @@
 // so a typo never silently widens the result.
 
 import {
-  ACTIONS,
-  type Action,
   BOT_CLASSES,
   type BotClass,
+  OUTCOMES,
+  type Outcome,
 } from '../../shared/domain.ts';
 
 export interface FilterFields {
   host?: string;
-  action?: Action[];
+  action?: Outcome[];
   class?: BotClass[];
   reason?: string;
   asn?: number;
@@ -79,10 +79,10 @@ export function parseFilterText(text: string): ParseResult {
       case 'action': {
         const actions = value.split(',');
         const bad = actions.find(
-          (a) => !(ACTIONS as readonly string[]).includes(a),
+          (a) => !(OUTCOMES as readonly string[]).includes(a),
         );
         if (bad) return { ok: false, error: `unknown action "${bad}"` };
-        filter.action = actions as Action[];
+        filter.action = actions as Outcome[];
         break;
       }
       case 'class': {

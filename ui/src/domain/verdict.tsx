@@ -2,11 +2,11 @@
 // modes"): seven actions fold into three tones; filled is terminal, soft
 // is friction, dashed is degraded but passing.
 
-import { ACTION_LOOK, type HostMode, isAction } from '../../shared/domain.ts';
+import { ACTION_LOOK, type HostMode, isOutcome } from '../../shared/domain.ts';
 import styles from './verdict.module.css';
 
 function actionClass(action: string): string {
-  if (!isAction(action)) return styles.neutral ?? '';
+  if (!isOutcome(action)) return styles.neutral ?? '';
   const look = ACTION_LOOK[action];
   if (action === 'block') return styles.block ?? '';
   if (action === 'decoy') return styles.decoy ?? '';

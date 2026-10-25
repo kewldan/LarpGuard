@@ -11,11 +11,13 @@ import {
   HOST_MODES,
   LIST_KINDS,
   MODE_SOURCES,
+  OUTCOMES,
   RANGES,
   ROLES,
 } from './domain.ts';
 
 export const actionSchema = z.enum(ACTIONS);
+export const outcomeSchema = z.enum(OUTCOMES);
 export const botClassSchema = z.enum(BOT_CLASSES);
 export const hostModeSchema = z.enum(HOST_MODES);
 export const modeSourceSchema = z.enum(MODE_SOURCES);
@@ -488,7 +490,7 @@ const csv = z
 export const requestFilterSchema = z.object({
   range: rangeSchema.default('1h'),
   host: csv.optional(),
-  action: csv.pipe(z.array(actionSchema)).optional(),
+  action: csv.pipe(z.array(outcomeSchema)).optional(),
   class: csv.pipe(z.array(botClassSchema)).optional(),
   reason: z.string().max(200).optional(),
   asn: z.coerce.number().int().min(0).max(4294967295).optional(),
