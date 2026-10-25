@@ -676,6 +676,9 @@ rules:
     when: 'path ~ "/status/*"'
     action: score
     score: -100
+  - name: query-and-cookie
+    when: 'path ~ "/qc*" and query("mode") == "x" and not has_cookie("pass")'
+    action: block
   - name: asn-rule
     when: 'asn == 64500 and path ~ "/asn-block*"'
     action: block
@@ -1321,6 +1324,14 @@ whoami: true
         status, body = admin_call(admin_socket, "POST", "/reload")
         expect(status == 200, body)
 
+    def rules_on_query_and_cookies():
+        status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/qc?mode=x")
+        expect(status == 403, status)
+        for path, extra in [("/qc?mode=y", b""), ("/qc?modex=x", b""),
+                            ("/qc?mode=x", b"Cookie: a=1; pass=\r\n")]:
+            status, _, _ = h1_get(https_port, "www.a.test", ca_a, path, extra)
+            expect(status == 200, (path, extra, status))
+
     def rate_limits_on_responses():
         def get(path, expected):
             status, headers, _ = h1_get(https_port, "www.a.test", ca_a, path)
@@ -1958,6 +1969,7 @@ whoami: true
         ("rate limits: 429, shadow, API keys, allow bypass", rate_limits),
         ("rate limits on origin responses: only 401s count",
          rate_limits_on_responses),
+        ("rules: query() and has_cookie()", rules_on_query_and_cookies),
         ("docker labels: mode, limits, passthrough, off, precedence, reload",
          docker_labels),
         ("admin API: status, policy, lists, decisions, console modes",

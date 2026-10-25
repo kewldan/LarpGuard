@@ -35,26 +35,6 @@ bool IsKnownComponent(std::string_view component) {
          (component.starts_with("cookie:") && component.size() > 7);
 }
 
-std::string_view CookieValue(const HttpRequest& request,
-                             std::string_view name) {
-  for (const auto& [header, value] : request.headers) {
-    if (header != "cookie") continue;
-    std::string_view rest = value;
-    while (!rest.empty()) {
-      const std::size_t end = rest.find(';');
-      std::string_view field = rest.substr(0, end);
-      while (!field.empty() && field.front() == ' ') field.remove_prefix(1);
-      const std::size_t equals = field.find('=');
-      if (equals != std::string_view::npos && field.substr(0, equals) == name) {
-        return field.substr(equals + 1);
-      }
-      if (end == std::string_view::npos) break;
-      rest.remove_prefix(end + 1);
-    }
-  }
-  return {};
-}
-
 }  // namespace
 
 bool ParseRate(std::string_view text, int64_t* count,
@@ -205,7 +185,8 @@ std::string RateLimitSet::BuildKey(const Limit& limit,
       value = request.request->Header(std::string_view(component).substr(7));
     } else if (component.starts_with("cookie:")) {
       value =
-          CookieValue(*request.request, std::string_view(component).substr(7));
+          FindCookie(*request.request, std::string_view(component).substr(7))
+              .value_or(std::string_view());
     }
     if (value.empty()) return {};
     key.push_back(kSeparator);

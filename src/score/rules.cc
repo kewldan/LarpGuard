@@ -108,6 +108,10 @@ enum class NodeKind {
   kField,
   kHeader,
   kHasHeader,
+  kCookie,
+  kHasCookie,
+  kQuery,
+  kHasQuery,
   kCidr,
   kNot,
   kAnd,
@@ -483,7 +487,9 @@ class Parser {
       node->flag = name == "true";
       return node;
     }
-    if (name == "header" || name == "has_header" || name == "cidr") {
+    if (name == "header" || name == "has_header" || name == "cookie" ||
+        name == "has_cookie" || name == "query" || name == "has_query" ||
+        name == "cidr") {
       Next();
       if (Peek().kind != TokenKind::kLParen) return Fail(error, "expected '('");
       Next();
@@ -499,11 +505,19 @@ class Parser {
         if (!Network::Parse(argument, &node->network)) {
           return Fail(error, std::format("bad network '{}'", argument));
         }
-      } else {
+      } else if (name == "header" || name == "has_header") {
         node->kind =
             name == "header" ? NodeKind::kHeader : NodeKind::kHasHeader;
         node->type = name == "header" ? Type::kString : Type::kBool;
         node->text = Lowercase(argument);
+      } else {
+        // Cookie and parameter names are case-sensitive.
+        const bool cookie = name.ends_with("cookie");
+        const bool has = name.starts_with("has_");
+        node->kind = cookie ? (has ? NodeKind::kHasCookie : NodeKind::kCookie)
+                            : (has ? NodeKind::kHasQuery : NodeKind::kQuery);
+        node->type = has ? Type::kBool : Type::kString;
+        node->text = argument;
       }
       return node;
     }
@@ -635,6 +649,18 @@ Value Evaluate(const Node& node, const RuleContext& context) {
     case NodeKind::kHasHeader:
       value.flag = context.request->HasHeader(node.text);
       return value;
+    case NodeKind::kCookie:
+      value.text = FindCookie(*context.request, node.text).value_or("");
+      return value;
+    case NodeKind::kHasCookie:
+      value.flag = FindCookie(*context.request, node.text).has_value();
+      return value;
+    case NodeKind::kQuery:
+      value.text = FindQueryParam(context.query, node.text).value_or("");
+      return value;
+    case NodeKind::kHasQuery:
+      value.flag = FindQueryParam(context.query, node.text).has_value();
+      return value;
     case NodeKind::kCidr:
       value.flag = node.network.Contains(context.ip);
       return value;
@@ -732,6 +758,18 @@ std::vector<std::string> Condition::References() const {
         break;
       case NodeKind::kHasHeader:
         names.emplace("has_header()");
+        break;
+      case NodeKind::kCookie:
+        names.emplace("cookie()");
+        break;
+      case NodeKind::kHasCookie:
+        names.emplace("has_cookie()");
+        break;
+      case NodeKind::kQuery:
+        names.emplace("query()");
+        break;
+      case NodeKind::kHasQuery:
+        names.emplace("has_query()");
         break;
       case NodeKind::kCidr:
         names.emplace("cidr()");

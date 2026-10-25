@@ -849,7 +849,8 @@ export function Rules() {
                   Expression
                 </span>
                 <span style={{ fontSize: 11.5, color: 'var(--color-text-3)' }}>
-                  and · or · not · == != &lt; &gt; ~ in · header() cidr()
+                  and · or · not · == != &lt; &gt; ~ in · header() cookie()
+                  query() cidr()
                 </span>
               </div>
               <Editor

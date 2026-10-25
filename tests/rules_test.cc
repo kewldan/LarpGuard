@@ -91,6 +91,23 @@ TEST_F(RulesTest, GlobInHeadersAndCidr) {
   EXPECT_TRUE(Eval(R"(cidr("::/0"))"));
 }
 
+TEST_F(RulesTest, CookiesAndQueryParameters) {
+  request_.headers.emplace_back("cookie", "theme=dark; session=s9; empty=");
+  context_.query = "id=42&debug&q=a%20b";
+  EXPECT_TRUE(Eval(R"(cookie("session") == "s9")"));
+  EXPECT_TRUE(Eval(R"(has_cookie("empty") and cookie("empty") == "")"));
+  EXPECT_FALSE(Eval(R"(has_cookie("Session"))"));  // Case-sensitive.
+  EXPECT_TRUE(Eval(R"(cookie("absent") == "" and not has_cookie("absent"))"));
+  EXPECT_TRUE(Eval(R"(query("id") == "42")"));
+  EXPECT_TRUE(Eval(R"(has_query("debug") and query("debug") == "")"));
+  EXPECT_TRUE(Eval(R"(query("q") == "a%20b")"));  // As sent.
+  EXPECT_FALSE(Eval(R"(has_query("i"))"));
+  context_.query = "";
+  EXPECT_FALSE(Eval(R"(has_query("id"))"));
+  EXPECT_NE(CompileError("cookie(name) == \"\"").find("string literal"),
+            std::string::npos);
+}
+
 TEST_F(RulesTest, AsnAndSignedAgentFields) {
   context_.asn = 16509;
   context_.asn_org = "AMAZON-02";
@@ -123,12 +140,13 @@ TEST_F(RulesTest, References) {
   std::string error;
   const auto condition = Condition::Compile(
       R"(score > 40 and (host == "a" or has_header("x-a")) and )"
-      R"(not cidr("10.0.0.0/8") and header("x-b") == "" and score < 90)",
+      R"(not cidr("10.0.0.0/8") and header("x-b") == "" and score < 90 and )"
+      R"(has_cookie("s") and query("q") == "")",
       &error);
   ASSERT_NE(condition, nullptr) << error;
   EXPECT_EQ(condition->References(),
-            (std::vector<std::string>{"cidr()", "has_header()", "header()",
-                                      "host", "score"}));
+            (std::vector<std::string>{"cidr()", "has_cookie()", "has_header()",
+                                      "header()", "host", "query()", "score"}));
 }
 
 TEST_F(RulesTest, StringEscapes) {

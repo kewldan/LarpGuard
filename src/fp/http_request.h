@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -31,6 +32,16 @@ struct HttpRequest {
   // All headers with lowercase names, in wire order.
   std::vector<std::pair<std::string, std::string>> headers;
 };
+
+// Value of a cookie from the Cookie header(s); nullopt when absent (an
+// empty value is present).
+std::optional<std::string_view> FindCookie(const HttpRequest& request,
+                                           std::string_view name);
+
+// Value of a query parameter in `query` (after '?', as sent: not
+// percent-decoded); nullopt when absent. "?a" has "a" with "".
+std::optional<std::string_view> FindQueryParam(std::string_view query,
+                                               std::string_view name);
 
 using HttpRequestCallback = std::function<void(HttpRequest&&)>;
 

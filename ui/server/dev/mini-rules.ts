@@ -1,7 +1,8 @@
 // A small evaluator of the gateway's rule language for the development
 // mock only (the real one is src/score/rules.cc and answers
 // POST /rules/test). Same grammar and field types; header(),
-// has_header() and cidr() see empty values.
+// has_header(), cookie(), has_cookie(), query() and has_query() see empty
+// values, cidr() the event's prefix.
 
 import type { RuleSampleEvent } from '../gateway/admin.ts';
 
@@ -297,7 +298,17 @@ class Parser {
           eval: () => token.text === 'true',
         };
       }
-      if (['header', 'has_header', 'cidr'].includes(token.text)) {
+      if (
+        [
+          'header',
+          'has_header',
+          'cookie',
+          'has_cookie',
+          'query',
+          'has_query',
+          'cidr',
+        ].includes(token.text)
+      ) {
         if (this.next().text !== '(')
           throw new RuleError(token.position, "expected '('");
         const argument = this.next();
@@ -315,9 +326,9 @@ class Parser {
             eval: (e) => e.ip_prefix.startsWith(stem),
           };
         }
-        return token.text === 'header'
-          ? { type: 'string', references: [name], eval: () => '' }
-          : { type: 'bool', references: [name], eval: () => false };
+        return token.text.startsWith('has_')
+          ? { type: 'bool', references: [name], eval: () => false }
+          : { type: 'string', references: [name], eval: () => '' };
       }
       const type = FIELDS[token.text];
       if (!type)

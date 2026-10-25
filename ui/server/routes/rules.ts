@@ -25,6 +25,10 @@ const SHOWN_SAMPLES = 12;
 const APPROXIMATE = new Set([
   'header()',
   'has_header()',
+  'cookie()',
+  'has_cookie()',
+  'query()',
+  'has_query()',
   'alpn',
   'cidr()',
   'path',

@@ -18,8 +18,9 @@ namespace bot_shield {
 struct RuleContext {
   const HttpRequest* request = nullptr;
   asio::ip::address ip;
-  std::string_view host;  // Normalized, no port.
-  std::string_view path;  // Without the query string.
+  std::string_view host;   // Normalized, no port.
+  std::string_view path;   // Without the query string.
+  std::string_view query;  // After '?', as sent; never in events.
   std::string_view sni;
   std::string_view alpn;
   std::string_view ja4;

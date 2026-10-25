@@ -1176,6 +1176,10 @@ class ConnectionObserver {
     rules.ip = record_.peer;
     rules.host = host;
     rules.path = path_and_query.substr(0, path_and_query.find('?'));
+    if (const std::size_t question = path_and_query.find('?');
+        question != std::string_view::npos) {
+      rules.query = path_and_query.substr(question + 1);
+    }
     rules.sni = record_.server_name;
     rules.alpn = record_.alpn;
     rules.ja4 = input.ja4;

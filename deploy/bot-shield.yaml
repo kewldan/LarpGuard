@@ -104,6 +104,9 @@ rules: []
 #  - name: monitoring
 #    when: 'cidr("10.0.0.0/8") and header("x-monitor") == "secret"'
 #    action: allow
+#  - name: debug-param
+#    when: 'has_query("debug") and not has_cookie("session")'
+#    action: block
 #  - name: admin-scrapers
 #    when: 'path ~ "/admin*" and class != "human"'
 #    action: block
