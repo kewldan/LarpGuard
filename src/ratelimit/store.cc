@@ -61,6 +61,12 @@ GcraResult RateLimitStore::Peek(std::string_view key, const GcraParams& params,
   return GcraCheck(&tat, now_ns, params);
 }
 
+void RateLimitStore::Forget(std::string_view key) {
+  Shard& shard = shards_[ShardOf(key, kShards)];
+  std::scoped_lock lock(shard.mutex);
+  shard.tats.erase(std::string(key));
+}
+
 std::size_t RateLimitStore::size() const {
   std::size_t total = 0;
   for (const Shard& shard : shards_) {

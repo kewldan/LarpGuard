@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -13,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "admin/attack.h"
@@ -163,23 +165,110 @@ TEST(AttackModeTest, HostsWildcardsAndExpiry) {
   AttackMode attack(0, 600);
   EXPECT_FALSE(attack.Active("shop.test", kNow));
   std::string error;
-  ASSERT_TRUE(
-      attack.Enable({"Shop.Test", "admin", kNow, kNow + 60}, kNow, &error))
+  ASSERT_TRUE(attack.Enable({.host = "Shop.Test",
+                             .source = "admin",
+                             .since = kNow,
+                             .until = kNow + 60},
+                            kNow, &error))
       << error;
-  ASSERT_TRUE(attack.Enable({"*.api.test", "admin", kNow, 0}, kNow, &error));
+  ASSERT_TRUE(attack.Enable(
+      {.host = "*.api.test", .source = "admin", .since = kNow, .until = 0},
+      kNow, &error));
   EXPECT_TRUE(attack.Active("shop.test", kNow));
   EXPECT_TRUE(attack.Active("v1.api.test", kNow));
   EXPECT_FALSE(attack.Active("other.test", kNow));
   // Expired entries stop matching and disappear.
   EXPECT_FALSE(attack.Active("shop.test", kNow + 60));
   EXPECT_EQ(attack.Entries(kNow + 60).size(), 1u);
-  EXPECT_FALSE(attack.Enable({"bad host", "admin", kNow, 0}, kNow, &error));
+  EXPECT_FALSE(attack.Enable(
+      {.host = "bad host", .source = "admin", .since = kNow, .until = 0}, kNow,
+      &error));
 
-  ASSERT_TRUE(attack.Enable({"*", "admin", kNow, 0}, kNow, &error));
+  ASSERT_TRUE(
+      attack.Enable({.host = "*", .source = "admin", .since = kNow, .until = 0},
+                    kNow, &error));
   EXPECT_TRUE(attack.Active("other.test", kNow));
   EXPECT_TRUE(attack.Disable("*"));
   EXPECT_FALSE(attack.Disable("*"));
   EXPECT_FALSE(attack.Active("other.test", kNow));
+}
+
+TEST(AttackModeTest, PicksTheNarrowestDominantSignature) {
+  std::vector<AttackSample> samples;
+  EXPECT_FALSE(DominantSignature(samples));  // Too few.
+  for (int i = 0; i < 40; ++i) {
+    samples.push_back({std::format("198.51.{}.0/24", i), "t13d_chrome", 64500});
+  }
+  // Spread over networks, one AS: the AS.
+  auto signature = DominantSignature(samples);
+  ASSERT_TRUE(signature);
+  EXPECT_EQ(*signature, (std::pair<std::string, std::string>{"asn", "64500"}));
+  // One network wins over its AS.
+  for (auto& sample : samples) sample.ip_prefix = "203.0.113.0/24";
+  signature = DominantSignature(samples);
+  ASSERT_TRUE(signature);
+  EXPECT_EQ(signature->first, "ip_prefix");
+  // Spread over networks and ASes, one TLS stack: the JA4.
+  for (int i = 0; i < 40; ++i) {
+    samples[i].ip_prefix = std::format("198.51.{}.0/24", i);
+    samples[i].asn = 64000 + static_cast<uint32_t>(i);
+  }
+  signature = DominantSignature(samples);
+  ASSERT_TRUE(signature);
+  EXPECT_EQ(signature->first, "ja4");
+  // Nothing shared: the whole host.
+  for (int i = 0; i < 40; ++i) samples[i].ja4 = std::format("t13d_{}", i);
+  EXPECT_FALSE(DominantSignature(samples));
+}
+
+TEST(AttackModeTest, NarrowsToTheAttackersThenWidens) {
+  RateLimitStore store;
+  AttackMode attack(10, 600);
+  constexpr int64_t kSecond = 1'000'000'000;
+  int64_t now_ns = kSecond;
+  // A flood from one network (90 %) among ordinary clients.
+  const auto subject = [](int i) {
+    return i % 10 == 0 ? AttackSubject{.host = "shop.test",
+                                       .ip_prefix = "192.0.2.0/24",
+                                       .ja4 = "t13d_chrome",
+                                       .asn = 64501}
+                       : AttackSubject{.host = "shop.test",
+                                       .ip_prefix = "203.0.113.0/24",
+                                       .ja4 = "t13d_go",
+                                       .asn = 64500};
+  };
+  bool switched = false;
+  int i = 0;
+  for (; !switched && i < 2000; ++i) {
+    const AttackSubject who = subject(i);
+    if (attack.Active(who, kNow)) continue;
+    switched = attack.CountRequest(who, kNow, now_ns, &store);
+    now_ns += kSecond / 40;
+  }
+  ASSERT_TRUE(switched);
+  std::vector<AttackEntry> entries = attack.Entries(kNow);
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].kind, "ip_prefix");
+  EXPECT_EQ(entries[0].value, "203.0.113.0/24");
+  // Only the attackers are challenged; the host as such is not.
+  EXPECT_TRUE(attack.Active(subject(1), kNow));
+  EXPECT_FALSE(attack.Active(subject(0), kNow));
+  EXPECT_FALSE(attack.Active("shop.test", kNow));
+
+  // The flood goes on from everywhere: the rest trips again, up to the
+  // whole host.
+  for (int step = 0; step < 4000 && !attack.Active("shop.test", kNow); ++step) {
+    const std::string prefix = std::format("10.{}.0.0/24", step);
+    const std::string ja4 = std::format("t13d_{}", step);
+    const AttackSubject who{
+        .host = "shop.test", .ip_prefix = prefix, .ja4 = ja4, .asn = 0};
+    if (attack.Active(who, kNow)) continue;
+    attack.CountRequest(who, kNow, now_ns, &store);
+    now_ns += kSecond / 40;
+  }
+  EXPECT_TRUE(attack.Active("shop.test", kNow));
+  EXPECT_TRUE(attack.Disable("shop.test"));
+  EXPECT_TRUE(attack.Entries(kNow).empty());  // Every entry of the host.
 }
 
 TEST(AttackModeTest, SwitchesOnAboveAutoRps) {
@@ -690,6 +779,24 @@ TEST_F(AdminServerTest, AttackMode) {
   EXPECT_EQ(response.body["entries"][0]["source"], "admin");
   EXPECT_FALSE(response.body["entries"][1].contains("until"));
   EXPECT_EQ(Call("GET", "/status").body["attack_entries"], 2);
+
+  // An automatic entry for one network carries its signature.
+  std::string error;
+  ASSERT_TRUE(attack_.Enable({.host = "api.test",
+                              .source = "auto",
+                              .since = kNow,
+                              .until = kNow + 600,
+                              .kind = "ip_prefix",
+                              .value = "203.0.113.0/24"},
+                             kNow, &error))
+      << error;
+  response = Call("GET", "/attack");
+  ASSERT_EQ(response.body["entries"].size(), 3u);
+  EXPECT_EQ(
+      response.body["entries"][2]["signature"],
+      (nlohmann::json{{"kind", "ip_prefix"}, {"value", "203.0.113.0/24"}}));
+  EXPECT_FALSE(response.body["entries"][0].contains("signature"));
+  EXPECT_EQ(Call("DELETE", "/attack/api.test").status, 200);
 
   EXPECT_EQ(Call("POST", "/attack", "{bad").status, 400);
   EXPECT_EQ(Call("POST", "/attack", R"({"host":"a b"})").status, 400);

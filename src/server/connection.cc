@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "action/actions.h"
+#include "admin/attack.h"
 #include "admin/lists.h"
 #include "behavior/behavior.h"
 #include "challenge/captcha.h"
@@ -361,8 +362,13 @@ class ConnectionObserver {
     // class trips the automatic switch.
     bool under_attack = false;
     if (context_.attack != nullptr && context_.challenger != nullptr) {
-      under_attack = context_.attack->Active(host, now) ||
-                     context_.attack->CountRequest(host, now, SteadyNanos(),
+      if (attack_prefix_.empty()) attack_prefix_ = IpPrefix(record_.peer);
+      const AttackSubject subject{.host = host,
+                                  .ip_prefix = attack_prefix_,
+                                  .ja4 = record_.ja4,
+                                  .asn = record_.asn};
+      under_attack = context_.attack->Active(subject, now) ||
+                     context_.attack->CountRequest(subject, now, SteadyNanos(),
                                                    context_.rate_limit_store);
     }
     const HttpRequest& request = exchange.observed;
@@ -1319,6 +1325,8 @@ class ConnectionObserver {
   bool asn_hosting_ = false;
   // Ids of the reputation lists holding the client (LookupThreatLists).
   std::vector<std::string> threat_lists_;
+  // The client's network as in events, for attack signatures.
+  std::string attack_prefix_;
   asio::any_io_executor executor_;
   int request_sequence_ = 0;
 };

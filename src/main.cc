@@ -502,10 +502,17 @@ int Run(int argc, char** argv) {
   services.reload = reload;
   services.on_attack_auto = [&notifier,
                              &config](const bot_shield::AttackEntry& entry) {
+    const std::string who =
+        entry.kind.empty() ? entry.host
+                           : std::format("{} {} on {}",
+                                         entry.kind == "ip_prefix" ? "network"
+                                         : entry.kind == "asn"     ? "AS"
+                                                                   : "JA4",
+                                         entry.value, entry.host);
     notifier.Send(
         {"attack_auto", entry.host,
          std::format("under-attack mode on for {} for {}: over {} requests/s",
-                     entry.host,
+                     who,
                      bot_shield::FormatDuration(
                          std::chrono::seconds(entry.until - entry.since)),
                      config.attack_auto_rps)});

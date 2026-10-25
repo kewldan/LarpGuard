@@ -125,8 +125,17 @@ function RateChart({
   );
 }
 
+const SIGNATURE_NAMES = { ip_prefix: 'network', asn: 'AS', ja4: 'JA4' };
+
 function entryLabel(entry: AttackEntry): string {
-  return entry.host === '*' ? 'all hosts' : entry.host;
+  const host = entry.host === '*' ? 'all hosts' : entry.host;
+  return entry.signature
+    ? `${host} · ${SIGNATURE_NAMES[entry.signature.kind]} ${entry.signature.value}`
+    : host;
+}
+
+function entryKey(entry: AttackEntry): string {
+  return `${entry.host}|${entry.signature?.kind ?? ''}|${entry.signature?.value ?? ''}`;
 }
 
 export function Attack() {
@@ -162,7 +171,7 @@ export function Attack() {
         className: styles.heroOn,
         title: 'Attack mode on',
         short: 'On',
-        sub: `${primary?.source === 'auto' ? 'Switched on automatically' : 'Switched on by an operator'} for ${data.entries.map(entryLabel).join(', ')}. Every client without a valid token is being challenged.`,
+        sub: `${primary?.source === 'auto' ? 'Switched on automatically' : 'Switched on by an operator'} for ${data.entries.map(entryLabel).join(', ')}. ${data.entries.every((entry) => entry.signature) ? 'Only clients with that signature' : 'Every client'} without a valid token ${data.entries.every((entry) => entry.signature) ? 'are' : 'is'} being challenged.`,
         label: left !== null ? 'Time left' : 'Active for',
         value:
           left !== null
@@ -322,7 +331,7 @@ export function Attack() {
               >
                 {data.entries.map((entry) => (
                   <div
-                    key={entry.host}
+                    key={entryKey(entry)}
                     style={{
                       display: 'flex',
                       flexWrap: 'wrap',
@@ -348,7 +357,7 @@ export function Attack() {
                     </span>
                     {canOperate ? (
                       <>
-                        {entry.until ? (
+                        {entry.until && !entry.signature ? (
                           <Button
                             size="sm"
                             onClick={() => {

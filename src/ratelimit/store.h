@@ -34,6 +34,8 @@ class RateLimitStore {
   // that count responses, not requests).
   GcraResult Peek(std::string_view key, const GcraParams& params,
                   int64_t now_ns) const;
+  // Drops a key: its next request starts from a full burst.
+  void Forget(std::string_view key);
 
   std::size_t size() const;
   uint64_t untracked() const { return untracked_.load(); }

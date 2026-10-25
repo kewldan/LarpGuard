@@ -264,6 +264,9 @@ nlohmann::json AttackToJson(const AttackEntry& entry) {
   nlohmann::json json = {
       {"host", entry.host}, {"source", entry.source}, {"since", entry.since}};
   if (entry.until != 0) json["until"] = entry.until;
+  if (!entry.kind.empty()) {
+    json["signature"] = {{"kind", entry.kind}, {"value", entry.value}};
+  }
   return json;
 }
 

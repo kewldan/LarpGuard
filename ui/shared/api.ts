@@ -880,6 +880,11 @@ export const attackEntrySchema = z.object({
   source: z.string(),
   since: z.number(),
   until: z.number().optional(),
+  // Only clients with this signature (automatic, from the attack itself);
+  // absent: every client of the host.
+  signature: z
+    .object({ kind: z.enum(['ip_prefix', 'asn', 'ja4']), value: z.string() })
+    .optional(),
 });
 export type AttackEntry = z.infer<typeof attackEntrySchema>;
 

@@ -2132,9 +2132,10 @@ metrics:
             attack = wait_event("attack_auto")[0]
             expect(attack["host"] == "a.test", attack)
             expect(attack["name"] == "e2e", attack)
+            # One client floods: only its network is put under attack.
             expect(attack["text"].startswith(
-                "bot-shield e2e: under-attack mode on for a.test for 1m"),
-                attack)
+                "bot-shield e2e: under-attack mode on for network "
+                "127.0.0.0/24 on a.test for 1m"), attack)
             expect(isinstance(attack["ts"], int), attack)
 
             # A broken file on SIGHUP: rejected, and the operator hears.
