@@ -18,6 +18,7 @@ import http.server
 import socketserver
 import json
 import os
+import random
 import re
 import shutil
 import signal
@@ -81,10 +82,27 @@ def write_atomic(path, data):
     os.replace(tmp, path)
 
 
+_issued_ports = set()
+
+
 def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    """A port free for TCP and UDP, below the ephemeral ranges (macOS
+    49152+, Linux 32768+): a port the kernel handed out with bind(0) could
+    be taken by one of the tests' outgoing connections before the gateway
+    binds it (about one start in ten)."""
+    for _ in range(1000):
+        port = random.randint(20000, 32000)
+        if port in _issued_ports:
+            continue
+        try:
+            for kind in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
+                with socket.socket(socket.AF_INET, kind) as s:
+                    s.bind(("127.0.0.1", port))
+        except OSError:
+            continue
+        _issued_ports.add(port)
+        return port
+    raise RuntimeError("no free port")
 
 
 def wait_port(port, timeout=10):
