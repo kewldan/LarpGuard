@@ -1543,6 +1543,14 @@ whoami: true
             "when": 'path ~ "/admin*"',
             "samples": [{"path": "/admin/x"}, {"path": "/home"}]})
         expect(status == 200 and body["matched"] == [0], body)
+        # A body that arrives after the head (the console's samples): the
+        # request line once pointed into the buffer the body reallocated.
+        samples = [{"path": f"/page/{i}", "user_agent": "x" * 40}
+                   for i in range(2000)] + [{"path": "/admin/y"}]
+        status, body = admin_call(admin_socket, "POST", "/rules/test", {
+            "when": 'path ~ "/admin*"', "samples": samples})
+        expect(status == 200 and body["matched"] == [2000],
+               (status, str(body)[:200]))
 
     # --- Proxy over HTTP/2 (curl) -------------------------------------------
 

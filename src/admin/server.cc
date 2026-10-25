@@ -668,7 +668,8 @@ asio::awaitable<void> HandleConnection(stream_protocol::socket socket,
   if (ec) co_return;
 
   const std::string_view head = std::string_view(data).substr(0, head_size);
-  const std::string_view line = head.substr(0, head.find("\r\n"));
+  // A copy: reading the body below may reallocate `data` (and `head`).
+  const std::string line(head.substr(0, head.find("\r\n")));
   const std::size_t first_space = line.find(' ');
   const std::size_t second_space = line.find(' ', first_space + 1);
   std::size_t content_length = 0;
