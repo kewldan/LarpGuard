@@ -20,6 +20,7 @@
 
 #include "common/host.h"
 #include "common/log.h"
+#include "net/geoip.h"
 #include "net/http_client.h"
 #include "net/threat_lists.h"
 #include "ratelimit/limits.h"
@@ -415,6 +416,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "web_bot_auth",
                   "asn",
                   "threat_lists",
+                  "geoip",
                   "captcha",
                   "xdp",
                   "data_dir",
@@ -939,6 +941,23 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
         return false;
       }
       config->web_bot_auth_trusted = ReadStrings(trusted);
+    }
+  }
+  if (const YAML::Node geoip = root["geoip"]) {
+    if (!CheckKeys(geoip, "geoip", {"url", "refresh"}, error) ||
+        !ReadDuration(geoip, "geoip", "refresh", &config->geoip_refresh,
+                      error)) {
+      return false;
+    }
+    if (geoip["url"]) {
+      config->geoip_url =
+          geoip["url"].IsNull() ? "" : geoip["url"].as<std::string>();
+      ParsedUrl url;
+      if (!config->geoip_url.empty() &&
+          !ParseUrl(GeoUrlForMonth(config->geoip_url, 2026, 1), &url)) {
+        *error = "geoip.url: expected an http(s) URL or \"\" (off)";
+        return false;
+      }
     }
   }
   if (const YAML::Node lists = root["threat_lists"]) {

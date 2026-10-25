@@ -32,6 +32,8 @@ const FIELDS: Record<string, Type> = {
   asn: 'int',
   asn_org: 'string',
   asn_country: 'string',
+  // Not in events: always "" here.
+  country: 'string',
   asn_hosting: 'bool',
   signed_agent: 'string',
   tcp_rtt_ms: 'int',

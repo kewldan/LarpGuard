@@ -39,6 +39,8 @@ struct RuleContext {
   int64_t asn = 0;
   std::string_view asn_org;
   std::string_view asn_country;
+  // Client country from the GeoIP database (geoip.url); "" when unknown.
+  std::string_view country;
   bool asn_hosting = false;
   // Host of a Web Bot Auth agent whose signature verified; "" otherwise.
   std::string_view signed_agent;

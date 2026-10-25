@@ -134,6 +134,11 @@ struct Config {
   // downloaded every `asn_refresh`; "" = off.
   std::string asn_url = "https://iptoasn.com/data/ip2asn-combined.tsv.gz";
   std::chrono::milliseconds asn_refresh{std::chrono::hours(24)};
+  // IP -> country database (DB-IP Lite CSV, gzip or plain); "{month}" in
+  // the URL becomes the current month ("2026-10"), the previous one while
+  // the new file is not out yet. "" = off.
+  std::string geoip_url;
+  std::chrono::milliseconds geoip_refresh{std::chrono::hours(24)};
   // IP reputation lists from the built-in catalog (src/net/threat_lists),
   // downloaded every `threat_lists_refresh`; empty = off.
   std::vector<std::string> threat_lists;

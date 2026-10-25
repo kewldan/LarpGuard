@@ -149,6 +149,8 @@ export const MOCK_KEYS: MockKey[] = [
     'https://iptoasn.com/data/ip2asn-combined.tsv.gz',
   ),
   key('asn.refresh', 'duration', 'restart', '24h'),
+  key('geoip.url', 'string', 'restart', ''),
+  key('geoip.refresh', 'duration', 'restart', '24h'),
   key('threat_lists.enabled', 'strings', 'restart', []),
   key('threat_lists.refresh', 'duration', 'restart', '1h'),
   key('data_dir', 'string', 'yaml', ''),

@@ -60,6 +60,7 @@
 #include "model/features.h"
 #include "net/asn.h"
 #include "net/classifier.h"
+#include "net/geoip.h"
 #include "net/prefixed_stream.h"
 #include "net/proxy_protocol.h"
 #include "net/socket_options.h"
@@ -188,6 +189,7 @@ class ConnectionObserver {
     record_.peer = info.peer.address();
     LookupAsn();
     LookupThreatLists();
+    LookupCountry();
   }
 
   ~ConnectionObserver() {
@@ -215,6 +217,12 @@ class ConnectionObserver {
 
   // The peer's autonomous system, once per connection (the address does
   // not change; QUIC migration is off).
+  void LookupCountry() {
+    if (context_.geoip == nullptr) return;
+    const std::shared_ptr<const GeoDatabase> db = context_.geoip->snapshot();
+    if (db != nullptr) country_ = std::string(db->Lookup(record_.peer));
+  }
+
   // Once per connection, like the ASN: the address does not change.
   void LookupThreatLists() {
     if (context_.threat_lists == nullptr) return;
@@ -1197,6 +1205,7 @@ class ConnectionObserver {
     rules.asn = record_.asn;
     rules.asn_org = asn_org_;
     rules.asn_country = asn_country_;
+    rules.country = country_;
     rules.asn_hosting = asn_hosting_;
     rules.signed_agent = exchange.signed_agent;
     rules.tcp_rtt_ms = record_.tcp_rtt_us < 0 ? -1 : record_.tcp_rtt_us / 1000;
@@ -1326,6 +1335,8 @@ class ConnectionObserver {
   // From the ASN database (LookupAsn).
   std::string asn_org_;
   std::string asn_country_;
+  // From the GeoIP database (LookupCountry); "" when unknown.
+  std::string country_;
   bool asn_hosting_ = false;
   // Ids of the reputation lists holding the client (LookupThreatLists).
   std::vector<std::string> threat_lists_;

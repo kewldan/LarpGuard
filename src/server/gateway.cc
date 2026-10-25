@@ -376,6 +376,7 @@ bool Gateway::Start(std::string* error) {
   shared.web_bot_auth = services_.web_bot_auth;
   shared.asn = services_.asn;
   shared.threat_lists = services_.threat_lists;
+  shared.geoip = services_.geoip;
   shared.xdp_blocks = services_.xdp_blocks;
   shared.behavior = services_.behavior;
   shared.rate_limit_store = &rate_limit_store_;

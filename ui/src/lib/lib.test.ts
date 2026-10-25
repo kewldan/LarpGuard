@@ -198,6 +198,12 @@ describe('rule syntax', () => {
     expect(tokens[0]?.weight).toBe(500);
     expect(tokens[2]?.color).toBe('var(--color-verified)');
     expect(tokens[3]?.color).toBe('var(--color-text-3)');
+    // Functions and fields the gateway added stay recognized.
+    const added = highlight('has_cookie("s") and country == "DE"');
+    expect(added.find((t) => t.text === 'has_cookie')?.color).toBe(
+      'var(--color-verified)',
+    );
+    expect(added.find((t) => t.text === 'country')?.weight).toBe(500);
     expect(tokens[4]?.color).toBe('var(--color-blocked-text)');
     expect(tokens[6]?.color).toBe('var(--color-healthy)');
   });

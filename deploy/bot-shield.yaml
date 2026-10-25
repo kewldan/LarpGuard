@@ -281,6 +281,16 @@ asn:
   url: "https://iptoasn.com/data/ip2asn-combined.tsv.gz"
   refresh: 24h
 
+# IP -> country database, downloaded in the background: DB-IP's IP to
+# Country Lite (CC BY 4.0: "IP Geolocation by DB-IP", https://db-ip.com),
+# e.g. "https://download.db-ip.com/free/dbip-country-lite-{month}.csv.gz";
+# {month} becomes the current month (the previous one while the new file is
+# not out). Gives the rule field country (ISO code; "" when unknown). The
+# AS registration country is asn_country. "" = off.
+geoip:
+  url: ""
+  refresh: 24h
+
 # Public IP reputation lists, downloaded in the background: tor (Tor exit
 # nodes, signal tor_exit), firehol_level1 (FireHOL level 1: DShield,
 # Feodo, Spamhaus DROP, bogons), spamhaus_drop (Spamhaus DROP, IPv4 and

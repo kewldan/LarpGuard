@@ -14,6 +14,7 @@ add_executable(bot_shield_tests
   http_client_test.cc
   failopen_test.cc
   events_test.cc
+  geoip_test.cc
   host_test.cc
   http_tap_test.cc
   ja4_test.cc

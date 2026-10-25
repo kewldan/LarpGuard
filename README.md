@@ -86,9 +86,12 @@ over ports 443/80, and Traefik moves to loopback behind it.
 - 🚦 **Rate limiting.** GCRA with composite keys: IP, subnet, ASN,
   fingerprint, API key, cookie or session. Filters by host, path, method and
   class. Per-IP connection limits apply before TLS.
-- 🌍 **ASN awareness.** The iptoasn.com database refreshes in the
-  background. It provides `asn`, `asn_org`, `asn_country` and `asn_hosting`
-  in rules and events, plus a hosting-network signal.
+- 🌍 **ASN, country and reputation.** The iptoasn.com database refreshes in
+  the background. It provides `asn`, `asn_org`, `asn_country` and
+  `asn_hosting` in rules and events, plus a hosting-network signal.
+  Optionally, a `country` rule field comes from
+  [IP Geolocation by DB-IP](https://db-ip.com) (CC BY 4.0), and public
+  threat lists (Tor exits, FireHOL level 1, Spamhaus DROP) add signals.
 - 🛡️ **XDP pre-filter.** A BPF program with its own loader (no libbpf)
   drops blocklisted sources, per-prefix SYN floods and malformed packets
   before the kernel's TCP stack. It fails open with the gateway.

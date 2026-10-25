@@ -112,11 +112,14 @@ TEST_F(RulesTest, AsnAndSignedAgentFields) {
   context_.asn = 16509;
   context_.asn_org = "AMAZON-02";
   context_.asn_country = "US";
+  context_.country = "DE";
   context_.asn_hosting = true;
   context_.signed_agent = "chatgpt.com";
   EXPECT_TRUE(Eval("asn == 16509"));
   EXPECT_TRUE(Eval("asn_hosting and asn_country in [\"US\", \"DE\"]"));
   EXPECT_TRUE(Eval("asn_org ~ \"AMAZON*\""));
+  // GeoIP country and AS registration country can differ.
+  EXPECT_TRUE(Eval("country == \"DE\" and asn_country != country"));
   EXPECT_TRUE(Eval("signed_agent == \"chatgpt.com\""));
   EXPECT_FALSE(Eval("not asn_hosting"));
   context_.asn_hosting = false;

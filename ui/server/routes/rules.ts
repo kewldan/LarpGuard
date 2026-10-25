@@ -29,6 +29,7 @@ const APPROXIMATE = new Set([
   'has_cookie()',
   'query()',
   'has_query()',
+  'country',
   'alpn',
   'cidr()',
   'path',

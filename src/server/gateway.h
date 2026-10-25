@@ -32,6 +32,7 @@
 #include "fp/library.h"
 #include "net/asn.h"
 #include "net/classifier.h"
+#include "net/geoip.h"
 #include "net/threat_lists.h"
 #include "proxy/upstream_pool.h"
 #include "quic/h3_server.h"
@@ -119,6 +120,7 @@ struct GatewayServices {
   WebBotAuthVerifier* web_bot_auth = nullptr;
   const AsnStore* asn = nullptr;
   const ThreatListStore* threat_lists = nullptr;  // Null: none enabled.
+  const GeoStore* geoip = nullptr;                // Null: geoip.url "".
   XdpAutoBlocks* xdp_blocks = nullptr;
   BehaviorStore* behavior = nullptr;
 };

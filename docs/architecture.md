@@ -450,7 +450,8 @@ TTL уменьшается и часть картины искажается.
    `http_version`, `sni`, `alpn`, `ja4`, `h2_fp`, `pseudo_order`,
    `header_fp`, `tcp_fp`, `user_agent`, `ua_family`, `ua_engine`, `ua_os`,
    `ua_tool`, `score`, `class`, `reasons`, `asn` (целое), `asn_org`,
-   `asn_country`, `asn_hosting` (bool), `signed_agent`, `tcp_rtt_ms` и
+   `asn_country`, `country` (страна по базе GeoIP, `geoip.url`; `""`, если
+   неизвестна), `asn_hosting` (bool), `signed_agent`, `tcp_rtt_ms` и
    `handshake_ms` (целые, мс; `-1`, если неизвестно, — поэтому
    `tcp_rtt_ms >= 0 and tcp_rtt_ms < 10`, а не только `< 10`). Функции:
    `header("name")`,
@@ -861,6 +862,14 @@ IPv4 и IPv6, ~580 тыс. диапазонов, ~25 МБ в памяти, по�
 определяется один раз на соединение. Хостинг-сети (`asn_hosting`: облака по
 списку ASN и по словам в имени — hosting, cloud, VPS, …) дают сигнал
 `hosting_network` (10).
+
+Страна по IP ✅ (`net/geoip`, `geoip.url`): DB-IP «IP to Country Lite»
+(CC BY 4.0, атрибуция «IP Geolocation by DB-IP» — в README), CSV
+`start,end,CC` для IPv4 и IPv6, ~710 тыс. диапазонов, бинарный поиск, один
+раз на соединение. В URL `{month}` подставляется текущий месяц, а пока
+файла нового месяца нет — прошлый (`GeoUrlsToTry`). Даёт поле правил
+`country`; `asn_country` — страна регистрации AS, они нередко различаются.
+В события страна не пишется. По умолчанию выключено.
 
 Списки угроз ✅ (`net/threat_lists`, `threat_lists.enabled`): встроенный
 каталог публичных списков — `tor` (выходные узлы Tor,

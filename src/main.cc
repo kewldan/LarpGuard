@@ -23,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -56,6 +57,7 @@
 #include "events/events.h"
 #include "events/nats_publisher.h"
 #include "net/asn.h"
+#include "net/geoip.h"
 #include "net/http_client.h"
 #include "net/threat_lists.h"
 #include "notify/notifier.h"
@@ -424,6 +426,49 @@ int Run(int argc, char** argv) {
     };
     sources.push_back(std::move(source));
   }
+  bot_shield::GeoStore geoip;
+  if (!config.geoip_url.empty()) {
+    bot_shield::RefreshSource source;
+    source.name = "geoip";
+    source.url = config.geoip_url;
+    if (!config.data_dir.empty()) {
+      source.cache_file = config.data_dir + "/geoip-country.csv.gz";
+    }
+    source.refresh =
+        std::chrono::duration_cast<std::chrono::seconds>(config.geoip_refresh);
+    source.max_size = std::size_t{64} << 20;
+    // This month's file, or last month's until the new one is out.
+    source.fetch = [](const std::string& url, std::size_t max_size,
+                      const std::stop_token& stop, std::string* data,
+                      std::string* fetch_error) {
+      for (const std::string& month_url : bot_shield::GeoUrlsToTry(
+               url, std::chrono::floor<std::chrono::days>(
+                        std::chrono::system_clock::now()))) {
+        if (bot_shield::FetchUrl(month_url, max_size, stop, data,
+                                 fetch_error)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    source.apply = [&geoip](std::string_view data, std::string* apply_error) {
+      std::string text;
+      if (data.starts_with("\x1f\x8b")) {
+        if (!bot_shield::Gunzip(data, std::size_t{512} << 20, &text,
+                                apply_error)) {
+          return false;
+        }
+        data = text;
+      }
+      auto database = std::make_shared<bot_shield::GeoDatabase>();
+      if (!bot_shield::GeoDatabase::Parse(data, database.get(), apply_error)) {
+        return false;
+      }
+      geoip.set(std::move(database));
+      return true;
+    };
+    sources.push_back(std::move(source));
+  }
   bot_shield::ThreatListStore threat_lists;
   for (bot_shield::RefreshSource& source : bot_shield::ThreatListSources(
            config.threat_lists, &threat_lists, config.data_dir,
@@ -484,6 +529,7 @@ int Run(int argc, char** argv) {
   if (web_bot_auth) services.web_bot_auth = &*web_bot_auth;
   services.asn = config.asn_url.empty() ? nullptr : &asn;
   services.threat_lists = config.threat_lists.empty() ? nullptr : &threat_lists;
+  services.geoip = config.geoip_url.empty() ? nullptr : &geoip;
   services.xdp_blocks =
       config.xdp_enabled && config.xdp_block_honeypot ? &xdp_blocks : nullptr;
   if (crawler_verifier) services.crawler_verifier = &*crawler_verifier;

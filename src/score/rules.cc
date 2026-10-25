@@ -62,6 +62,7 @@ enum class Field {
   kAsn,
   kAsnOrg,
   kAsnCountry,
+  kCountry,
   kAsnHosting,
   kSignedAgent,
   kTcpRttMs,
@@ -97,6 +98,7 @@ constexpr FieldInfo kFields[] = {
     {"asn", Field::kAsn, Type::kInt},
     {"asn_org", Field::kAsnOrg, Type::kString},
     {"asn_country", Field::kAsnCountry, Type::kString},
+    {"country", Field::kCountry, Type::kString},
     {"asn_hosting", Field::kAsnHosting, Type::kBool},
     {"signed_agent", Field::kSignedAgent, Type::kString},
     {"tcp_rtt_ms", Field::kTcpRttMs, Type::kInt},
@@ -611,6 +613,9 @@ Value FieldValue(Field field, const RuleContext& context) {
       break;
     case Field::kAsnCountry:
       value.text = context.asn_country;
+      break;
+    case Field::kCountry:
+      value.text = context.country;
       break;
     case Field::kAsnHosting:
       value.type = Type::kBool;

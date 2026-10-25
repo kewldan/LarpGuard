@@ -24,13 +24,22 @@ const FIELDS = new Set([
   'asn',
   'asn_org',
   'asn_country',
+  'country',
   'asn_hosting',
   'signed_agent',
   'tcp_rtt_ms',
   'handshake_ms',
 ]);
 const KEYWORDS = new Set(['and', 'or', 'not', 'in']);
-const FUNCTIONS = new Set(['header', 'has_header', 'cidr']);
+const FUNCTIONS = new Set([
+  'header',
+  'has_header',
+  'cookie',
+  'has_cookie',
+  'query',
+  'has_query',
+  'cidr',
+]);
 
 interface Token {
   text: string;

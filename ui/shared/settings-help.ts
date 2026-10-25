@@ -37,6 +37,7 @@ export const SETTINGS_HELP: Readonly<Record<string, string>> = {
   "events.requests": "One event per HTTP request, read passively from decrypted traffic.",
   "events.token": "Optional NATS auth: token, or user + password.",
   "fingerprints.library": "Fingerprint library; \"\" = built in (same as deploy/fingerprints.yaml).",
+  "geoip": "IP -> country database, downloaded in the background: DB-IP's IP to Country Lite (CC BY 4.0: \"IP Geolocation by DB-IP\", https://db-ip.com), e.g. \"https://download.db-ip.com/free/dbip-country-lite-{month}.csv.gz\"; {month} becomes the current month (the previous one while the new file is not out). Gives the rule field country (ISO code; \"\" when unknown). The AS registration country is asn_country. \"\" = off.",
   "honeypot": "Honeypot paths (globs; only paths no site behind the gateway serves). A request to one scores \"honeypot\" and marks its address and fingerprint + network for ttl (\"honeypot_client\" on every host). Needs behavior.",
   "http3": "HTTP/3: QUIC on the HTTPS port (UDP), same verdicts as TCP; advertised to clients with Alt-Svc. Traefik's HTTP/3 must stay off. Hosts without a certificate here (or passthrough hosts) refuse QUIC, so clients use TCP.",
   "http3.advertise_port": "Port in Alt-Svc; 0 = the HTTPS listen port.",
