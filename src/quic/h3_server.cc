@@ -539,8 +539,13 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
     callbacks.rand = &RandomBytes;
     nghttp3_settings settings;
     nghttp3_settings_default(&settings);
-    settings.qpack_max_dtable_capacity = 4096;
-    settings.qpack_blocked_streams = 100;
+    // No QPACK dynamic table for requests: each header block decodes on its
+    // own. With one, a request can wait for the client's encoder stream, and
+    // some clients never send it (curl 8.14 with OpenSSL QUIC writes its
+    // control and QPACK streams before the handshake, they get blocked and
+    // are never retried; its requests then hang until the idle timeout).
+    settings.qpack_max_dtable_capacity = 0;
+    settings.qpack_blocked_streams = 0;
     settings.max_field_section_size = uint64_t{64} * 1024;
     if (nghttp3_conn_server_new(&h3_, &callbacks, &settings, nullptr, this) !=
         0) {
