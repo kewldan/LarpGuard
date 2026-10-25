@@ -38,6 +38,21 @@ std::string DecoyWatermark(std::string_view secret,
 std::string RenderDecoy(std::string_view custom, bool html,
                         std::string_view watermark);
 
+// An endless maze for crawlers that ignore robots.txt (decoy.labyrinth):
+// a page of plausible filler text whose links lead to more such pages on
+// the same host. The page for a path is always the same (derived from
+// `secret`), so the maze looks like a real site; it carries the watermark
+// and asks search engines not to index or follow it.
+std::string RenderLabyrinth(std::string_view secret, std::string_view path,
+                            std::string_view watermark);
+
+// robots.txt for AI crawlers under crawlers.ai_robots: everything is off
+// limits.
+inline constexpr std::string_view kAiRobotsTxt =
+    "# AI crawlers are not welcome on this site.\n"
+    "User-agent: *\n"
+    "Disallow: /\n";
+
 }  // namespace bot_shield
 
 #endif  // BOT_SHIELD_ACTION_ACTIONS_H_

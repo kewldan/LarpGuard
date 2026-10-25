@@ -693,8 +693,12 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     }
   }
   if (const YAML::Node decoy = root["decoy"]) {
-    if (!CheckKeys(decoy, "decoy", {"html_file", "json_file"}, error)) {
+    if (!CheckKeys(decoy, "decoy", {"html_file", "json_file", "labyrinth"},
+                   error)) {
       return false;
+    }
+    if (decoy["labyrinth"]) {
+      config->decoy_labyrinth = decoy["labyrinth"].as<bool>();
     }
     struct Template {
       const char* key;
@@ -723,7 +727,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   }
   if (const YAML::Node crawlers = root["crawlers"]) {
     if (!CheckKeys(crawlers, "crawlers",
-                   {"verify", "ai", "ip_ranges", "ranges_refresh"}, error) ||
+                   {"verify", "ai", "ai_robots", "ip_ranges", "ranges_refresh"},
+                   error) ||
         !ReadDuration(crawlers, "crawlers", "ranges_refresh",
                       &config->crawlers_ranges_refresh, error)) {
       return false;
@@ -733,6 +738,9 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     }
     if (crawlers["verify"]) {
       config->crawlers_verify = crawlers["verify"].as<bool>();
+    }
+    if (crawlers["ai_robots"]) {
+      config->crawlers_ai_robots = crawlers["ai_robots"].as<bool>();
     }
     if (crawlers["ai"]) {
       const auto ai = crawlers["ai"].as<std::string>();

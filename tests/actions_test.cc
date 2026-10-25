@@ -3,7 +3,9 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "config/config.h"
@@ -31,6 +33,31 @@ TEST(DecoyTest, WatermarksBuiltInAndCustomTemplates) {
   // A watermark containing the placeholder does not loop.
   EXPECT_EQ(RenderDecoy("{{watermark}}", true, "{{watermark}}"),
             "{{watermark}}");
+}
+
+TEST(DecoyTest, LabyrinthIsStableAndLeadsDeeper) {
+  const std::string page = RenderLabyrinth("secret", "/docs/a", "W1");
+  EXPECT_TRUE(page.starts_with("<!doctype html>"));
+  EXPECT_NE(page.find(R"(content="noindex,nofollow")"), std::string::npos);
+  EXPECT_NE(page.find("W1"), std::string::npos);
+  // The same path always gives the same page (but for the watermark).
+  EXPECT_EQ(page, RenderLabyrinth("secret", "/docs/a", "W1"));
+  EXPECT_NE(page, RenderLabyrinth("secret", "/docs/b", "W1"));
+  EXPECT_NE(page, RenderLabyrinth("other", "/docs/a", "W1"));
+  // Twelve nofollow links to other paths on the same host.
+  std::vector<std::string> links;
+  for (std::size_t at = page.find("href=\""); at != std::string::npos;
+       at = page.find("href=\"", at + 1)) {
+    const std::size_t start = at + 6;
+    links.push_back(page.substr(start, page.find('"', start) - start));
+  }
+  ASSERT_EQ(links.size(), 12U);
+  for (const std::string& link : links) {
+    EXPECT_TRUE(link.starts_with('/')) << link;
+    EXPECT_EQ(link.find("//"), std::string::npos) << link;
+  }
+  EXPECT_NE(RenderLabyrinth("secret", links[0], "W1"), page);
+  EXPECT_NE(kAiRobotsTxt.find("Disallow: /\n"), std::string_view::npos);
 }
 
 TEST(ActionsTest, ParsesNewActions) {

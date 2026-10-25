@@ -12,6 +12,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <format>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -68,7 +70,97 @@ asio::awaitable<void> Trickle(std::weak_ptr<Exchange> weak, int64_t chunks,
   }
 }
 
+constexpr std::string_view kWords[] = {
+    "archive",   "annual",    "analysis",  "board",     "budget",  "catalog",
+    "center",    "change",    "community", "council",   "data",    "design",
+    "digital",   "district",  "energy",    "estate",    "field",   "finance",
+    "forum",     "general",   "global",    "group",     "guide",   "history",
+    "housing",   "industry",  "institute", "journal",   "library", "local",
+    "market",    "material",  "media",     "member",    "method",  "network",
+    "notes",     "office",    "open",      "planning",  "policy",  "practice",
+    "program",   "project",   "public",    "quarterly", "record",  "regional",
+    "report",    "research",  "review",    "school",    "science", "service",
+    "society",   "standard",  "studies",   "summary",   "survey",  "system",
+    "technical", "transport", "update",    "water"};
+
+// Deterministic pseudo-random words: bytes of an HMAC chain.
+class WordStream {
+ public:
+  WordStream(std::string_view secret, std::string_view seed)
+      : secret_(secret), seed_(seed) {}
+
+  std::string_view Next() {
+    return kWords[static_cast<std::size_t>(Byte()) % std::size(kWords)];
+  }
+
+  int Below(int limit) { return Byte() % limit; }
+
+  // No word twice in a row: "office office" gives the filler away.
+  std::string Words(int count) {
+    std::string out;
+    std::string_view last;
+    for (int i = 0; i < count; ++i) {
+      std::string_view word = Next();
+      while (word == last) word = Next();
+      if (i > 0) out.push_back(' ');
+      out += word;
+      last = word;
+    }
+    return out;
+  }
+
+ private:
+  int Byte() {
+    if (offset_ + 2 > block_.size()) {
+      block_ =
+          HmacSha256Hex(secret_, std::format("{}#{}", seed_, counter_++), 64);
+      offset_ = 0;
+    }
+    const int value = std::stoi(block_.substr(offset_, 2), nullptr, 16);
+    offset_ += 2;
+    return value;
+  }
+
+  std::string_view secret_;
+  std::string seed_;
+  std::string block_;
+  std::size_t offset_ = 0;
+  int counter_ = 0;
+};
+
+std::string Capitalized(std::string text) {
+  if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') {
+    text[0] = static_cast<char>(text[0] - 'a' + 'A');
+  }
+  return text;
+}
+
 }  // namespace
+
+std::string RenderLabyrinth(std::string_view secret, std::string_view path,
+                            std::string_view watermark) {
+  WordStream words(secret, path);
+  const std::string title = Capitalized(words.Words(3));
+  std::string out = std::format(
+      "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+      "<title>{}</title>\n<meta name=\"robots\" content=\"noindex,nofollow\">"
+      "</head><body data-ref=\"{}\">\n<h1>{}</h1>\n",
+      title, watermark, title);
+  for (int paragraph = 0; paragraph < 4; ++paragraph) {
+    out += "<p>" + Capitalized(words.Words(28 + words.Below(16))) + ".</p>\n";
+  }
+  out += "<ul>\n";
+  for (int link = 0; link < 12; ++link) {
+    const std::string target = std::format(
+        "/{}/{}", words.Next(),
+        HmacSha256Hex(secret, std::format("{}>{}", path, link), 10));
+    out += std::format("<li><a rel=\"nofollow\" href=\"{}\">{}</a></li>\n",
+                       target, Capitalized(words.Words(2 + words.Below(3))));
+  }
+  out += std::format("</ul>\n<p class=\"ref\">Ref. {}</p>\n</body></html>\n",
+                     watermark);
+  return out;
+}
 
 bool StartTarpit(const asio::any_io_executor& executor,
                  const std::shared_ptr<Exchange>& exchange,

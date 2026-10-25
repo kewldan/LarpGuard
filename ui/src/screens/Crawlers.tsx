@@ -4,6 +4,7 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 
 import type { Crawlers as CrawlersData } from '../../shared/api.ts';
+import { AiCrawlerPolicy } from '../domain/AiCrawlerPolicy.tsx';
 import { ActionChip } from '../domain/verdict.tsx';
 import { ago, compact } from '../lib/format.ts';
 import { useCrawlers, useGatewayConfig } from '../lib/queries.ts';
@@ -176,6 +177,8 @@ export function Crawlers() {
           </div>
         ))}
       </div>
+
+      <AiCrawlerPolicy />
 
       <div
         style={{

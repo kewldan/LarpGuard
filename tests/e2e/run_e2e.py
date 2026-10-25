@@ -18,6 +18,7 @@ import http.server
 import socketserver
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -668,6 +669,13 @@ rules:
   - name: human-check
     when: 'path ~ "/captcha*"'
     action: captcha
+  # The fake origin's /status/NNN checks a limit, not the verdict: the
+  # bare, evenly spaced requests would otherwise be scored a bot. A score
+  # rule, unlike allow, leaves rate limits in force.
+  - name: status-paths
+    when: 'path ~ "/status/*"'
+    action: score
+    score: -100
   - name: asn-rule
     when: 'asn == 64500 and path ~ "/asn-block*"'
     action: block
@@ -697,7 +705,10 @@ docker:
   poll_interval: 200ms
 crawlers:
   ai: block
+  ai_robots: true
   ip_ranges: false
+decoy:
+  labyrinth: true
 asn:
   url: http://127.0.0.1:{outbound.port}/ip2asn.tsv
 web_bot_auth:
@@ -1118,6 +1129,13 @@ whoami: true
         event = nats.find("e2e.events.req",
                           lambda e: e.get("path_group") == "/ai/enforced")
         expect("ai_crawler:openai" in event["reasons"], event)
+        # crawlers.ai_robots: robots.txt says Disallow for AI crawlers (even
+        # with ai: block), and the site's own for everyone else.
+        status, _, body = h1_get(https_port, "www.a.test", ca_a, "/robots.txt",
+                                 f"User-Agent: {gptbot}\r\n".encode())
+        expect(status == 200 and b"Disallow: /\n" in body, (status, body))
+        status, _, body = h1_get(https_port, "www.a.test", ca_a, "/robots.txt")
+        expect(b"Disallow" not in body, body)
         status, _, body = h1_get(https_port, "a.test", ca_a, "/ai/shadow",
                                  f"User-Agent: {gptbot}\r\n".encode())
         expect(status == 200, status)
@@ -1193,6 +1211,17 @@ whoami: true
         mark = event["watermark"]
         expect(len(mark) == 12 and mark.encode() in body, (mark, body))
         expect(event["action"] == "decoy" and event["local"] is True, event)
+        # decoy.labyrinth: a maze page, the same for the same path, with
+        # links deeper in and no indexing.
+        expect(b'content="noindex,nofollow"' in body, body)
+        links = [m for m in body.split(b'href="')[1:]]
+        expect(len(links) == 12 and all(l.startswith(b"/") for l in links),
+               body)
+        _, _, again = h1_get(https_port, "www.a.test", ca_a, "/decoy/list",
+                             b"Accept: text/html\r\n")
+        # Each answer has its own watermark; the rest is the same page.
+        unmark = lambda page: re.sub(rb"[0-9a-f]{12}", b"", page)
+        expect(unmark(again) == unmark(body), (again, body))
         status, headers, body = h1_get(https_port, "www.a.test", ca_a,
                                        "/decoy/api",
                                        b"Accept: application/json\r\n")
@@ -1293,18 +1322,24 @@ whoami: true
         expect(status == 200, body)
 
     def rate_limits_on_responses():
+        def get(path, expected):
+            status, headers, _ = h1_get(https_port, "www.a.test", ca_a, path)
+            if status != expected:
+                # Which verdict answered instead (reasons, action).
+                event = nats.find("e2e.events.req", lambda e: (
+                    e.get("path_group", "").startswith("/status") and
+                    e.get("status") == status), timeout=1)
+                raise AssertionError((status, event))
+            return headers
+
         # Successful answers never use the limit up.
         for _ in range(5):
-            status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/status/200")
-            expect(status == 200, status)
+            get("/status/200", 200)
         # Two failures from the origin do; then any request is refused
         # before it reaches the origin.
         for _ in range(2):
-            status, _, _ = h1_get(https_port, "www.a.test", ca_a, "/status/401")
-            expect(status == 401, status)
-        status, headers, _ = h1_get(https_port, "www.a.test", ca_a,
-                                    "/status/200")
-        expect(status == 429, status)
+            get("/status/401", 401)
+        headers = get("/status/200", 429)
         expect(headers["ratelimit-policy"] == '"failed-logins";q=2;w=60',
                headers)
         event = nats.find("e2e.events.req",
@@ -1869,7 +1904,8 @@ whoami: true
         expect(values['bot_shield_tarpits_total{result="started"}'] == 3,
                "tarpits")
         expect(values["bot_shield_tarpits_active"] == 0, "tarpits active")
-        expect(values["bot_shield_decoys_total"] == 2, "decoys")
+        # HTML twice (the labyrinth is asked again) and JSON once.
+        expect(values["bot_shield_decoys_total"] == 3, "decoys")
         expect(values["bot_shield_behavior_signals_total"] >= 2, "behavior")
         expect(values["bot_shield_nats_connected"] == 1, "nats connected")
         expect(values['bot_shield_events_total{result="published"}'] >= 50,

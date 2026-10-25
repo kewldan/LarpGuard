@@ -137,6 +137,19 @@ TEST(ConfigTest, ParsesAttack) {
   EXPECT_FALSE(ParseConfig("attack: {rps: 1}\n", &config, &error));
 }
 
+TEST(ConfigTest, ParsesAiRobotsAndLabyrinth) {
+  Config config;
+  std::string error;
+  EXPECT_FALSE(config.crawlers_ai_robots);
+  EXPECT_FALSE(config.decoy_labyrinth);
+  ASSERT_TRUE(
+      ParseConfig("crawlers: {ai_robots: true}\ndecoy: {labyrinth: true}\n",
+                  &config, &error))
+      << error;
+  EXPECT_TRUE(config.crawlers_ai_robots);
+  EXPECT_TRUE(config.decoy_labyrinth);
+}
+
 TEST(ConfigTest, ParsesNotify) {
   Config config;
   std::string error;

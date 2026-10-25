@@ -49,6 +49,7 @@ bool VerdictSet::Build(const Config& config,
   }
   set->honeypot_paths = config.honeypot_paths;
   set->ai_crawler_action = config.crawlers_ai;
+  set->ai_robots = config.crawlers_ai_robots;
   set->trusted_agents = config.web_bot_auth_trusted;
   set->model_threshold = config.model_threshold;
   if (!config.model_file.empty()) {

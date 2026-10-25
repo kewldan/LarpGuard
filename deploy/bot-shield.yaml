@@ -211,6 +211,10 @@ tarpit:
 decoy:
   html_file: ""
   json_file: ""
+  # HTML decoys become an endless maze: filler pages whose links lead to
+  # more of them (the same page for the same path, noindex/nofollow), so a
+  # crawler that ignores robots.txt wastes its time. Wins over html_file.
+  labyrinth: false
 
 # HTTP/3: QUIC on the HTTPS port (UDP), same verdicts as TCP; advertised to
 # clients with Alt-Svc. Traefik's HTTP/3 must stay off. Hosts without a
@@ -243,6 +247,10 @@ model:
 crawlers:
   verify: true
   ai: default
+  # /robots.txt for AI crawlers says "Disallow: /" (answered here, any mode
+  # but off); search engines and people get the site's own robots.txt.
+  # Polite AI crawlers stop; for the rest, ai: decoy with decoy.labyrinth.
+  ai_robots: false
   # Published IP ranges (Google, Bing, Apple, DuckDuckGo, OpenAI,
   # Perplexity, Mistral), downloaded in the background: inside them a claim
   # is verified at once; outside them a crawler without reverse DNS

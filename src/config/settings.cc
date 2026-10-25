@@ -261,6 +261,8 @@ constexpr SettingKey kKeys[] = {
          [](C c) -> Json { return c.decoy_html_file; }),
     Yaml("decoy.json_file", T::kString,
          [](C c) -> Json { return c.decoy_json_file; }),
+    Restart("decoy.labyrinth", T::kBool,
+            [](C c) -> Json { return c.decoy_labyrinth; }),
     Restart("http3.enabled", T::kBool,
             [](C c) -> Json { return c.http3_enabled; }),
     Restart("http3.idle_timeout", T::kDuration,
@@ -283,6 +285,8 @@ constexpr SettingKey kKeys[] = {
          [](C c) -> Json {
            return c.crawlers_ai ? ActionName(*c.crawlers_ai) : "default";
          }),
+    Live("crawlers.ai_robots", T::kBool,
+         [](C c) -> Json { return c.crawlers_ai_robots; }),
     Restart("crawlers.ip_ranges", T::kBool,
             [](C c) -> Json { return c.crawlers_ip_ranges; }),
     Restart("crawlers.ranges_refresh", T::kDuration,

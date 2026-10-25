@@ -381,6 +381,7 @@ class ConnectionObserver {
     const KnownCrawler* crawler = FindCrawler(request.Header("user-agent"));
     bool verified_crawler = false;
     std::optional<Action> crawler_action;
+    bool ai_robots = false;
     if (crawler != nullptr) {
       // Published IP ranges decide at once; reverse DNS otherwise.
       CrawlerStatus status = CrawlerStatus::kPending;
@@ -419,6 +420,14 @@ class ConnectionObserver {
       }
       if (crawler->ai) {
         verdict.reasons.push_back(std::format("ai_crawler:{}", crawler->id));
+        const std::string_view target = exchange.request.path;
+        if (verdicts_->ai_robots &&
+            target.substr(0, target.find('?')) == "/robots.txt" &&
+            (exchange.request.method == "GET" ||
+             exchange.request.method == "HEAD")) {
+          ai_robots = true;
+          verdict.reasons.emplace_back("ai_robots");
+        }
         // botshield.ai_crawlers on the host's container beats crawlers.ai.
         crawler_action =
             label_policy != nullptr && label_policy->ai_crawlers_set
@@ -581,6 +590,13 @@ class ConnectionObserver {
     headers.emplace_back("x-bot-reasons", reasons.empty() ? "-" : reasons);
     headers.emplace_back("x-bot-mode", HostModeName(mode));
 
+    // Before any block: a polite AI crawler that reads it goes away.
+    if (ai_robots) {
+      exchange.RespondLocally(200, kAiRobotsTxt,
+                              {{"cache-control", "max-age=3600"}},
+                              "text/plain; charset=utf-8");
+      return;
+    }
     if (decision.action == Action::kBlock) {
       metrics.requests_blocked.Inc();
       exchange.RespondLocally(verdicts_->policy->block_status(),
@@ -659,11 +675,18 @@ class ConnectionObserver {
                              : std::string_view(record_.server_name),
                          exchange.request_id);
       const bool html = IsNavigation(request);
+      const std::string_view target = exchange.request.path;
       exchange.RespondLocally(
           200,
-          RenderDecoy(
-              html ? context_.config->decoy_html : context_.config->decoy_json,
-              html, exchange.watermark),
+          html && context_.config->decoy_labyrinth
+              ? RenderLabyrinth(context_.challenger != nullptr
+                                    ? context_.challenger->watermark_secret()
+                                    : std::string_view(record_.server_name),
+                                target.substr(0, target.find('?')),
+                                exchange.watermark)
+              : RenderDecoy(html ? context_.config->decoy_html
+                                 : context_.config->decoy_json,
+                            html, exchange.watermark),
           {{"cache-control", "no-store"}},
           html ? "text/html; charset=utf-8" : "application/json");
       return;

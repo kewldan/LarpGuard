@@ -117,6 +117,9 @@ struct Config {
   // DNS, and what to do with AI crawlers (unset: score them like anyone).
   bool crawlers_verify = true;
   std::optional<Action> crawlers_ai;
+  // Answer /robots.txt for AI crawlers with "Disallow: /" (any mode but
+  // off); others get the site's own.
+  bool crawlers_ai_robots = false;
   // Published crawler IP ranges (Google, Bing, OpenAI, ...), downloaded
   // every `crawlers_ranges_refresh`.
   bool crawlers_ip_ranges = true;
@@ -158,6 +161,8 @@ struct Config {
   std::string decoy_json;
   std::string decoy_html_file;
   std::string decoy_json_file;
+  // HTML decoys become an endless maze of linked pages (RenderLabyrinth).
+  bool decoy_labyrinth = false;
   // Model signal ("model" section): gradient-boosted trees from
   // tools/train_model.py; "" = no model. Above `model_threshold` the
   // request gets signal "model". `model_log_features` puts the feature
