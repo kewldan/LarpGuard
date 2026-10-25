@@ -46,6 +46,8 @@ jobs:
           - name: Build & test
             build_type: RelWithDebInfo
             cmake_flags: ""
+            # The binaries for the console contract tests.
+            artifact: true
           - name: ASan + UBSan
             build_type: Debug
             cmake_flags: -DBOT_SHIELD_SANITIZE=ON
@@ -98,6 +100,14 @@ jobs:
       - name: End-to-end tests
         if: ${{ !matrix.tidy }}
         run: python3 -I tests/e2e/run_e2e.py build/src/bot-shield
+      - uses: actions/upload-artifact@v7
+        if: matrix.artifact
+        with:
+          name: gateway-linux
+          path: |
+            build/src/bot-shield
+            build/tests/bot_shield_fake_upstream
+          retention-days: 1
       - name: clang-tidy
         if: matrix.tidy
         run: cmake --build build --target tidy
@@ -141,9 +151,55 @@ jobs:
             ui/test-results
           retention-days: 7
 
+  # The console's BFF against the real gateway (built by the test job) and
+  # a real ClickHouse: every admin API call and analytics query through the
+  # schemas the console uses (ui/server/contract).
+  contract:
+    name: Console contract
+    needs: test
+    runs-on: ubuntu-24.04
+    # Same Debian as the gateway build, with Node 24.
+    container:
+      image: node:24-trixie
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: "1"
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    defaults:
+      run:
+        working-directory: ui
+    env:
+      HOME: /root
+      # A missing gateway or ClickHouse fails the job instead of skipping.
+      CONTRACT_REQUIRED: "1"
+      CLICKHOUSE_URL: http://clickhouse:8123
+      BOT_SHIELD_BIN: ../gateway/src/bot-shield
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: gateway-linux
+          path: gateway
+      # Artifacts lose the executable bit.
+      - run: chmod +x ../gateway/src/bot-shield ../gateway/tests/bot_shield_fake_upstream
+      - name: openssl (test certificates)
+        run: >-
+          command -v openssl
+          || (apt-get update && apt-get install -y --no-install-recommends openssl)
+      - uses: actions/cache@v6
+        with:
+          path: /root/.npm
+          key: npm-${{ hashFiles('ui/package-lock.json') }}
+      - run: npm ci --no-audit --no-fund
+      - run: npm run contract
+
   image:
     name: Image ${{ matrix.name }} (${{ matrix.platform }})
-    needs: [format, test, ui]
+    needs: [format, test, ui, contract]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.runner }}
     permissions:
