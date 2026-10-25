@@ -21,6 +21,7 @@
 #include "common/host.h"
 #include "common/log.h"
 #include "net/http_client.h"
+#include "net/threat_lists.h"
 #include "ratelimit/limits.h"
 #include "score/policy.h"
 #include "score/rules.h"
@@ -413,6 +414,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "log_level",
                   "web_bot_auth",
                   "asn",
+                  "threat_lists",
                   "captcha",
                   "xdp",
                   "data_dir",
@@ -937,6 +939,28 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
         return false;
       }
       config->web_bot_auth_trusted = ReadStrings(trusted);
+    }
+  }
+  if (const YAML::Node lists = root["threat_lists"]) {
+    if (!CheckKeys(lists, "threat_lists", {"enabled", "refresh"}, error) ||
+        !ReadDuration(lists, "threat_lists", "refresh",
+                      &config->threat_lists_refresh, error)) {
+      return false;
+    }
+    if (lists["enabled"]) {
+      config->threat_lists = ReadStrings(lists["enabled"]);
+      for (const std::string& id : config->threat_lists) {
+        if (FindThreatList(id) == nullptr) {
+          std::string known;
+          for (const ThreatList& list : KnownThreatLists()) {
+            known += known.empty() ? "" : ", ";
+            known += list.id;
+          }
+          *error = std::format("threat_lists.enabled: unknown list '{}' ({})",
+                               id, known);
+          return false;
+        }
+      }
     }
   }
   if (const YAML::Node asn = root["asn"]) {

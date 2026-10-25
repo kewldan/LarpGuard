@@ -186,6 +186,7 @@ class ConnectionObserver {
     record_.listener = std::move(listener);
     record_.peer = info.peer.address();
     LookupAsn();
+    LookupThreatLists();
   }
 
   ~ConnectionObserver() {
@@ -213,6 +214,13 @@ class ConnectionObserver {
 
   // The peer's autonomous system, once per connection (the address does
   // not change; QUIC migration is off).
+  // Once per connection, like the ASN: the address does not change.
+  void LookupThreatLists() {
+    if (context_.threat_lists == nullptr) return;
+    threat_lists_ = ThreatListStore::Match(*context_.threat_lists->snapshot(),
+                                           record_.peer);
+  }
+
   void LookupAsn() {
     if (context_.asn == nullptr) return;
     const std::shared_ptr<const AsnDatabase> db = context_.asn->snapshot();
@@ -465,6 +473,15 @@ class ConnectionObserver {
     // Clouds and hosters (ASN database).
     if (asn_hosting_ && !verified_crawler) {
       AddSignal("hosting_network", &verdict);
+    }
+    // Public reputation lists: the list for rules, its signal for the score.
+    if (!verified_crawler) {
+      for (const std::string& id : threat_lists_) {
+        verdict.reasons.push_back("ip_list:" + id);
+        if (const ThreatList* list = FindThreatList(id)) {
+          AddSignal(list->signal, &verdict);
+        }
+      }
     }
     // Behaviour (5.4) and honeypot marks (6.3); verified crawlers crawl
     // regularly by nature and skip both.
@@ -1300,6 +1317,8 @@ class ConnectionObserver {
   std::string asn_org_;
   std::string asn_country_;
   bool asn_hosting_ = false;
+  // Ids of the reputation lists holding the client (LookupThreatLists).
+  std::vector<std::string> threat_lists_;
   asio::any_io_executor executor_;
   int request_sequence_ = 0;
 };

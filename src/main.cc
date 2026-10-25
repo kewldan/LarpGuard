@@ -57,6 +57,7 @@
 #include "events/nats_publisher.h"
 #include "net/asn.h"
 #include "net/http_client.h"
+#include "net/threat_lists.h"
 #include "notify/notifier.h"
 #include "score/policy.h"
 #include "server/gateway.h"
@@ -423,6 +424,13 @@ int Run(int argc, char** argv) {
     };
     sources.push_back(std::move(source));
   }
+  bot_shield::ThreatListStore threat_lists;
+  for (bot_shield::RefreshSource& source : bot_shield::ThreatListSources(
+           config.threat_lists, &threat_lists, config.data_dir,
+           std::chrono::duration_cast<std::chrono::seconds>(
+               config.threat_lists_refresh))) {
+    sources.push_back(std::move(source));
+  }
   bot_shield::DataRefresher refresher(std::move(sources));
   refresher.Start();
 
@@ -475,6 +483,7 @@ int Run(int argc, char** argv) {
       config.crawlers_ip_ranges ? &crawler_ranges : nullptr;
   if (web_bot_auth) services.web_bot_auth = &*web_bot_auth;
   services.asn = config.asn_url.empty() ? nullptr : &asn;
+  services.threat_lists = config.threat_lists.empty() ? nullptr : &threat_lists;
   services.xdp_blocks =
       config.xdp_enabled && config.xdp_block_honeypot ? &xdp_blocks : nullptr;
   if (crawler_verifier) services.crawler_verifier = &*crawler_verifier;

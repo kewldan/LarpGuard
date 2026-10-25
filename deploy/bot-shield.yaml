@@ -278,8 +278,18 @@ asn:
   url: "https://iptoasn.com/data/ip2asn-combined.tsv.gz"
   refresh: 24h
 
-# Downloads (crawler ranges, ASN database) are cached here and survive
-# restarts; "" = memory only (downloaded again on every start).
+# Public IP reputation lists, downloaded in the background: tor (Tor exit
+# nodes, signal tor_exit), firehol_level1 (FireHOL level 1: DShield,
+# Feodo, Spamhaus DROP, bogons), spamhaus_drop (Spamhaus DROP, IPv4 and
+# IPv6); both signal threat_list. A listed client gets ip_list:<id> in its
+# reasons for rules. Private, loopback and other non-global addresses never
+# match (FireHOL lists bogons). [] = off.
+threat_lists:
+  enabled: []
+  refresh: 1h
+
+# Downloads (crawler ranges, ASN database, threat lists) are cached here
+# and survive restarts; "" = memory only (downloaded again on every start).
 data_dir: /var/lib/bot-shield/data   # Not a default: off unless set.
 # CA bundle for those downloads, CAPTCHA providers and key directories;
 # "" = the system's.

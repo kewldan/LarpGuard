@@ -25,6 +25,7 @@
 #include "model/gbdt.h"
 #include "net/asn.h"
 #include "net/classifier.h"
+#include "net/threat_lists.h"
 #include "proxy/proxy_hooks.h"
 #include "proxy/upstream_pool.h"
 #include "ratelimit/limits.h"
@@ -73,6 +74,8 @@ struct GatewayContext {
   WebBotAuthVerifier* web_bot_auth = nullptr;
   // IP -> AS database; null when asn.url is "".
   const AsnStore* asn = nullptr;
+  // Public IP reputation lists (threat_lists); null when none enabled.
+  const ThreatListStore* threat_lists = nullptr;
   // Honeypot hits dropped in XDP (xdp.block_honeypot); null when off.
   XdpAutoBlocks* xdp_blocks = nullptr;
   // Operational allow/block lists and the recent-decision log (admin API).

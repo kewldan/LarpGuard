@@ -98,6 +98,11 @@ weights:
   # proxies; also satellite links and carrier TCP accelerators, hence the
   # modest weight).
   relayed_connection: 15
+  # Public IP reputation lists (threat_lists): Tor exit nodes carry many
+  # privacy-minded people, so only a nudge; the others list networks run
+  # by spammers and malware.
+  tor_exit: 10
+  threat_list: 40
 )yaml";
 
 std::vector<std::string> ReadList(const YAML::Node& node) {

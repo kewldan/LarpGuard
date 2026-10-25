@@ -32,6 +32,7 @@
 #include "fp/library.h"
 #include "net/asn.h"
 #include "net/classifier.h"
+#include "net/threat_lists.h"
 #include "proxy/upstream_pool.h"
 #include "quic/h3_server.h"
 #include "ratelimit/limits.h"
@@ -117,6 +118,7 @@ struct GatewayServices {
   const CrawlerRangeStore* crawler_ranges = nullptr;
   WebBotAuthVerifier* web_bot_auth = nullptr;
   const AsnStore* asn = nullptr;
+  const ThreatListStore* threat_lists = nullptr;  // Null: none enabled.
   XdpAutoBlocks* xdp_blocks = nullptr;
   BehaviorStore* behavior = nullptr;
 };

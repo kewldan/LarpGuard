@@ -48,6 +48,7 @@ add_library(bot_shield_core STATIC
   model/gbdt.cc
   net/classifier.cc
   net/asn.cc
+  net/threat_lists.cc
   net/http_client.cc
   net/proxy_protocol.cc
   net/socket_options.cc

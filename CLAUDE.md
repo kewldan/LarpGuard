@@ -87,7 +87,9 @@ clang-format/clang-tidy менять в CI вместе с локальной.
 - `src/tls/` — разбор ClientHello, хранилище сертификатов, опрос `acme.json`.
 - `src/net/` — классификатор маршрута, PROXY v2, `PrefixedStream`,
   `Watchdog`, сокетные опции, `http_client` (блокирующий HTTPS-клиент для
-  фоновых потоков — никогда на цикле воркера), `asn` (база iptoasn).
+  фоновых потоков — никогда на цикле воркера), `asn` (база iptoasn),
+  `threat_lists` (каталог публичных списков угроз; только глобальные
+  адреса, сверка раз на соединение).
 - `src/common/refresher` — `DataRefresher`: фоновые загрузки (диапазоны
   краулеров, ASN) с кешем в `data_dir`; новый скачиваемый набор — новый
   `RefreshSource` в `main.cc`. `compress` — zlib (gunzip, PNG).

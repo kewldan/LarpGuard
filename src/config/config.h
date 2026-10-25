@@ -134,6 +134,10 @@ struct Config {
   // downloaded every `asn_refresh`; "" = off.
   std::string asn_url = "https://iptoasn.com/data/ip2asn-combined.tsv.gz";
   std::chrono::milliseconds asn_refresh{std::chrono::hours(24)};
+  // IP reputation lists from the built-in catalog (src/net/threat_lists),
+  // downloaded every `threat_lists_refresh`; empty = off.
+  std::vector<std::string> threat_lists;
+  std::chrono::milliseconds threat_lists_refresh{std::chrono::hours(1)};
   // Downloaded datasets are cached here across restarts; "" = memory only.
   std::string data_dir;
   // CA bundle for outbound HTTPS; "" = the system's.

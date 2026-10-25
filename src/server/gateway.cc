@@ -375,6 +375,7 @@ bool Gateway::Start(std::string* error) {
   shared.crawler_ranges = services_.crawler_ranges;
   shared.web_bot_auth = services_.web_bot_auth;
   shared.asn = services_.asn;
+  shared.threat_lists = services_.threat_lists;
   shared.xdp_blocks = services_.xdp_blocks;
   shared.behavior = services_.behavior;
   shared.rate_limit_store = &rate_limit_store_;
