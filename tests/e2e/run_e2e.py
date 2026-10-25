@@ -1624,8 +1624,15 @@ whoami: true
             status, version = result.stdout.split()
             return int(status), version
 
+        # One handshake, one connection: curl closes it when done, so the
+        # gauge is back where it was. A ClientHello split over two Initial
+        # datagrams once made a second, lingering connection.
+        before = read_metrics(metrics_url)["bot_shield_quic_connections"]
         status, version = h3("/h3/get?x=1")
         expect(status == 200 and version == "3", (status, version))
+        time.sleep(0.5)
+        after = read_metrics(metrics_url)["bot_shield_quic_connections"]
+        expect(after <= before, (before, after))
         body = json.loads(open(out).read())
         expect(body["proto"] == "h2", body)  # Upstream leg: the h2 pool.
         expect("x-bot-score" in body["headers"], body)

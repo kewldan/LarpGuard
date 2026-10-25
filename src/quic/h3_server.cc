@@ -1145,6 +1145,12 @@ void QuicServer::OnDatagram(std::span<const uint8_t> data,
     Remove(connection.get());
     return;
   }
+  // The client keeps sending to the DCID it chose (or the Retry SCID)
+  // until it sees ours, e.g. a ClientHello split over two Initials (large
+  // post-quantum key shares): without this the second one would make a
+  // second connection, which then holds a max_connections slot until the
+  // idle timeout. Dropped with the connection's other ids in Remove().
+  Register(CidKey(header.dcid), connection);
   connection->OnDatagram(data, remote);
 }
 
