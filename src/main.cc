@@ -441,9 +441,16 @@ int Run(int argc, char** argv) {
     source.fetch = [](const std::string& url, std::size_t max_size,
                       const std::stop_token& stop, std::string* data,
                       std::string* fetch_error) {
-      for (const std::string& month_url : bot_shield::GeoUrlsToTry(
-               url, std::chrono::floor<std::chrono::days>(
-                        std::chrono::system_clock::now()))) {
+      int year = 0;
+      int month = 0;
+      bot_shield::YearMonthOfUnixDay(
+          std::chrono::duration_cast<std::chrono::seconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+                  .count() /
+              86400,
+          &year, &month);
+      for (const std::string& month_url :
+           bot_shield::GeoUrlsToTry(url, year, month)) {
         if (bot_shield::FetchUrl(month_url, max_size, stop, data,
                                  fetch_error)) {
           return true;

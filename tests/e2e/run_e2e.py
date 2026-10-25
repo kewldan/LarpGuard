@@ -687,11 +687,12 @@ rules:
   - name: human-check
     when: 'path ~ "/captcha*"'
     action: captcha
-  # The fake origin's /status/NNN checks a limit, not the verdict: the
-  # bare, evenly spaced requests would otherwise be scored a bot. A score
-  # rule, unlike allow, leaves rate limits in force.
+  # The fake origin's /status/NNN checks a limit and /qc a rule, not the
+  # verdict: the bare requests would otherwise be scored a bot (more so on
+  # Linux, with TCP signals). A score rule, unlike allow, leaves rate limits
+  # and block rules in force.
   - name: status-paths
-    when: 'path ~ "/status/*"'
+    when: 'path ~ "/status/*" or path ~ "/qc*"'
     action: score
     score: -100
   - name: query-and-cookie

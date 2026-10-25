@@ -5,7 +5,6 @@
 #include <asio/ip/address.hpp>
 #include <asio/ip/address_v4.hpp>
 #include <asio/ip/address_v6.hpp>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -104,19 +103,29 @@ std::string_view GeoDatabase::Lookup(const asio::ip::address& address) const {
   return ip > it->end ? std::string_view() : code(it->country);
 }
 
-std::vector<std::string> GeoUrlsToTry(std::string_view url,
-                                      std::chrono::sys_days today) {
+std::vector<std::string> GeoUrlsToTry(std::string_view url, int year,
+                                      int month) {
   if (url.find("{month}") == std::string_view::npos) return {std::string(url)};
-  const std::chrono::year_month_day day{today};
-  std::vector<std::string> urls;
-  for (const std::chrono::year_month month :
-       {day.year() / day.month(),
-        day.year() / day.month() - std::chrono::months(1)}) {
-    urls.push_back(
-        GeoUrlForMonth(url, static_cast<int>(month.year()),
-                       static_cast<int>(static_cast<unsigned>(month.month()))));
-  }
-  return urls;
+  const int previous_year = month == 1 ? year - 1 : year;
+  const int previous_month = month == 1 ? 12 : month - 1;
+  return {GeoUrlForMonth(url, year, month),
+          GeoUrlForMonth(url, previous_year, previous_month)};
+}
+
+void YearMonthOfUnixDay(int64_t day, int* year, int* month) {
+  // Howard Hinnant's civil_from_days: 400-year eras from 0000-03-01.
+  const int64_t z = day + 719468;
+  const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+  const int64_t day_of_era = z - era * 146097;
+  const int64_t year_of_era = (day_of_era - day_of_era / 1460 +
+                               day_of_era / 36524 - day_of_era / 146096) /
+                              365;
+  const int64_t day_of_year =
+      day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+  const int64_t shifted_month = (5 * day_of_year + 2) / 153;  // March = 0.
+  *month = static_cast<int>(shifted_month < 10 ? shifted_month + 3
+                                               : shifted_month - 9);
+  *year = static_cast<int>(year_of_era + era * 400 + (*month <= 2 ? 1 : 0));
 }
 
 std::string GeoUrlForMonth(std::string_view url, int year, int month) {

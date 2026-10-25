@@ -3,7 +3,6 @@
 
 #include <array>
 #include <asio/ip/address.hpp>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -45,10 +44,13 @@ class GeoDatabase {
 // The database URL for a month: "{month}" in `url` becomes "2026-10".
 std::string GeoUrlForMonth(std::string_view url, int year, int month);
 
-// The URLs to try on `today`: this month's file, then last month's (a new
-// month's file appears a few days in); just `url` without "{month}".
-std::vector<std::string> GeoUrlsToTry(std::string_view url,
-                                      std::chrono::sys_days today);
+// The URLs to try in a month (1-12): this month's file, then last month's
+// (a new month's file appears a few days in); just `url` without
+// "{month}".
+std::vector<std::string> GeoUrlsToTry(std::string_view url, int year,
+                                      int month);
+// Year and month (1-12) of a day counted from 1970-01-01 (UTC).
+void YearMonthOfUnixDay(int64_t day, int* year, int* month);
 
 // The current database, replaced by the background refresh; looked up once
 // per connection.

@@ -9,6 +9,7 @@
 #include <ios>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/compress.h"
@@ -53,19 +54,31 @@ TEST(GeoipTest, MonthInUrl) {
 }
 
 TEST(GeoipTest, TriesThisMonthThenLast) {
-  using std::chrono::January;
-  using std::chrono::March;
   const std::string url = "https://x/c-{month}.csv.gz";
-  EXPECT_EQ(GeoUrlsToTry(url, std::chrono::sys_days{std::chrono::year{2026} /
-                                                    March / 2}),
+  EXPECT_EQ(GeoUrlsToTry(url, 2026, 3),
             (std::vector<std::string>{"https://x/c-2026-03.csv.gz",
                                       "https://x/c-2026-02.csv.gz"}));
   // Across the year.
-  EXPECT_EQ(GeoUrlsToTry(url, std::chrono::sys_days{std::chrono::year{2026} /
-                                                    January / 3})[1],
-            "https://x/c-2025-12.csv.gz");
-  EXPECT_EQ(GeoUrlsToTry("https://x/static.csv", std::chrono::sys_days{}),
+  EXPECT_EQ(GeoUrlsToTry(url, 2026, 1)[1], "https://x/c-2025-12.csv.gz");
+  EXPECT_EQ(GeoUrlsToTry("https://x/static.csv", 2026, 1),
             std::vector<std::string>{"https://x/static.csv"});
+}
+
+TEST(GeoipTest, CalendarFromUnixDays) {
+  int year = 0;
+  int month = 0;
+  YearMonthOfUnixDay(0, &year, &month);
+  EXPECT_EQ(std::pair(year, month), std::pair(1970, 1));
+  YearMonthOfUnixDay(20752, &year, &month);  // 2026-10-26.
+  EXPECT_EQ(std::pair(year, month), std::pair(2026, 10));
+  YearMonthOfUnixDay(20512, &year, &month);  // 2026-02-28.
+  EXPECT_EQ(std::pair(year, month), std::pair(2026, 2));
+  YearMonthOfUnixDay(19782, &year, &month);  // 2024-02-29.
+  EXPECT_EQ(std::pair(year, month), std::pair(2024, 2));
+  YearMonthOfUnixDay(20818, &year, &month);  // 2026-12-31.
+  EXPECT_EQ(std::pair(year, month), std::pair(2026, 12));
+  YearMonthOfUnixDay(20819, &year, &month);  // 2027-01-01.
+  EXPECT_EQ(std::pair(year, month), std::pair(2027, 1));
 }
 
 TEST(GeoipTest, Config) {
