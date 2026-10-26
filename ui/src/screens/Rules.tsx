@@ -14,7 +14,14 @@ import { useCanOperate } from '../app/session.ts';
 import { ActionChip } from '../domain/verdict.tsx';
 import { ApiError } from '../lib/api.ts';
 import { type RuleDraft, ruleSpec, ruleYaml } from '../lib/config-yaml.ts';
-import { clock, compact, count, lineColumn, percent } from '../lib/format.ts';
+import {
+  clock,
+  compact,
+  count,
+  duration,
+  lineColumn,
+  percent,
+} from '../lib/format.ts';
 import { useCompact } from '../lib/media.ts';
 import {
   useApplySettings,
@@ -28,6 +35,7 @@ import { highlight } from '../lib/rule-syntax.ts';
 import { thresholdsOf } from '../lib/signals.ts';
 import { toneText } from '../lib/tone.ts';
 import { Button } from '../ui/Button.tsx';
+import { Segmented } from '../ui/controls.tsx';
 import { Icon, Spinner } from '../ui/Icon.tsx';
 import {
   EmptyState,
@@ -234,7 +242,8 @@ function TestResult({
             marginTop: 4,
           }}
         >
-          ≈{compact(result.estimated)}
+          {result.source === 'live' ? '' : '≈'}
+          {compact(result.estimated)}
         </div>
         <div
           className="mono"
@@ -353,8 +362,8 @@ function TestResult({
         >
           Approximate: events do not carry{' '}
           <span className="mono">{result.approximate.join(', ')}</span> exactly
-          (no header values or ALPN, addresses as /24 or /48 prefixes, paths as
-          normalized groups).
+          (no header, cookie or query values, addresses as /24 or /48 prefixes,
+          paths as normalized groups). Test live for exact results.
         </div>
       ) : null}
       {result.by_host.length > 0 ? (
@@ -475,6 +484,9 @@ export function Rules() {
   const copy = useCopy();
   const [drafts, setDrafts] = useState<Record<string, Draft>>(loadDrafts);
   const [testedKey, setTestedKey] = useState<string | null>(null);
+  // Where to test: an hour of events, or the gateway's recent requests
+  // (exact headers, cookies, query, address and path).
+  const [source, setSource] = useState<'events' | 'live'>('events');
 
   const list = useMemo(() => rules.data?.rules ?? [], [rules.data]);
   const names = list.map((rule) => rule.name);
@@ -485,7 +497,7 @@ export function Rules() {
     (selected ? drafts[selected] : undefined) ??
     (original ? fromRule(original) : undefined);
   const dirty = draft !== undefined && isDirty(draft, original);
-  const key = draft ? `${draft.when}|${draft.action}` : '';
+  const key = draft ? `${draft.when}|${draft.action}|${source}` : '';
 
   const update = (patch: Partial<Draft>) => {
     if (!draft || !selected) return;
@@ -871,11 +883,19 @@ export function Rules() {
               }
               onClick={() => {
                 setTestedKey(key);
-                test.mutate({ when: draft.when, action: draft.action });
+                test.mutate({
+                  when: draft.when,
+                  action: draft.action,
+                  source,
+                });
               }}
             >
               {test.isPending ? <Spinner size={14} /> : null}
-              {tested ? 'Test again' : 'Test against 1h'}
+              {tested
+                ? 'Test again'
+                : source === 'live'
+                  ? 'Test live'
+                  : 'Test against 1h'}
             </Button>
             {canOperate && rules.data.editable && original && !dirty ? (
               <>
@@ -1152,13 +1172,27 @@ export function Rules() {
                 }}
               >
                 <h2 style={{ fontSize: 14, fontWeight: 600 }}>
-                  Test against last 1h of traffic
+                  {source === 'live'
+                    ? 'Test against live traffic'
+                    : 'Test against last 1h of traffic'}
                 </h2>
+                <Segmented<'events' | 'live'>
+                  label="Sample"
+                  mono={false}
+                  options={[
+                    { value: 'events', label: 'Last hour' },
+                    { value: 'live', label: 'Live, exact' },
+                  ]}
+                  value={source}
+                  onChange={setSource}
+                />
                 <span style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
                   {test.isPending
                     ? 'running'
                     : result
-                      ? `${count(result.sampled)} sampled of ${compact(result.total)}`
+                      ? result.source === 'live'
+                        ? `${count(result.sampled)} recent requests${result.window_ms ? `, last ${duration(result.window_ms)}` : ''}`
+                        : `${count(result.sampled)} sampled of ${compact(result.total)}`
                       : 'not run'}
                 </span>
               </div>
@@ -1174,7 +1208,10 @@ export function Rules() {
                     color: 'var(--color-text-3)',
                   }}
                 >
-                  <Spinner /> Sampling the last hour and evaluating…
+                  <Spinner />{' '}
+                  {source === 'live'
+                    ? "Evaluating on the gateway's recent requests…"
+                    : 'Sampling the last hour and evaluating…'}
                 </div>
               ) : test.isError && testedKey === key ? (
                 <ErrorState error={test.error} />
@@ -1191,7 +1228,9 @@ export function Rules() {
                 >
                   {test.data
                     ? 'Edited since the last test. Run it again before changing the config.'
-                    : 'Run the test to see what this rule would have matched in the last hour.'}
+                    : source === 'live'
+                      ? 'Live tests run in the gateway on its recent requests, with headers, cookies, query and the full address; only event fields come back.'
+                      : 'Run the test to see what this rule would have matched in the last hour.'}
                 </div>
               )}
             </section>

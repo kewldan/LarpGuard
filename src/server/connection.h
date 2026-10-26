@@ -32,6 +32,7 @@
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
 #include "score/policy.h"
+#include "score/rule_samples.h"
 #include "score/rules.h"
 #include "score/scorer.h"
 #include "server/verdicts.h"
@@ -86,6 +87,9 @@ struct GatewayContext {
   DecisionLog* decisions = nullptr;
   // Under-attack mode (admin API and attack.auto_rps); shared.
   AttackMode* attack = nullptr;
+  // Recent requests for testing draft rules live; null without the admin
+  // API.
+  RuleSampleRing* rule_samples = nullptr;
   // Per-IP connection limits at accept time (shared).
   ConnectionCounter* connection_counter = nullptr;
   // Per-IP connections still before their first request headers (shared).

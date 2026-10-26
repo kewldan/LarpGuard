@@ -33,6 +33,7 @@
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
 #include "score/policy.h"
+#include "score/rule_samples.h"
 #include "server/health.h"
 #include "server/verdicts.h"
 #include "tls/cert_store.h"
@@ -582,6 +583,54 @@ TEST_F(AdminServerTest, Reload) {
   EXPECT_EQ(response.status, 422);
   EXPECT_EQ(response.body["error"], "rules: bad rule");
   EXPECT_EQ(Call("GET", "/status").body["verdicts_generation"], 2);
+}
+
+TEST_F(AdminServerTest, LiveRuleTests) {
+  EXPECT_EQ(
+      Call("POST", "/rules/test", R"({"when":"true","live":true})").status,
+      404);
+  RuleSampleRing ring(8);
+  const auto add = [&](const std::string& ip, const std::string& key,
+                       const std::string& query) {
+    LiveRuleSample sample;
+    sample.time_ms = kNow * 1000;
+    sample.request_id = "r-" + key + std::to_string(ring.size());
+    sample.request.method = "GET";
+    sample.request.headers = {{"x-api-key", key},
+                              {"cookie", "sid=secret-cookie"}};
+    sample.ip = make_address(ip);
+    sample.host = "shop.test";
+    sample.path = "/orders/42";
+    sample.query = query;
+    sample.bot_class = "human";
+    sample.action = "allow";
+    sample.would_action = "allow";
+    ring.Add(std::move(sample));
+  };
+  add("203.0.113.7", "k1", "debug=secret-query");
+  add("203.0.113.8", "k1", "");
+  add("198.51.100.1", "k2", "");
+  context_.rule_samples = &ring;
+  // Exact headers, cookies, query, address and path: what events lack.
+  const nlohmann::json body = {
+      {"when", R"(header("x-api-key") == "k1" and cidr("203.0.113.7/32"))"
+               R"( and has_query("debug") and cookie("sid") ~ "secret*")"
+               R"( and path == "/orders/42")"},
+      {"live", true}};
+  AdminResponse response = Call("POST", "/rules/test", body.dump());
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(response.body["evaluated"], 3);
+  EXPECT_EQ(response.body["matched_count"], 1);
+  ASSERT_EQ(response.body["matches"].size(), 1u);
+  const nlohmann::json& match = response.body["matches"][0];
+  EXPECT_EQ(match["ip_prefix"], "203.0.113.0/24");
+  EXPECT_EQ(match["path_group"], "/orders/:n");
+  // Nothing an event would not carry.
+  const std::string text = response.body.dump();
+  EXPECT_EQ(text.find("secret"), std::string::npos);
+  EXPECT_EQ(text.find("203.0.113.7"), std::string::npos);
+  EXPECT_EQ(text.find("x-api-key"), std::string::npos);
+  context_.rule_samples = nullptr;
 }
 
 TEST_F(AdminServerTest, AuditSigning) {

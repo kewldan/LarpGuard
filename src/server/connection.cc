@@ -75,6 +75,7 @@
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
 #include "score/policy.h"
+#include "score/rule_samples.h"
 #include "score/rules.h"
 #include "score/scorer.h"
 #include "server/verdicts.h"
@@ -625,6 +626,7 @@ class ConnectionObserver {
     exchange.reasons = verdict.reasons;
     exchange.action = ActionName(decision.action);
     exchange.would_action = ActionName(decision.would_action);
+    SampleForRules(exchange, input, host, verdict);
     if (whoami) {
       RespondWhoami(exchange, host, mode, verdict, token_valid, decision);
       return;
@@ -1208,15 +1210,15 @@ class ConnectionObserver {
 
   // Score rules adjust the verdict, then the first allow/block rule may
   // override the action. Matches are added to the reasons as "rule:<name>".
-  std::optional<Action> ApplyRules(const Exchange& exchange,
-                                   const ScoringInput& input,
-                                   std::string_view host,
-                                   Verdict* verdict) const {
-    const HttpRequest& request = exchange.observed;
-    const UserAgent ua = ParseUserAgent(request.Header("user-agent"));
+  // Everything rules read about the request; views into `exchange`,
+  // `record_`, `ua` and `verdict`, which must outlive it.
+  RuleContext RuleContextFor(const Exchange& exchange,
+                             const ScoringInput& input, std::string_view host,
+                             const UserAgent& ua,
+                             const Verdict& verdict) const {
     const std::string_view path_and_query = exchange.request.path;
     RuleContext rules;
-    rules.request = &request;
+    rules.request = &exchange.observed;
     rules.ip = record_.peer;
     rules.host = host;
     rules.path = path_and_query.substr(0, path_and_query.find('?'));
@@ -1235,9 +1237,9 @@ class ConnectionObserver {
     rules.ua_engine = ua.engine;
     rules.ua_os = ua.os;
     rules.ua_tool = ua.tool;
-    rules.score = verdict->score;
-    rules.bot_class = BotClassName(verdict->bot_class);
-    rules.reasons = &verdict->reasons;
+    rules.score = verdict.score;
+    rules.bot_class = BotClassName(verdict.bot_class);
+    rules.reasons = &verdict.reasons;
     rules.asn = record_.asn;
     rules.asn_org = asn_org_;
     rules.asn_country = asn_country_;
@@ -1247,6 +1249,61 @@ class ConnectionObserver {
     rules.tcp_rtt_ms = record_.tcp_rtt_us < 0 ? -1 : record_.tcp_rtt_us / 1000;
     rules.handshake_ms =
         record_.handshake_us < 0 ? -1 : record_.handshake_us / 1000;
+    return rules;
+  }
+
+  // Keeps the request, as rules saw it, for testing draft rules on live
+  // traffic (RuleSampleRing).
+  void SampleForRules(const Exchange& exchange, const ScoringInput& input,
+                      std::string_view host, const Verdict& verdict) const {
+    if (context_.rule_samples == nullptr ||
+        !context_.rule_samples->WantSample()) {
+      return;
+    }
+    const UserAgent ua = ParseUserAgent(exchange.observed.Header("user-agent"));
+    const RuleContext rules =
+        RuleContextFor(exchange, input, host, ua, verdict);
+    LiveRuleSample sample;
+    sample.time_ms = UnixMillis();
+    sample.request_id = exchange.request_id;
+    sample.action = exchange.action;
+    sample.would_action = exchange.would_action;
+    sample.request = exchange.observed;
+    sample.ip = rules.ip;
+    sample.host = rules.host;
+    sample.path = rules.path;
+    sample.query = rules.query;
+    sample.sni = rules.sni;
+    sample.alpn = rules.alpn;
+    sample.ja4 = rules.ja4;
+    sample.h2_fingerprint = rules.h2_fingerprint;
+    sample.pseudo_order = rules.pseudo_order;
+    sample.header_fp = rules.header_fp;
+    sample.tcp_fingerprint = rules.tcp_fingerprint;
+    sample.ua_family = rules.ua_family;
+    sample.ua_engine = rules.ua_engine;
+    sample.ua_os = rules.ua_os;
+    sample.ua_tool = rules.ua_tool;
+    sample.score = rules.score;
+    sample.bot_class = rules.bot_class;
+    sample.reasons = verdict.reasons;
+    sample.asn = rules.asn;
+    sample.asn_org = rules.asn_org;
+    sample.asn_country = rules.asn_country;
+    sample.country = rules.country;
+    sample.asn_hosting = rules.asn_hosting;
+    sample.signed_agent = rules.signed_agent;
+    sample.tcp_rtt_ms = rules.tcp_rtt_ms;
+    sample.handshake_ms = rules.handshake_ms;
+    context_.rule_samples->Add(std::move(sample));
+  }
+
+  std::optional<Action> ApplyRules(const Exchange& exchange,
+                                   const ScoringInput& input,
+                                   std::string_view host,
+                                   Verdict* verdict) const {
+    const UserAgent ua = ParseUserAgent(exchange.observed.Header("user-agent"));
+    RuleContext rules = RuleContextFor(exchange, input, host, ua, *verdict);
 
     std::vector<std::string> matched;
     const int delta = verdicts_->rules.ScoreDelta(rules, &matched);

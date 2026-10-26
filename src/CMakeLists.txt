@@ -68,6 +68,7 @@ add_library(bot_shield_core STATIC
   ratelimit/limits.cc
   ratelimit/store.cc
   score/policy.cc
+  score/rule_samples.cc
   score/rules.cc
   score/scorer.cc
   server/connection.cc

@@ -159,6 +159,8 @@ class Gateway {
   ConnectionCounter connection_counter_;
   ConnectionCounter pending_counter_;
   AttackMode attack_;
+  // Live samples for rule tests (only with the admin API).
+  RuleSampleRing rule_samples_;
   std::unique_ptr<Heartbeats> heartbeats_;
   std::vector<std::unique_ptr<Worker>> workers_;
   // After admin_ and the stores it points to: stopped and joined first.

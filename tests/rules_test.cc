@@ -7,10 +7,12 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "fp/http_request.h"
 #include "score/policy.h"
+#include "score/rule_samples.h"
 #include "score/scorer.h"
 
 namespace bot_shield {
@@ -225,6 +227,31 @@ TEST_F(RulesTest, RuleSetValidation) {
   EXPECT_FALSE(RuleSet::Compile(
       {{"a", "true", "block", 0, true}, {"a", "true", "allow", 0}}, &rules,
       &error));
+}
+
+TEST(RuleSampleRingTest, KeepsTheNewestAndSamplesWhenFull) {
+  RuleSampleRing ring(16);
+  int wanted = 0;
+  for (int i = 0; i < 40; ++i) {
+    if (!ring.WantSample()) continue;
+    ++wanted;
+    LiveRuleSample sample;
+    sample.request_id = std::to_string(i);
+    sample.path = "/p";
+    ring.Add(std::move(sample));
+  }
+  // Every request until full, then one in kSampleEvery.
+  EXPECT_EQ(wanted,
+            16 + (40 - 16) / static_cast<int>(RuleSampleRing::kSampleEvery));
+  EXPECT_EQ(ring.size(), 16u);
+  int count = 0;
+  ring.ForEach([&](const LiveRuleSample& sample) {
+    ++count;
+    EXPECT_EQ(sample.View().path, "/p");
+  });
+  EXPECT_EQ(count, 16);
+  RuleSampleRing off(0);
+  EXPECT_FALSE(off.WantSample());
 }
 
 TEST_F(RulesTest, DisabledRulesAreNotEvaluated) {

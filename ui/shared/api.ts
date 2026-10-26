@@ -786,8 +786,12 @@ export type Rules = z.infer<typeof rulesSchema>;
 export const ruleTestRequestSchema = z.object({
   when: z.string().min(1).max(4000),
   action: z.union([actionSchema, z.literal('score')]),
+  // events: a sample of the last hour from ClickHouse (no headers,
+  // cookies, query or full address); live: the gateway's recent requests
+  // in memory, with all of them.
+  source: z.enum(['events', 'live']).default('events'),
 });
-export type RuleTestRequest = z.infer<typeof ruleTestRequestSchema>;
+export type RuleTestRequest = z.input<typeof ruleTestRequestSchema>;
 
 export const ruleCheckSchema = z.object({
   references: z.array(z.string()),
@@ -807,6 +811,9 @@ export const ruleSampleSchema = z.object({
 });
 
 export const ruleTestResultSchema = z.object({
+  source: z.enum(['events', 'live']),
+  // Live: how far back the gateway's samples reach (ms); null for events.
+  window_ms: z.number().nullable(),
   // Requests in the last hour and how many were sampled and evaluated.
   total: z.number(),
   sampled: z.number(),

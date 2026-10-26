@@ -23,6 +23,7 @@
 #include "events/events.h"
 #include "net/asn.h"
 #include "ratelimit/store.h"
+#include "score/rule_samples.h"
 #include "server/health.h"
 #include "server/verdicts.h"
 #include "tls/cert_store.h"
@@ -62,6 +63,8 @@ struct AdminContext {
   const Heartbeats* heartbeats = nullptr;
   // Signs audit entries of the console (admin.audit_key_file); may be null.
   const AuditSigner* audit_signer = nullptr;
+  // Recent requests for live rule tests; may be null.
+  const RuleSampleRing* rule_samples = nullptr;
 };
 
 struct AdminResponse {
@@ -77,7 +80,7 @@ struct AdminResponse {
 //   GET    /lists            POST /lists        PATCH|DELETE /lists/<id>
 //   GET    /decisions?limit=&host=&class=       GET /decisions/<request id>
 //   GET    /attack           POST /attack       DELETE /attack/<host>
-//   POST   /rules/test       (a condition on sample events)
+//   POST   /rules/test       (a condition on sample events, or "live")
 //   GET    /asn?numbers=<n>,<n>
 //   POST   /reload           (rules, limits, policy, library, model)
 //   GET    /audit/key        POST /audit/sign   (the console's audit log)

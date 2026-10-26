@@ -336,6 +336,23 @@ log_level: info
     expect(await admin.decision('no-such-request')).toBeNull();
   });
 
+  it('live rule tests on recent requests', async () => {
+    await get('/contract/live?token=s3cr3t');
+    // What events lack: the query and the full address.
+    const live = await admin.testRuleLive(
+      'has_query("token") and cidr("127.0.0.1/32")',
+    );
+    expect(live.evaluated).toBeGreaterThan(0);
+    expect(live.matched_count).toBe(1);
+    expect(live.matches[0]).toMatchObject({
+      host: HOST,
+      path_group: '/contract/live',
+      ip_prefix: '127.0.0.0/24',
+    });
+    expect(JSON.stringify(live)).not.toContain('s3cr3t');
+    expect(JSON.stringify(live)).not.toContain('127.0.0.1');
+  });
+
   it('attack mode', async () => {
     await admin.enableAttack(HOST, '5m');
     await admin.enableAttack(`www.${HOST}`);

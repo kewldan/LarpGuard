@@ -60,6 +60,7 @@
 #include "proxy/proxy_hooks.h"
 #include "ratelimit/limits.h"
 #include "score/policy.h"
+#include "score/rule_samples.h"
 #include "score/rules.h"
 #include "server/verdicts.h"
 
@@ -74,6 +75,8 @@ constexpr std::size_t kMaxHead = std::size_t{64} * 1024;
 constexpr std::size_t kMaxBody = std::size_t{8} * 1024 * 1024;
 constexpr std::size_t kMaxSamples = 5000;
 constexpr std::size_t kMaxAsns = 200;
+// Matches described in a live rule test (the count covers them all).
+constexpr std::size_t kMaxLiveMatches = 1000;
 constexpr auto kRequestTimeout = std::chrono::seconds(10);
 
 AdminResponse Error(int status, std::string_view message) {
@@ -600,6 +603,59 @@ bool ParseSample(const nlohmann::json& json, RuleSample* sample) {
   return true;
 }
 
+// POST /rules/test {"when", "live": true}: the condition on the gateway's
+// recent requests (RuleSampleRing) with everything rules read; matches come
+// back described by event fields only (path group, prefix and hash of the
+// address), newest first.
+AdminResponse LiveRulesTest(const Condition& condition,
+                            const AdminContext& context) {
+  if (context.rule_samples == nullptr) {
+    return Error(404, "live samples are off (no admin API on the workers)");
+  }
+  const int64_t now_ms = UnixMillis();
+  int64_t oldest_ms = now_ms;
+  std::size_t evaluated = 0;
+  // Sample pointers stay valid only under their shard's lock: describe
+  // each match right away.
+  nlohmann::json matches = nlohmann::json::array();
+  std::size_t matched_count = 0;
+  std::vector<std::pair<int64_t, nlohmann::json>> found;
+  context.rule_samples->ForEach([&](const LiveRuleSample& sample) {
+    ++evaluated;
+    oldest_ms = std::min(oldest_ms, sample.time_ms);
+    if (!condition.Evaluate(sample.View())) return;
+    ++matched_count;
+    nlohmann::json match = {{"time_ms", sample.time_ms},
+                            {"request_id", sample.request_id},
+                            {"host", sample.host},
+                            {"method", sample.request.method},
+                            {"path_group", PathGroup(sample.path)},
+                            {"ip_prefix", IpPrefix(sample.ip)},
+                            {"class", sample.bot_class},
+                            {"score", sample.score},
+                            {"asn", sample.asn},
+                            {"action", sample.action},
+                            {"would_action", sample.would_action}};
+    if (context.event_settings != nullptr) {
+      match["ip_hash"] = IpHash(sample.ip, context.event_settings->ip_salt);
+    }
+    found.emplace_back(sample.time_ms, std::move(match));
+  });
+  std::ranges::sort(found, std::greater<>(),
+                    &std::pair<int64_t, nlohmann::json>::first);
+  for (auto& [time_ms, match] : found) {
+    if (matches.size() >= kMaxLiveMatches) break;
+    matches.push_back(std::move(match));
+  }
+  return {200,
+          {{"references", condition.References()},
+           {"evaluated", evaluated},
+           {"live", true},
+           {"window_ms", evaluated == 0 ? 0 : now_ms - oldest_ms},
+           {"matched_count", matched_count},
+           {"matches", std::move(matches)}}};
+}
+
 // POST /rules/test {"when": "<condition>", "samples": [<req event>, ...]}:
 // compiles the condition like a rule in the configuration and evaluates it
 // on the samples. 422 with the column on a compile error.
@@ -628,6 +684,10 @@ AdminResponse RulesTest(std::string_view body, const AdminContext& context) {
     }
     response.body["column"] = column;
     return response;
+  }
+  if (const auto live = json.find("live");
+      live != json.end() && live->is_boolean() && live->get<bool>()) {
+    return LiveRulesTest(*condition, context);
   }
   const auto asn = context.asn != nullptr ? context.asn->snapshot() : nullptr;
   nlohmann::json matched = nlohmann::json::array();

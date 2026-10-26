@@ -19,7 +19,7 @@ import {
 } from '../gateway/admin.ts';
 import { compileRule, RuleError } from './mini-rules.ts';
 import { MOCK_CONFIG } from './mock-config.ts';
-import { MOCK_ASNS, MOCK_HOSTS } from './mock-data.ts';
+import { MOCK_ASNS, MOCK_HOSTS, type MockEvent } from './mock-data.ts';
 import { createMockSettings } from './mock-settings.ts';
 
 export const MOCK_CONFIG_HASH = '7a1e2f04c9b3';
@@ -29,7 +29,11 @@ export const MOCK_SHADOW_HOSTS = new Set([
   'docs.example.com',
 ]);
 
-export function createMockAdmin(now: () => number): AdminApi {
+// `recent`: the requests the gateway would hold for live rule tests.
+export function createMockAdmin(
+  now: () => number,
+  recent: () => readonly MockEvent[] = () => [],
+): AdminApi {
   // An audit key of its own, as the gateway's admin.audit_key_file.
   const auditKeys = generateKeyPairSync('ed25519');
   const rawPublic = auditKeys.publicKey
@@ -315,6 +319,45 @@ export function createMockAdmin(now: () => number): AdminApi {
       if (!attack.delete(name)) return Promise.resolve(false);
       endRecord(name, seconds());
       return Promise.resolve(true);
+    },
+    testRuleLive: (when) => {
+      try {
+        const rule = compileRule(when);
+        const samples = recent();
+        const matches = samples
+          .filter((sample) => rule.matches(sample))
+          .reverse()
+          .slice(0, 1000);
+        return Promise.resolve({
+          references: rule.references,
+          evaluated: samples.length,
+          window_ms:
+            samples.length === 0 ? 0 : now() - (samples[0]?.ts ?? now()),
+          matched_count: samples.filter((sample) => rule.matches(sample))
+            .length,
+          matches: matches.map((sample) => ({
+            time_ms: sample.ts,
+            request_id: sample.request_id,
+            host: sample.host,
+            method: sample.method,
+            path_group: sample.path_group,
+            ip_prefix: sample.ip_prefix,
+            ip_hash: sample.ip_hash,
+            class: sample.class,
+            score: sample.score,
+            asn: sample.asn,
+            action: sample.action,
+            would_action: sample.would_action,
+          })),
+        });
+      } catch (error) {
+        if (error instanceof RuleError) {
+          return Promise.reject(
+            new AdminError(422, error.message, error.column),
+          );
+        }
+        throw error;
+      }
     },
     testRule: (when, samples) => {
       try {

@@ -77,7 +77,8 @@ const metrics: MetricsApi = {
   },
 };
 
-const admin = createMockAdmin(now);
+// The gateway's live rule samples: its most recent requests.
+const admin = createMockAdmin(now, () => events.slice(-4096));
 const app = createApp({
   config,
   admin,

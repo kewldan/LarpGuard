@@ -8,6 +8,7 @@
 #include <asio/use_awaitable.hpp>
 #include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <format>
@@ -35,6 +36,9 @@
 
 namespace bot_shield {
 namespace {
+
+// Requests kept for live rule tests: a few minutes of a busy site.
+constexpr std::size_t kLiveRuleSamples = 4096;
 
 int64_t UnixSeconds() {
   return std::chrono::duration_cast<std::chrono::seconds>(
@@ -357,7 +361,8 @@ Gateway::Gateway(const Config& config, const CertStore* certificates,
               std::chrono::duration_cast<std::chrono::seconds>(
                   config.attack_auto_duration)
                   .count(),
-              config.admin_attack_file) {
+              config.admin_attack_file),
+      rule_samples_(config.admin_socket.empty() ? 0 : kLiveRuleSamples) {
   if (services_.on_attack_auto) attack_.set_on_auto(services_.on_attack_auto);
 }
 
@@ -394,6 +399,7 @@ bool Gateway::Start(std::string* error) {
   shared.connection_counter = &connection_counter_;
   shared.pending_counter = &pending_counter_;
   shared.attack = &attack_;
+  if (!config_.admin_socket.empty()) shared.rule_samples = &rule_samples_;
   shared.events = services_.events;
   shared.event_settings = services_.event_settings;
   if (!ResolveEndpoint(config_.upstream_https, &shared.upstream_https, error) ||
@@ -456,6 +462,7 @@ bool Gateway::Start(std::string* error) {
     admin_.apply_settings = services_.apply_settings;
     admin_.asn = services_.asn;
     admin_.audit_signer = services_.audit_signer;
+    admin_.rule_samples = &rule_samples_;
     admin_.started_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::system_clock::now().time_since_epoch())
                             .count();

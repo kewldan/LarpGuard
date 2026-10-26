@@ -144,6 +144,32 @@ export const rulesTestSchema = z.object({
 });
 export type RulesTestResponse = z.infer<typeof rulesTestSchema>;
 
+// POST /rules/test with "live": matches among the gateway's recent
+// requests, described by event fields only.
+export const liveRulesTestSchema = z.object({
+  references: z.array(z.string()),
+  evaluated: z.number(),
+  window_ms: z.number(),
+  matched_count: z.number(),
+  matches: z.array(
+    z.object({
+      time_ms: z.number(),
+      request_id: z.string(),
+      host: z.string(),
+      method: z.string(),
+      path_group: z.string(),
+      ip_prefix: z.string(),
+      ip_hash: z.string().optional(),
+      class: z.string(),
+      score: z.number(),
+      asn: z.number(),
+      action: z.string(),
+      would_action: z.string(),
+    }),
+  ),
+});
+export type LiveRulesTestResponse = z.infer<typeof liveRulesTestSchema>;
+
 const asnResponseSchema = z.object({
   loaded: z.boolean(),
   asns: z.array(
@@ -210,6 +236,7 @@ export interface AdminApi {
   attack(): Promise<z.infer<typeof attackStateSchema>>;
   enableAttack(host: string, ttl?: string): Promise<void>;
   disableAttack(host: string): Promise<boolean>;
+  testRuleLive(when: string): Promise<LiveRulesTestResponse>;
   testRule(
     when: string,
     samples: RuleSampleEvent[],
@@ -401,6 +428,8 @@ export function createAdminClient(socketPath: string): AdminApi {
         undefined,
         true,
       )) !== null,
+    testRuleLive: (when) =>
+      must(liveRulesTestSchema, 'POST', '/rules/test', { when, live: true }),
     testRule: (when, samples) =>
       must(rulesTestSchema, 'POST', '/rules/test', { when, samples }),
     asns: async (numbers) => {

@@ -60,8 +60,21 @@ function toEvent(sample: SampleEvent): RuleSampleEvent {
   };
 }
 
+// A matched request, from an event or a live sample.
+interface Matched {
+  ts: number;
+  host: string;
+  path_group: string;
+  score: number;
+  class: string;
+  asn: number;
+  ip_prefix: string;
+  action: string;
+  would_action: string;
+}
+
 // What enforce mode does with a request now: the would-be action.
-function current(sample: SampleEvent): string {
+function current(sample: Matched): string {
   return sample.would_action || sample.action || 'allow';
 }
 
@@ -120,17 +133,44 @@ export function registerRules(app: Hono<AppEnv>): void {
     const draft = parseOr400(ruleTestRequestSchema, await jsonBody(c));
     // Compile first: errors come back fast, without touching ClickHouse.
     const check = await deps.admin.testRule(draft.when, []);
-    const { total, samples } = await analytics(deps).ruleSamples(
-      3600,
-      SAMPLE_TARGET,
-    );
-    const result =
-      samples.length === 0
-        ? check
-        : await deps.admin.testRule(draft.when, samples.map(toEvent));
-    const matched = result.matched
-      .map((index) => samples[index])
-      .filter((sample): sample is SampleEvent => sample !== undefined);
+    let matched: Matched[];
+    let total: number;
+    let sampled: number;
+    let windowMs: number | null = null;
+    let matchedCount: number;
+    if (draft.source === 'live') {
+      // Exact: the gateway's recent requests with headers, cookies, query
+      // and the full address; matches come back as event fields.
+      const live = await deps.admin.testRuleLive(draft.when);
+      matched = live.matches.map((match) => ({
+        ts: match.time_ms,
+        host: match.host,
+        path_group: match.path_group,
+        score: match.score,
+        class: match.class,
+        asn: match.asn,
+        ip_prefix: match.ip_prefix,
+        action: match.action,
+        would_action: match.would_action,
+      }));
+      total = live.evaluated;
+      sampled = live.evaluated;
+      windowMs = live.window_ms;
+      matchedCount = live.matched_count;
+    } else {
+      const events = await analytics(deps).ruleSamples(3600, SAMPLE_TARGET);
+      const result =
+        events.samples.length === 0
+          ? check
+          : await deps.admin.testRule(draft.when, events.samples.map(toEvent));
+      matched = result.matched
+        .map((index) => events.samples[index])
+        .filter((sample): sample is SampleEvent => sample !== undefined)
+        .map((sample) => ({ ...sample, path_group: sample.path }));
+      total = events.total;
+      sampled = events.samples.length;
+      matchedCount = matched.length;
+    }
     const hosts = [...new Set(matched.map((sample) => sample.host))].slice(
       0,
       50,
@@ -146,20 +186,22 @@ export function registerRules(app: Hono<AppEnv>): void {
         ),
       ),
     );
-    const after = (sample: SampleEvent) =>
+    const after = (sample: Matched) =>
       draft.action === 'score' ? current(sample) : draft.action;
     const byHost = new Map<string, number>();
     for (const sample of matched) {
       byHost.set(sample.host, (byHost.get(sample.host) ?? 0) + 1);
     }
     const response: RuleTestResult = {
+      source: draft.source,
+      window_ms: windowMs,
       total,
-      sampled: samples.length,
-      matched: matched.length,
+      sampled,
+      matched: matchedCount,
       estimated:
-        samples.length === 0
-          ? 0
-          : Math.round((matched.length / samples.length) * total),
+        draft.source === 'live' || sampled === 0
+          ? matchedCount
+          : Math.round((matchedCount / sampled) * total),
       action_changes: matched.filter(
         (sample) => current(sample) !== after(sample),
       ).length,
@@ -172,12 +214,16 @@ export function registerRules(app: Hono<AppEnv>): void {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
         .map(([host, count]) => ({ host, matched: count })),
-      approximate: result.references.filter((name) => APPROXIMATE.has(name)),
-      references: result.references,
+      // Live samples carry everything a rule reads.
+      approximate:
+        draft.source === 'live'
+          ? []
+          : check.references.filter((name) => APPROXIMATE.has(name)),
+      references: check.references,
       samples: matched.slice(0, SHOWN_SAMPLES).map((sample) => ({
         ts: sample.ts,
         host: sample.host,
-        path_group: sample.path,
+        path_group: sample.path_group,
         score: sample.score,
         class: sample.class,
         asn: sample.asn,

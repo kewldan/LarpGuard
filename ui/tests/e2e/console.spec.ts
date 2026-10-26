@@ -111,6 +111,10 @@ test('a rule is type-checked as you type and tested on the last hour', async ({
   await page.getByRole('button', { name: 'Test against 1h' }).click();
   await expect(page.getByText('Would match')).toBeVisible();
   await expect(page.getByRole('table')).toContainText('block');
+  // Live: the gateway's recent requests, exact.
+  await page.getByRole('button', { name: 'Live, exact' }).click();
+  await page.getByRole('button', { name: 'Test live' }).click();
+  await expect(page.getByText(/recent requests/)).toBeVisible();
   await page.getByRole('button', { name: 'Discard draft' }).click();
 });
 
