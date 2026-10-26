@@ -91,6 +91,16 @@ describe('readiness from ClickHouse rows', () => {
   });
 });
 
+describe('consumers', () => {
+  it('keeps aliases off the columns it filters on', () => {
+    for (const by of ['ip_prefix', 'ip_hash', 'session'] as const) {
+      expect(sql.consumers(60, 10, by).sql).not.toMatch(
+        /\bAS (ip_prefix|ip_hash|session|ts)\b/,
+      );
+    }
+  });
+});
+
 describe('challengeStep', () => {
   const event = (action: string, reasons: string[]) => ({
     ts: 1,

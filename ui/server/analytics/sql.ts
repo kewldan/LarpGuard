@@ -369,10 +369,12 @@ GROUP BY name`,
 
   // The busiest clients by a limit's key as events carry it: the network,
   // the address hash (key `ip`) or the clearance session (key `session`).
+  // `network`, not `ip_prefix`: an alias named like a column replaces it
+  // in WHERE.
   consumers(seconds: number, limit: number, by: ConsumerKey): Query {
     const column = CONSUMER_COLUMNS[by];
     return {
-      sql: `SELECT ${column} AS key, any(ip_prefix) AS ip_prefix,
+      sql: `SELECT ${column} AS key, any(ip_prefix) AS network,
   uniq(ip_hash) AS ip_hash_count,
   topK(1)(host)[1] AS host, count() / {seconds:Float64} AS rps,
   countIf(rate_limit != '') AS refused

@@ -472,18 +472,20 @@ export function createAnalytics(database: string, run: Run): Analytics {
 
     refusedByLimit: (seconds) => nameCounts(sql.refusedByLimit(seconds)),
 
-    consumers: (seconds, by) =>
-      run(
-        sql.consumers(seconds, 10, by),
-        z.object({
-          key: z.string(),
-          ip_prefix: z.string(),
-          ip_hash_count: num,
-          host: z.string(),
-          rps: num,
-          refused: num,
-        }),
-      ),
+    consumers: async (seconds, by) =>
+      (
+        await run(
+          sql.consumers(seconds, 10, by),
+          z.object({
+            key: z.string(),
+            network: z.string(),
+            ip_hash_count: num,
+            host: z.string(),
+            rps: num,
+            refused: num,
+          }),
+        )
+      ).map(({ network, ...row }) => ({ ...row, ip_prefix: network })),
 
     hostStats: (seconds) => run(sql.hostStats(seconds), hostRow),
 

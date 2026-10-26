@@ -155,10 +155,14 @@ function recordDetail(record: AttackRecord): string {
     record.source === 'auto' && record.threshold
       ? `over ${count(record.threshold)} rps${record.host === '*' ? ' in total' : ''}`
       : 'by an operator';
+  const lasted =
+    record.ended === undefined ? null : record.ended - record.since;
   const length =
-    record.ended !== undefined
-      ? `for ${duration((record.ended - record.since) * 1000)}`
-      : 'still on';
+    lasted === null
+      ? 'still on'
+      : lasted < 60
+        ? 'for under a minute'
+        : `for ${duration(Math.round(lasted / 60) * 60_000)}`;
   return `${trigger} · ${length}`;
 }
 
