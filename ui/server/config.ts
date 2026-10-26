@@ -88,6 +88,13 @@ export const consoleConfigSchema = z
       .nullable()
       .default(null),
     audit_log: z.string().min(1),
+    // Users added by an admin in the console (written by the console);
+    // null: only console.yaml's users, none can be added.
+    users_file: z
+      .string()
+      .min(1)
+      .nullable()
+      .default('/var/lib/larpguard/users.json'),
     // Registered passkeys (written by the console); null turns passkeys off.
     passkeys_file: z
       .string()

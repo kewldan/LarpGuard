@@ -18,6 +18,7 @@ import {
 } from '../shared/api.ts';
 import { type SessionData, safeEqual } from './auth/sessions.ts';
 import { SignInGuard } from './auth/signin.ts';
+import { UserDirectory } from './auth/users.ts';
 import { type ConsoleUser, secureCookies } from './config.ts';
 import type { AppEnv, Deps } from './deps.ts';
 import {
@@ -34,6 +35,7 @@ import {
   registerPasskeySignIn,
   registerPasskeys,
 } from './routes/passkeys.ts';
+import { registerUsers } from './routes/users.ts';
 
 const CSP = [
   "default-src 'self'",
@@ -127,7 +129,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   const cookie = cookieName(deps);
   const secure = secureCookies(deps.config);
   const origin = new URL(deps.config.public_origin).origin;
-  const users = new Map(deps.config.users.map((user) => [user.name, user]));
+  const users = new UserDirectory(deps.config.users, deps.config.users_file);
   const guard = new SignInGuard(deps.verifyPassword);
   const network = (c: Context<AppEnv>) =>
     addressPrefix(clientAddress(c)) || 'unknown';
@@ -299,6 +301,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
 
   registerRoutes(app);
   registerPasskeys(app, passkeys);
+  registerUsers(app, { guard, users, network });
 
   app.all('/api/*', () => fail(404, 'unknown endpoint'));
 

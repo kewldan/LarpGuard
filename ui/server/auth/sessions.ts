@@ -80,6 +80,15 @@ export class SessionStore {
     }
   }
 
+  // Live sessions of a user (the users screen).
+  countUser(user: string, now: number): number {
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      if (session.user === user && !this.expired(session, now)) count += 1;
+    }
+    return count;
+  }
+
   get size(): number {
     return this.sessions.size;
   }

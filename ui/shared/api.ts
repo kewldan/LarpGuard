@@ -111,6 +111,55 @@ export const passkeySignInSchema = z.object({
 // session alone cannot plant a lasting credential.
 export const passkeyReauthSchema = loginSchema.omit({ username: true });
 
+// --- Users (admin) -----------------------------------------------------------
+
+const userNameSchema = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/);
+
+export const userListSchema = z.object({
+  // users_file is set: users can be added here (console.yaml's stay
+  // read-only).
+  editable: z.boolean(),
+  users: z.array(
+    z.object({
+      name: z.string(),
+      role: roleSchema,
+      source: z.enum(['config', 'console']),
+      created_at: z.number().nullable(),
+      created_by: z.string().nullable(),
+      passkeys: z.number(),
+      sessions: z.number(),
+    }),
+  ),
+});
+export type UserList = z.infer<typeof userListSchema>;
+
+// Every change to users asks for the admin's own password and code again.
+const confirmSchema = passkeyReauthSchema;
+
+export const newUserSchema = z.object({
+  name: userNameSchema,
+  role: roleSchema,
+  confirm: confirmSchema,
+});
+export type NewUser = z.infer<typeof newUserSchema>;
+
+export const changeUserSchema = z.object({
+  role: roleSchema,
+  confirm: confirmSchema,
+});
+
+export const confirmUserSchema = z.object({ confirm: confirmSchema });
+
+// Shown once: the console keeps only the scrypt hash and the secret.
+export const userCredentialsSchema = z.object({
+  name: z.string(),
+  role: roleSchema,
+  password: z.string(),
+  totp_secret: z.string(),
+  otpauth: z.string(),
+});
+export type UserCredentials = z.infer<typeof userCredentialsSchema>;
+
 export const newPasskeySchema = z.object({
   name: z.string().trim().min(1).max(64),
   response: credentialResponse,
@@ -1071,6 +1120,7 @@ export const AUDIT_KINDS = [
   'reload',
   'settings',
   'auth',
+  'users',
 ] as const;
 export const auditKindSchema = z.enum(AUDIT_KINDS);
 export type AuditKind = z.infer<typeof auditKindSchema>;

@@ -1,8 +1,12 @@
 // Development server: the BFF with an in-memory gateway and synthetic
-// analytics (npm run dev:api, browser tests). Sign in as "dev" (operator)
+// analytics (npm run dev:api, browser tests). Sign in as "dev" (admin)
 // or "viewer" with password "dev-password-1" and the TOTP code of
 // DEV_TOTP_SECRET. LG_FIXED_TIME (Unix ms) freezes the clock and the
 // traffic, for repeatable screenshots.
+
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { serve } from '@hono/node-server';
 
@@ -25,9 +29,10 @@ const config = parseConsoleConfig(`
 listen: 127.0.0.1:${port}
 public_origin: ${origin}
 audit_log: /dev/null
+users_file: ${join(mkdtempSync(join(tmpdir(), 'larpguard-dev-')), 'users.json')}
 users:
   - name: dev
-    role: operator
+    role: admin
     password: scrypt$10$8$1$ZGV2LXNhbHQtMDEyMzQ1Ng==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     totp_secret: ${DEV_TOTP_SECRET}
   - name: viewer

@@ -6,7 +6,7 @@ import type { Role } from '../shared/domain.ts';
 import type { AppEnv } from './deps.ts';
 import { fail } from './http.ts';
 
-const ROLE_RANK: Record<Role, number> = { viewer: 0, operator: 1 };
+const ROLE_RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
 
 export function requireRole(role: Role): MiddlewareHandler<AppEnv> {
   return async (c, next) => {

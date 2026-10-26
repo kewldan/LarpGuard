@@ -37,13 +37,14 @@ import {
 } from '../auth/passkeys.ts';
 import type { SessionData } from '../auth/sessions.ts';
 import type { SignInGuard } from '../auth/signin.ts';
+import type { UserDirectory } from '../auth/users.ts';
 import type { ConsoleUser } from '../config.ts';
 import type { AppEnv } from '../deps.ts';
 import { fail, jsonBody, parseOr400, send } from '../http.ts';
 
 export interface PasskeyContext {
   guard: SignInGuard;
-  users: Map<string, ConsoleUser>;
+  users: Pick<UserDirectory, 'get'>;
   origin: string;
   // The client's network (a /24 or /48), for the limiter and the audit.
   network: (c: Context<AppEnv>) => string;

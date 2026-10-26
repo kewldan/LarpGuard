@@ -86,7 +86,7 @@ export const crawlersSearch = z.object({
 
 export const auditSearch = z.object({
   kind: z
-    .enum(['list', 'attack', 'mode', 'reload', 'settings', 'auth'])
+    .enum(['list', 'attack', 'mode', 'reload', 'settings', 'auth', 'users'])
     .optional()
     .catch(undefined),
   q: z.string().max(200).optional().catch(undefined),

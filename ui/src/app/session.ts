@@ -54,5 +54,9 @@ export function useSession(): Session {
 }
 
 export function useCanOperate(): boolean {
-  return useSession().user.role === 'operator';
+  return useSession().user.role !== 'viewer';
+}
+
+export function useIsAdmin(): boolean {
+  return useSession().user.role === 'admin';
 }

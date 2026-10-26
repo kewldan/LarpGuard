@@ -63,6 +63,14 @@ export class PasskeyStore {
     return passkey;
   }
 
+  // Every passkey of a user (removed or recovered account); how many.
+  removeUser(user: string): number {
+    const kept = this.passkeys.filter((passkey) => passkey.user !== user);
+    const removed = this.passkeys.length - kept.length;
+    if (removed > 0) this.save(kept);
+    return removed;
+  }
+
   used(id: string, counter: number, now: number): void {
     this.save(
       this.passkeys.map((passkey) =>

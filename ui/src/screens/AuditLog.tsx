@@ -24,6 +24,7 @@ const KINDS: { kind: AuditKind | undefined; name: string }[] = [
   { kind: 'settings', name: 'Settings' },
   { kind: 'reload', name: 'Config reloads' },
   { kind: 'auth', name: 'Sign-in' },
+  { kind: 'users', name: 'Users' },
 ];
 
 const KIND_LOOK: Record<AuditKind, [string, string]> = {
@@ -32,6 +33,7 @@ const KIND_LOOK: Record<AuditKind, [string, string]> = {
   mode: ['var(--color-surface-3)', 'var(--color-text)'],
   list: ['var(--color-blocked-soft)', 'var(--color-blocked-text)'],
   auth: ['var(--color-verified-soft)', 'var(--color-verified)'],
+  users: ['var(--color-verified-soft)', 'var(--color-verified)'],
   attack: ['var(--color-blocked)', 'var(--color-on-blocked-chip)'],
 };
 

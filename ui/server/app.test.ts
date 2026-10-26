@@ -746,3 +746,160 @@ describe('the SPA', () => {
     expect((await app.request('/api/nope')).status).toBe(401);
   });
 });
+
+describe('users', () => {
+  let dir: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'lg-users-'));
+  });
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true });
+  });
+
+  function adminApp() {
+    return build({
+      config: {
+        ...config,
+        users_file: join(dir, `users-${Math.random()}.json`),
+        users: config.users.map((user) =>
+          user.name === 'ops' ? { ...user, role: 'admin' as const } : user,
+        ),
+      },
+    });
+  }
+
+  // A fresh code each time: a code works once.
+  function confirm() {
+    clock += 30_000;
+    return { password: 'right-password', totp: code() };
+  }
+
+  it('are for admins only', async () => {
+    const app = build();
+    const operator = await signIn(app);
+    expect((await send(app, operator, 'GET', '/api/users')).status).toBe(403);
+  });
+
+  it('are added, re-roled, reset and removed with a fresh check each time', async () => {
+    const app = adminApp();
+    const admin = await signIn(app);
+    const listed = (await (
+      await send(app, admin, 'GET', '/api/users')
+    ).json()) as {
+      editable: boolean;
+      users: { name: string; source: string }[];
+    };
+    expect(listed.editable).toBe(true);
+    expect(listed.users.map((user) => user.source)).toEqual([
+      'config',
+      'config',
+    ]);
+
+    // A wrong code is refused (and counts against the limiter).
+    expect(
+      (
+        await send(app, admin, 'POST', '/api/users', {
+          name: 'new-ops',
+          role: 'operator',
+          confirm: { password: 'right-password', totp: '000000' },
+        })
+      ).status,
+    ).toBe(403);
+    const added = await send(app, admin, 'POST', '/api/users', {
+      name: 'new-ops',
+      role: 'operator',
+      confirm: confirm(),
+    });
+    expect(added.status).toBe(201);
+    const credentials = (await added.json()) as {
+      password: string;
+      totp_secret: string;
+      otpauth: string;
+    };
+    expect(credentials.password.length).toBeGreaterThanOrEqual(20);
+    expect(credentials.otpauth).toContain('new-ops');
+    // The new user signs in with the secret they were given.
+    clock += 30_000;
+    const newcomer = await signIn(
+      app,
+      'new-ops',
+      totpAt(base32Decode(credentials.totp_secret), Math.floor(clock / 1000)),
+    );
+    expect(newcomer.response.status).toBe(200);
+    expect(
+      (
+        await send(app, admin, 'POST', '/api/users', {
+          name: 'watcher',
+          role: 'viewer',
+          confirm: confirm(),
+        })
+      ).status,
+    ).toBe(409);
+
+    // A role change ends their sessions.
+    expect(
+      (
+        await send(app, admin, 'PATCH', '/api/users/new-ops', {
+          role: 'viewer',
+          confirm: confirm(),
+        })
+      ).status,
+    ).toBe(204);
+    expect((await send(app, newcomer, 'GET', '/api/status')).status).toBe(401);
+
+    const reset = await send(
+      app,
+      admin,
+      'POST',
+      '/api/users/new-ops/credentials',
+      {
+        confirm: confirm(),
+      },
+    );
+    expect(reset.status).toBe(200);
+    expect(
+      ((await reset.json()) as { totp_secret: string }).totp_secret,
+    ).not.toBe(credentials.totp_secret);
+
+    // console.yaml's users and the admin's own account stay as they are.
+    expect(
+      (
+        await send(app, admin, 'PATCH', '/api/users/watcher', {
+          role: 'operator',
+          confirm: confirm(),
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await send(app, admin, 'DELETE', '/api/users/ops', {
+          confirm: confirm(),
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await send(app, admin, 'DELETE', '/api/users/new-ops', {
+          confirm: confirm(),
+        })
+      ).status,
+    ).toBe(204);
+    const audit = (await (
+      await send(app, admin, 'GET', '/api/audit')
+    ).json()) as {
+      entries: { kind: string; what: string }[];
+    };
+    expect(
+      audit.entries
+        .filter((entry) => entry.kind === 'users')
+        .map((e) => e.what),
+    ).toEqual([
+      'Removed user new-ops',
+      'New password and code for new-ops',
+      'new-ops: role operator → viewer',
+      'Added user new-ops (operator)',
+    ]);
+  });
+});

@@ -44,9 +44,12 @@ import {
   settingsSchema,
   statusSchema,
   type UpdateListEntry,
+  type UserCredentials,
+  userCredentialsSchema,
+  userListSchema,
 } from '../../shared/api.ts';
 
-import type { Range } from '../../shared/domain.ts';
+import type { Range, Role } from '../../shared/domain.ts';
 import { getJson, send, sendJson } from './api.ts';
 import { addPasskey } from './passkeys.ts';
 
@@ -71,6 +74,7 @@ export const keys = {
   audit: ['audit'] as const,
   search: (q: string) => ['search', q] as const,
   passkeys: ['passkeys'] as const,
+  users: ['users'] as const,
   settings: ['settings'] as const,
   settingsHistory: ['settings', 'history'] as const,
 };
@@ -300,6 +304,60 @@ export function usePasskeys() {
     queryFn: ({ signal }) =>
       getJson(passkeyListSchema, '/api/passkeys', undefined, signal),
   });
+}
+
+export function useUsers(enabled: boolean) {
+  return useQuery({
+    queryKey: keys.users,
+    queryFn: ({ signal }) =>
+      getJson(userListSchema, '/api/users', undefined, signal),
+    enabled,
+  });
+}
+
+type Confirm = { password: string; totp: string };
+
+// Each answers with the new user's credentials, shown once (null when
+// there are none to show).
+export function useUserChange() {
+  return useChange(
+    async (
+      change:
+        | { kind: 'add'; name: string; role: Role; confirm: Confirm }
+        | { kind: 'role'; name: string; role: Role; confirm: Confirm }
+        | { kind: 'reset'; name: string; confirm: Confirm }
+        | { kind: 'remove'; name: string; confirm: Confirm },
+    ): Promise<UserCredentials | null> => {
+      const path = `/api/users/${encodeURIComponent(change.name)}`;
+      switch (change.kind) {
+        case 'add':
+          return sendJson(userCredentialsSchema, 'POST', '/api/users', {
+            name: change.name,
+            role: change.role,
+            confirm: change.confirm,
+          });
+        case 'role':
+          await send('PATCH', path, {
+            role: change.role,
+            confirm: change.confirm,
+          });
+          return null;
+        case 'reset':
+          return sendJson(
+            userCredentialsSchema,
+            'POST',
+            `${path}/credentials`,
+            {
+              confirm: change.confirm,
+            },
+          );
+        case 'remove':
+          await send('DELETE', path, { confirm: change.confirm });
+          return null;
+      }
+    },
+    [keys.users, keys.audit],
+  );
 }
 
 export function useSearch(q: string) {

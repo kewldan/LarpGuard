@@ -153,6 +153,22 @@ test('a limit what-if is applied to the gateway, then the file is back', async (
   ).toBeVisible();
 });
 
+test('an admin sees the users and the add form', async ({ page }) => {
+  // Confirming needs a fresh code, and the frozen clock leaves dev one
+  // more (the passkey test takes it): this stops at the form.
+  await open(page, '/settings');
+  const users = page.getByRole('region', { name: 'Users' });
+  await expect(users.getByText('dev (you)')).toBeVisible();
+  await expect(
+    users.getByText('viewer', { exact: true }).first(),
+  ).toBeVisible();
+  await users.getByRole('button', { name: 'Add user' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add a user' });
+  await expect(dialog.getByLabel('Your code')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+});
+
 test('switch a host to enforce and back', async ({ page }) => {
   await open(page, '/hosts?host=shop.example.com');
   await page.getByRole('radio', { name: /ENFORCE/ }).click();

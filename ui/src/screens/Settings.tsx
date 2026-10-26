@@ -8,10 +8,12 @@ import { setTheme, type ThemeChoice, useTheme } from '../lib/theme.ts';
 import { Card, PageHead } from '../ui/Card.tsx';
 import { Segmented } from '../ui/controls.tsx';
 import { PasskeysCard } from './SettingsPasskeys.tsx';
+import { UsersCard } from './SettingsUsers.tsx';
 import styles from './screens.module.css';
 
 export function Settings() {
   const session = useSession();
+  const isAdmin = session.user.role === 'admin';
   const { choice } = useTheme();
   const gateway = useStatus().data?.gateway;
   const config = useGatewayConfig().data;
@@ -19,9 +21,11 @@ export function Settings() {
     ['User', session.user.name],
     [
       'Role',
-      session.user.role === 'operator'
-        ? 'operator: can change lists, modes, attack mode, settings and reload'
-        : 'viewer: read-only',
+      session.user.role === 'admin'
+        ? 'admin: an operator who also manages the console users'
+        : session.user.role === 'operator'
+          ? 'operator: can change lists, modes, attack mode, settings and reload'
+          : 'viewer: read-only',
     ],
     ['Session ends', dateTime(session.expires_at)],
   ];
@@ -60,14 +64,16 @@ export function Settings() {
               lineHeight: 1.5,
             }}
           >
-            Users, roles, passwords and two-factor secrets live in the
-            console&apos;s <span className="mono">console.yaml</span> (
+            Users come from the console&apos;s{' '}
+            <span className="mono">console.yaml</span> (
             <span className="mono">larpguard-console hash-password</span>,{' '}
-            <span className="mono">totp-secret</span>). Passkeys are yours to
+            <span className="mono">totp-secret</span>) and, added by an admin,
+            from <span className="mono">users_file</span>. Passkeys are yours to
             add below.
           </div>
         </Card>
         <PasskeysCard />
+        {isAdmin ? <UsersCard /> : null}
         <Card title="Appearance">
           <div
             style={{

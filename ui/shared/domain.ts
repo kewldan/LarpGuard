@@ -102,7 +102,8 @@ export const RANGE_STEP_SECONDS: Record<Range, number> = {
 export const LIST_KINDS = ['ip', 'ja4', 'header_fp', 'asn'] as const;
 export type ListKind = (typeof LIST_KINDS)[number];
 
-export const ROLES = ['viewer', 'operator'] as const;
+// admin: an operator who also manages the console's users.
+export const ROLES = ['viewer', 'operator', 'admin'] as const;
 export type Role = (typeof ROLES)[number];
 
 // Reason codes with a parameter: "rule:<name>", "list:<id>",

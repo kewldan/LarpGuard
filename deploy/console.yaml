@@ -25,8 +25,13 @@ clickhouse:
   user: console
   password_file: /etc/larpguard/clickhouse.password
 
-# Every change and sign-in, hash-chained (append-only).
+# Every change and sign-in, hash-chained (append-only); with the gateway's
+# admin.audit_key_file each entry is also signed by the gateway.
 audit_log: /var/lib/larpguard/audit.jsonl
+
+# Users an admin adds in Settings → Users (written by the console, mode
+# 0600); null: users come from this file only.
+users_file: /var/lib/larpguard/users.json   # The default.
 
 # Passkeys users add in Settings (written by the console, mode 0600); null
 # turns passkeys off. They need HTTPS: the RP ID is public_origin's host.
@@ -37,11 +42,13 @@ session:
   max: 12h
 
 # viewer: reads everything and tests rules; operator: also lists, attack
-# mode, host modes and reloads. Make the values with
+# mode, host modes, settings and reloads; admin: an operator who also
+# manages the users in users_file (these here stay as written). Make the
+# values with
 #   larpguard-console hash-password      (reads the password from stdin)
 #   larpguard-console totp-secret <name> (prints the secret and an otpauth URI)
 users:
   - name: admin
-    role: operator
+    role: admin
     password: scrypt$17$8$1$REPLACE$REPLACE
     totp_secret: REPLACEWITHBASE32SECRET
