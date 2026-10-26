@@ -15,6 +15,7 @@
 #include <functional>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -24,6 +25,7 @@
 #include "common/metrics.h"
 #include "fp/http_request.h"
 #include "net/watchdog.h"
+#include "proxy/body_rate.h"
 #include "proxy/exchange.h"
 #include "proxy/http_message.h"
 #include "proxy/proxy_hooks.h"
@@ -546,7 +548,15 @@ asio::awaitable<void> H1ServerConnection::Run() {
     std::shared_ptr<Exchange> exchange = exchange_;
     asio::co_spawn(executor, WriteResponse(exchange), asio::detached);
 
-    // Request body, throttled by what the upstream has consumed.
+    // Request body, throttled by what the upstream has consumed. Only reads
+    // count against the minimum body rate: waiting for the upstream is not
+    // the client's fault.
+    BodyRate body_rate;
+    if (!BodyRateExempt(
+            FindHeader(exchange->request.headers, "content-type"))) {
+      body_rate = BodyRate(settings_.request_body_timeout,
+                           settings_.request_body_min_rate);
+    }
     bool client_ended = false;
     while (!message_complete_ && !response_done_ && !write_failed_) {
       if (exchange->request_body.size() > settings_.max_buffered_body) {
@@ -560,7 +570,26 @@ asio::awaitable<void> H1ServerConnection::Run() {
         }
         continue;
       }
-      if (!co_await ReadMore()) {
+      const auto started = std::chrono::steady_clock::now();
+      bool read = false;
+      bool too_slow = false;
+      {
+        std::optional<ScopedWatchdog> deadline;
+        if (body_rate.enabled()) {
+          deadline.emplace(executor, body_rate.remaining(),
+                           [this] { transport_->Close(); });
+        }
+        read = co_await ReadMore();
+        too_slow = deadline && (*deadline)->expired();
+      }
+      body_rate.Received(buffer_.size());
+      if (too_slow ||
+          body_rate.Charge(std::chrono::steady_clock::now() - started)) {
+        GlobalMetrics().request_body_timeouts.Inc();
+        client_ended = true;
+        break;
+      }
+      if (!read) {
         client_ended = true;
         break;
       }

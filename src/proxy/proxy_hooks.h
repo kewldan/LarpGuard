@@ -32,6 +32,10 @@ struct ProxySettings {
   // connection starts; later ones this long after their first byte
   // (HTTP/1.1) or HEADERS frame (HTTP/2).
   std::chrono::milliseconds request_headers_timeout{10000};
+  // Minimum request body rate (BodyRate): `request_body_timeout` of grace,
+  // one more second per `request_body_min_rate` bytes; 0 bytes/s: off.
+  std::chrono::milliseconds request_body_timeout{20000};
+  int64_t request_body_min_rate = 500;
   // Then HTTP/1.1 answers with "Connection: close" and HTTP/2 sends GOAWAY.
   std::size_t max_requests_per_connection = 1000;
   // Alt-Svc sent with every response (HTTP/3 advertisement); empty: none.

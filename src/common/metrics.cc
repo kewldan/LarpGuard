@@ -70,6 +70,11 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_request_header_timeouts_total", "",
                request_header_timeouts.Get());
 
+  AppendHeader(&out, "bot_shield_request_body_timeouts_total", "counter",
+               "Requests cut off for a body below the minimum rate.");
+  AppendSample(&out, "bot_shield_request_body_timeouts_total", "",
+               request_body_timeouts.Get());
+
   AppendHeader(&out, "bot_shield_connection_request_limit_total", "counter",
                "Client connections ended after max_requests_per_connection.");
   AppendSample(&out, "bot_shield_connection_request_limit_total", "",

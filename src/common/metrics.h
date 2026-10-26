@@ -37,6 +37,7 @@ struct Metrics {
   Counter rejected_no_server_name;
   Counter rejected_pending_per_ip;
   Counter request_header_timeouts;
+  Counter request_body_timeouts;
   Counter connection_request_limits;
   Counter h2_client_resets;
   Counter challenge_endpoint_limited;

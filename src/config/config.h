@@ -65,6 +65,12 @@ struct Config {
   // From the end of the TLS handshake (or the first byte of a keep-alive
   // request) until the request headers are complete.
   std::chrono::milliseconds request_headers_timeout{10000};
+  // Minimum request body rate (slow POST): a body gets
+  // `request_body_timeout` of grace and one more second per
+  // `request_body_min_rate` bytes received (never above the grace); time
+  // the gateway itself waits for Traefik is not counted. 0 bytes/s: off.
+  std::chrono::milliseconds request_body_timeout{20000};
+  int64_t request_body_min_rate = 500;
   std::chrono::milliseconds drain_timeout{30000};
 
   std::size_t max_connections = 100000;

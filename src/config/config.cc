@@ -169,11 +169,22 @@ bool ParseTraefik(const YAML::Node& node, Config* config, std::string* error) {
 bool ParseTimeouts(const YAML::Node& node, Config* config, std::string* error) {
   if (!CheckKeys(node, "timeouts",
                  {"client_hello", "tls_handshake", "request_headers",
-                  "upstream_connect", "idle", "drain", "upstream_idle"},
+                  "request_body", "request_body_min_rate", "upstream_connect",
+                  "idle", "drain", "upstream_idle"},
                  error)) {
     return false;
   }
-  return ReadDuration(node, "timeouts", "client_hello",
+  if (const YAML::Node rate = node["request_body_min_rate"]) {
+    const auto value = rate.as<int64_t>();
+    if (value < 0) {
+      *error = "timeouts.request_body_min_rate: expected bytes per second >= 0";
+      return false;
+    }
+    config->request_body_min_rate = value;
+  }
+  return ReadDuration(node, "timeouts", "request_body",
+                      &config->request_body_timeout, error) &&
+         ReadDuration(node, "timeouts", "client_hello",
                       &config->client_hello_timeout, error) &&
          ReadDuration(node, "timeouts", "tls_handshake",
                       &config->tls_handshake_timeout, error) &&

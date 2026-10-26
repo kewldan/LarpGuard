@@ -54,6 +54,7 @@ add_library(bot_shield_core STATIC
   net/proxy_protocol.cc
   net/socket_options.cc
   net/watchdog.cc
+  proxy/body_rate.cc
   proxy/exchange.cc
   proxy/h1_server.cc
   proxy/h2_connection.cc

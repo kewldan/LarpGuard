@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <asio/ip/address.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -8,11 +9,41 @@
 #include <utility>
 #include <vector>
 
+#include "proxy/body_rate.h"
 #include "proxy/exchange.h"
 #include "proxy/http_message.h"
 
 namespace bot_shield {
 namespace {
+
+TEST(BodyRateTest, GraceThenOneSecondPerMinRateBytes) {
+  using std::chrono::milliseconds;
+  BodyRate rate(milliseconds(2000), 1000);
+  EXPECT_TRUE(rate.enabled());
+  EXPECT_EQ(rate.remaining(), milliseconds(2000));
+  EXPECT_FALSE(rate.Charge(milliseconds(1500)));
+  rate.Received(500);  // Half a second more.
+  EXPECT_EQ(rate.remaining(), milliseconds(1000));
+  // Credit never grows above the grace: a fast start buys no slack later.
+  rate.Received(1'000'000);
+  EXPECT_EQ(rate.remaining(), milliseconds(2000));
+  EXPECT_FALSE(rate.Charge(milliseconds(1999)));
+  EXPECT_TRUE(rate.Charge(milliseconds(1)));
+  EXPECT_TRUE(rate.expired());
+}
+
+TEST(BodyRateTest, DisabledAndExempt) {
+  BodyRate off;
+  EXPECT_FALSE(off.enabled());
+  EXPECT_FALSE(off.Charge(std::chrono::hours(1)));
+  EXPECT_FALSE(off.expired());
+  BodyRate zero(std::chrono::seconds(20), 0);
+  EXPECT_FALSE(zero.enabled());
+  EXPECT_TRUE(BodyRateExempt("application/grpc"));
+  EXPECT_TRUE(BodyRateExempt("application/grpc+proto"));
+  EXPECT_FALSE(BodyRateExempt("application/json"));
+  EXPECT_FALSE(BodyRateExempt(""));
+}
 
 TEST(HttpMessageTest, ReplacesAltSvc) {
   // Traefik's Alt-Svc would send clients past the gateway (ADR-011).

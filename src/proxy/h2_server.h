@@ -3,6 +3,8 @@
 
 #include <nghttp2/nghttp2.h>
 
+#include <asio/steady_timer.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -13,6 +15,7 @@
 #include "fp/h2_fingerprint.h"
 #include "fp/http_request.h"
 #include "net/watchdog.h"
+#include "proxy/body_rate.h"
 #include "proxy/exchange.h"
 #include "proxy/h2_connection.h"
 #include "proxy/http_message.h"
@@ -46,6 +49,8 @@ class H2ServerConnection final : public H2Connection {
     HttpRequest observed;
     HeaderList trailers;
     std::shared_ptr<Exchange> exchange;
+    // Minimum body rate while the request body is still arriving.
+    BodyRate body_rate;
     bool response_submitted = false;
     bool reported = false;
   };
@@ -67,6 +72,10 @@ class H2ServerConnection final : public H2Connection {
   }
   // Arms or disarms the request_headers deadline to match AwaitingHeaders().
   void UpdateHeadersDeadline();
+  // Charges streams waiting for request body bytes once a second and resets
+  // those below the minimum rate.
+  void ArmBodyTimer();
+  void CheckBodyRates();
 
   Stream* FindStream(int32_t id);
   void OnRequestHeaders(Stream& stream, bool end_stream);
@@ -105,6 +114,9 @@ class H2ServerConnection final : public H2Connection {
   // Stream whose header block has begun but not ended; 0 if none.
   int32_t header_block_stream_ = 0;
   std::shared_ptr<Watchdog> headers_deadline_;
+  asio::steady_timer body_timer_;
+  std::chrono::steady_clock::time_point body_tick_;
+  bool body_timer_armed_ = false;
   std::map<int32_t, std::unique_ptr<Stream>> streams_;
 };
 

@@ -226,6 +226,8 @@ Worker::Worker(int index, GatewayContext shared, const Config& config)
   context_.proxy_settings.idle_timeout = config.idle_timeout;
   context_.proxy_settings.request_headers_timeout =
       config.request_headers_timeout;
+  context_.proxy_settings.request_body_timeout = config.request_body_timeout;
+  context_.proxy_settings.request_body_min_rate = config.request_body_min_rate;
   context_.proxy_settings.max_requests_per_connection =
       config.max_requests_per_connection;
   if (config.http3_enabled) {

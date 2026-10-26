@@ -10,11 +10,13 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include "common/metrics.h"
 #include "net/watchdog.h"
+#include "proxy/body_rate.h"
 #include "proxy/exchange.h"
 #include "proxy/h2_connection.h"
 #include "proxy/http_message.h"
@@ -40,6 +42,7 @@ constexpr std::size_t kMaxContinuations = 8;
 // Pending SETTINGS/PING ACKs (SETTINGS and PING floods).
 constexpr std::size_t kMaxOutboundAck = 1000;
 constexpr std::size_t kMaxSettingsEntries = 32;
+constexpr std::chrono::seconds kBodyRateTick{1};
 constexpr std::string_view kBadGateway = "bad gateway\n";
 constexpr std::string_view kMethodNotAllowed = "method not allowed\n";
 
@@ -71,7 +74,8 @@ H2ServerConnection::H2ServerConnection(std::unique_ptr<Transport> transport,
       pool_(pool),
       client_(std::move(client)),
       hooks_(std::move(hooks)),
-      settings_(settings) {
+      settings_(settings),
+      body_timer_(transport_->executor()) {
   nghttp2_session_callbacks* callbacks = nullptr;
   nghttp2_session_callbacks_new(&callbacks);
   nghttp2_session_callbacks_set_on_begin_headers_callback(callbacks,
@@ -136,6 +140,46 @@ void H2ServerConnection::UpdateHeadersDeadline() {
       });
 }
 
+void H2ServerConnection::ArmBodyTimer() {
+  if (body_timer_armed_ || closed()) return;
+  body_timer_armed_ = true;
+  body_tick_ = std::chrono::steady_clock::now();
+  body_timer_.expires_after(kBodyRateTick);
+  body_timer_.async_wait([weak = weak_from_this()](const std::error_code& ec) {
+    auto self = weak.lock();
+    if (!self) return;
+    auto* server = static_cast<H2ServerConnection*>(self.get());
+    server->body_timer_armed_ = false;
+    if (ec || server->closed()) return;
+    server->CheckBodyRates();
+  });
+}
+
+void H2ServerConnection::CheckBodyRates() {
+  const auto waited = std::chrono::steady_clock::now() - body_tick_;
+  bool pending = false;
+  for (auto& [id, stream] : streams_) {
+    if (!stream->body_rate.enabled() || !stream->exchange) continue;
+    const Exchange& exchange = *stream->exchange;
+    if (exchange.request_ended) {
+      stream->body_rate = BodyRate();
+      continue;
+    }
+    pending = true;
+    // Bytes the upstream has not taken yet: the client is not the one
+    // being waited for.
+    if (!exchange.request_body.empty()) continue;
+    if (stream->body_rate.Charge(waited)) {
+      GlobalMetrics().request_body_timeouts.Inc();
+      stream->body_rate = BodyRate();
+      nghttp2_submit_rst_stream(session_, NGHTTP2_FLAG_NONE, id,
+                                NGHTTP2_CANCEL);
+    }
+  }
+  Flush();
+  if (pending) ArmBodyTimer();
+}
+
 void H2ServerConnection::OnBytesRead(std::span<const uint8_t> data) {
   if (hooks_.on_client_bytes) hooks_.on_client_bytes(data);
 }
@@ -165,6 +209,7 @@ void H2ServerConnection::OnClosed() {
     headers_deadline_->Stop();
     headers_deadline_.reset();
   }
+  body_timer_.cancel();
   for (auto& [id, stream] : streams_) {
     if (stream->exchange) {
       if (!stream->exchange->response_ended) {
@@ -205,6 +250,12 @@ void H2ServerConnection::OnRequestHeaders(Stream& stream, bool end_stream) {
   exchange->observed = std::move(stream.observed);
   exchange->h2_fingerprint = fingerprint_.fingerprint();
   exchange->request_ended = end_stream;
+  if (!end_stream &&
+      !BodyRateExempt(FindHeader(exchange->request.headers, "content-type"))) {
+    stream.body_rate = BodyRate(settings_.request_body_timeout,
+                                settings_.request_body_min_rate);
+    if (stream.body_rate.enabled()) ArmBodyTimer();
+  }
 
   const int32_t id = stream.id;
   std::weak_ptr<H2Connection> weak = weak_from_this();
@@ -387,6 +438,7 @@ int H2ServerConnection::OnDataChunk(nghttp2_session* session, uint8_t /*flags*/,
     nghttp2_session_consume(session, stream_id, size);
     return 0;
   }
+  stream->body_rate.Received(size);
   stream->exchange->PushRequestBody(std::span(data, size));
   return 0;
 }

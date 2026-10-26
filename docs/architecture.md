@@ -721,8 +721,9 @@ rate_limits:
 - `pending_per_ip` ✅ (по умолчанию 128): соединения с IP, которые ещё не
   дошли до заголовков первого запроса (ClientHello, хендшейк, заголовки).
 - Таймауты ✅: ClientHello 5 с, хендшейк 10 с, заголовки запроса 10 с
-  (`timeouts.request_headers`), idle 300 с. Минимальная скорость тела —
-  позже.
+  (`timeouts.request_headers`), idle 300 с. Минимальная скорость тела ✅:
+  20 с запаса и секунда на каждые 500 байт (`timeouts.request_body`,
+  `request_body_min_rate`), раздел 11.1.
 - Лимиты H2 ✅: `MAX_CONCURRENT_STREAMS` 100, rapid reset, CONTINUATION,
   SETTINGS/PING flood; `max_requests_per_connection` для HTTP/1.1 и HTTP/2.
 - `/__bs/*` ✅ — свой лимит по IP (`challenge.endpoint_rate`).
@@ -1035,6 +1036,17 @@ Traefik без проверок, поэтому на `web` остаётся то
 HEADERS/CONTINUATION (HTTP/2). Простаивать между запросами keep-alive
 соединение может до `idle`. Метрики:
 `request_header_timeouts_total`, `connections_rejected_total{reason="pending_per_ip"}`.
+
+**Медленное тело (slow POST).** Как `MinRate` в mod_reqtimeout Apache:
+у тела запроса `timeouts.request_body` (20 с) запаса, каждые
+`request_body_min_rate` байт (500) дают ещё секунду, но запас не растёт
+выше начального — быстрое начало не покупает права тянуть потом. Время,
+пока шлюз сам ждёт Traefik (тело уже прочитано и не забрано, backpressure),
+не считается. Ниже скорости HTTP/1.1 закрывает соединение, HTTP/2 —
+`RST_STREAM (CANCEL)`, HTTP/3 — сброс потока; запрос в Traefik
+отменяется. gRPC (`application/grpc*`) не ограничивается: потоковые
+вызовы шлют сообщения, когда они есть. `request_body_min_rate: 0`
+выключает. Метрика `request_body_timeouts_total`.
 
 **HTTP/2.** nghttp2 1.69 с явно заданными лимитами: rapid reset
 (CVE-2023-44487) — корзина на 200 RST_STREAM с пополнением 33/с, после неё
@@ -1466,8 +1478,11 @@ watchdog (M5), лимиты соединений на IP (M3), HTTP/2 к gRPC-х
   `/__bs/*`, тайм-ауты заголовков (тишина, slowloris, открытый блок
   HEADERS), лимит запросов на соединение, `pending_per_ip`.
 
-Не сделано: минимальная скорость тела запроса, сохранение режима «под
-атакой» между перезапусками.
+Не сделано: сохранение режима «под атакой» между перезапусками.
+
+Потом: минимальная скорость тела запроса (`timeouts.request_body`,
+`request_body_min_rate`) для HTTP/1.1, HTTP/2 и HTTP/3; e2e — медленное
+тело в HTTP/1.1 и HTTP/2 и тело выше порога.
 
 ### Статус: roadmap (без UI)
 

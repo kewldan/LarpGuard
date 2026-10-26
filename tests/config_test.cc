@@ -77,6 +77,8 @@ timeouts:
   client_hello: 1s
   tls_handshake: 2s
   request_headers: 7s
+  request_body: 15s
+  request_body_min_rate: 200
   upstream_connect: 3s
   idle: 4m
   drain: 5s
@@ -105,6 +107,8 @@ whoami: true
   EXPECT_EQ(config.no_sni, FallbackRoute::kPassthrough);
   EXPECT_EQ(config.client_hello_timeout, milliseconds(1000));
   EXPECT_EQ(config.request_headers_timeout, milliseconds(7000));
+  EXPECT_EQ(config.request_body_timeout, milliseconds(15000));
+  EXPECT_EQ(config.request_body_min_rate, 200);
   EXPECT_EQ(config.max_requests_per_connection, 50u);
   EXPECT_EQ(config.idle_timeout, milliseconds(240000));
   EXPECT_EQ(config.max_connections, 1000u);
@@ -118,6 +122,8 @@ TEST(ConfigTest, GatewayProtectionDefaults) {
   const Config config;
   EXPECT_EQ(config.no_sni, FallbackRoute::kReject);
   EXPECT_EQ(config.request_headers_timeout, std::chrono::seconds(10));
+  EXPECT_EQ(config.request_body_timeout, std::chrono::seconds(20));
+  EXPECT_EQ(config.request_body_min_rate, 500);
   EXPECT_EQ(config.max_requests_per_connection, 1000u);
   EXPECT_EQ(config.pending_connections_per_ip, 128u);
   EXPECT_EQ(config.challenge_endpoint_rate, 30);
@@ -501,6 +507,8 @@ TEST(ConfigTest, RejectsBadValues) {
       ParseConfig("max_requests_per_connection: 0\n", &config, &error));
   EXPECT_FALSE(
       ParseConfig("timeouts: {request_headers: 0s}\n", &config, &error));
+  EXPECT_FALSE(
+      ParseConfig("timeouts: {request_body_min_rate: -1}\n", &config, &error));
   EXPECT_FALSE(
       ParseConfig("passthrough_hosts: [\"bad host\"]\n", &config, &error));
   EXPECT_FALSE(ParseConfig("listen: {https: nope}\n", &config, &error));

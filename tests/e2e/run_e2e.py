@@ -2241,6 +2241,8 @@ traefik:
   upstream_https: 127.0.0.1:{tls_port}
 timeouts:
   request_headers: 1s
+  request_body: 1s
+  request_body_min_rate: 1000
 max_requests_per_connection: 5
 connection_limits:
   pending_per_ip: 2
@@ -2304,6 +2306,65 @@ metrics:
         expect(any(f[0] == H2_HEADERS and f[2] == 1 for f in frames), frames)
         expect(elapsed < 3, f"open header block lasted {elapsed:.1f}s")
 
+    def h1_request_body_rate():
+        # A body that trickles in below the minimum rate is cut off.
+        with tls_socket(guarded_port, "a.test", ca_a, ["http/1.1"]) as tls:
+            started = time.monotonic()
+            tls.sendall(b"POST /slow HTTP/1.1\r\nHost: a.test\r\n"
+                        b"Content-Length: 100000\r\n\r\n")
+            closed = False
+            for _ in range(30):
+                time.sleep(0.3)
+                try:
+                    tls.sendall(b"x" * 10)
+                except (ConnectionError, ssl.SSLError):
+                    closed = True
+                    break
+            if not closed:
+                wait_closed(tls, 2)
+            elapsed = time.monotonic() - started
+        expect(elapsed < 4, f"slow body lasted {elapsed:.1f}s")
+        # A body above the rate goes through, however long it is in total.
+        body = b"y" * 3000
+        with tls_socket(guarded_port, "a.test", ca_a, ["http/1.1"]) as tls:
+            tls.sendall(b"POST /steady HTTP/1.1\r\nHost: a.test\r\n"
+                        b"Content-Length: 3000\r\n\r\n")
+            for i in range(0, len(body), 500):
+                time.sleep(0.25)
+                tls.sendall(body[i:i + 500])
+            response = http.client.HTTPResponse(tls)
+            response.begin()
+            expect(response.status == 200, response.status)
+            expect(json.loads(response.read())["body_len"] == 3000,
+                   "body length")
+
+    def h2_request_body_rate():
+        # POST without END_STREAM, then 10 bytes every 300 ms: RST_STREAM.
+        block = (b"\x83\x87\x04\x05/slow\x01" + bytes([len("a.test")]) +
+                 b"a.test")
+        with h2_connect(guarded_port, "a.test", ca_a) as tls:
+            tls.sendall(h2_frame(H2_HEADERS, H2_END_HEADERS, 1, block))
+            tls.settimeout(0.3)
+            started = time.monotonic()
+            data = b""
+            reset = None
+            while reset is None and time.monotonic() - started < 6:
+                try:
+                    tls.sendall(h2_frame(H2_DATA, 0, 1, b"x" * 10))
+                    data += tls.recv(65536)
+                except (TimeoutError, socket.timeout):
+                    pass
+                except (ConnectionError, ssl.SSLError):
+                    break
+                while len(data) >= 9:
+                    length = int.from_bytes(data[:3], "big")
+                    if len(data) < 9 + length:
+                        break
+                    if data[3] == H2_RST_STREAM:
+                        reset = time.monotonic() - started
+                    data = data[9 + length:]
+        expect(reset is not None and reset < 4, f"reset after {reset}")
+
     def requests_per_connection():
         raw = b"GET / HTTP/1.1\r\nHost: a.test\r\n\r\n" * 5
         results = h1_exchange(guarded_port, "a.test", ca_a, raw, responses=5)
@@ -2347,6 +2408,8 @@ metrics:
                "header timeouts")
         expect(values["bot_shield_connection_request_limit_total"] >= 2,
                "request limits")
+        expect(values["bot_shield_request_body_timeouts_total"] >= 2,
+               "body timeouts")
 
     try:
         for name, fn in [
@@ -2354,6 +2417,10 @@ metrics:
              h1_request_headers_timeout),
             ("timeouts: h2 first request and open header block",
              h2_request_headers_timeout),
+            ("timeouts: h1 request body below the minimum rate",
+             h1_request_body_rate),
+            ("timeouts: h2 request body below the minimum rate",
+             h2_request_body_rate),
             ("limits: requests per connection (h1 close, h2 GOAWAY)",
              requests_per_connection),
             ("limits: pending connections per IP", pending_per_ip),

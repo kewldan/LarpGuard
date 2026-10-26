@@ -47,6 +47,13 @@ timeouts:
   # handshake, later ones within this time after their first byte (HTTP/1.1)
   # or HEADERS frame (HTTP/2). Slow clients (slowloris) are closed.
   request_headers: 10s
+  # Request bodies (slow POST): a body has request_body of grace, and every
+  # request_body_min_rate bytes buy one more second (never above the
+  # grace), so a client sending slower than that is cut off within it.
+  # Time the gateway waits for Traefik does not count; gRPC is exempt.
+  # request_body_min_rate: 0 turns it off.
+  request_body: 20s
+  request_body_min_rate: 500
   upstream_connect: 5s
   idle: 300s
   drain: 30s

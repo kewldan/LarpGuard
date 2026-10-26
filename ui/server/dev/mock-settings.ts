@@ -70,6 +70,8 @@ export const MOCK_KEYS: MockKey[] = [
   key('timeouts.client_hello', 'duration', 'restart', '5s'),
   key('timeouts.tls_handshake', 'duration', 'restart', '10s'),
   key('timeouts.request_headers', 'duration', 'restart', '10s'),
+  key('timeouts.request_body', 'duration', 'restart', '20s'),
+  key('timeouts.request_body_min_rate', 'int', 'restart', 500),
   key('timeouts.upstream_connect', 'duration', 'restart', '5s'),
   key('timeouts.idle', 'duration', 'restart', '5m'),
   key('timeouts.drain', 'duration', 'restart', '30s'),

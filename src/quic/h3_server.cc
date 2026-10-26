@@ -37,6 +37,7 @@
 
 #include "common/metrics.h"
 #include "net/socket_options.h"
+#include "proxy/body_rate.h"
 #include "proxy/exchange.h"
 #include "proxy/http_message.h"
 #include "proxy/proxy_hooks.h"
@@ -54,6 +55,7 @@ constexpr std::size_t kReadChunk = std::size_t{16} * 1024;
 constexpr uint64_t kStreamWindow = uint64_t{256} * 1024;
 constexpr uint64_t kConnectionWindow = uint64_t{1024} * 1024;
 constexpr std::string_view kBadGateway = "bad gateway\n";
+constexpr std::chrono::seconds kBodyRateTick{1};
 
 ngtcp2_tstamp Now() {
   return static_cast<ngtcp2_tstamp>(
@@ -129,7 +131,8 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
       : server_(server),
         remote_(std::move(remote)),
         local_(std::move(local)),
-        timer_(server->io_context()) {
+        timer_(server->io_context()),
+        body_timer_(server->io_context()) {
     conn_ref_.get_conn = [](ngtcp2_crypto_conn_ref* ref) {
       return static_cast<QuicConnection*>(ref->user_data)->conn_;
     };
@@ -381,6 +384,7 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
       }
     }
     timer_.cancel();
+    body_timer_.cancel();
     for (auto& [id, stream] : streams_) FinishStream(*stream, true);
     streams_.clear();
     for (const std::string& cid : scids_) server_->Unregister(cid);
@@ -396,6 +400,8 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
     HttpRequest observed;
     HeaderList trailers;
     std::shared_ptr<Exchange> exchange;
+    // Minimum body rate while the request body is still arriving.
+    BodyRate body_rate;
     bool response_submitted = false;
     bool reported = false;
     // Response bytes handed to nghttp3, kept until acknowledged.
@@ -513,6 +519,50 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
     });
   }
 
+  // Charges streams waiting for request body bytes once a second and
+  // resets those below the minimum rate (BodyRate).
+  void ArmBodyTimer() {
+    if (body_timer_armed_ || closed_) return;
+    body_timer_armed_ = true;
+    body_tick_ = std::chrono::steady_clock::now();
+    body_timer_.expires_after(kBodyRateTick);
+    body_timer_.async_wait(
+        [weak = weak_from_this()](const std::error_code& ec) {
+          auto self = weak.lock();
+          if (!self) return;
+          self->body_timer_armed_ = false;
+          if (ec || self->closed_) return;
+          self->CheckBodyRates();
+        });
+  }
+
+  void CheckBodyRates() {
+    const auto waited = std::chrono::steady_clock::now() - body_tick_;
+    bool pending = false;
+    {
+      const CallbackScope scope(this);
+      for (auto& [id, stream] : streams_) {
+        if (!stream->body_rate.enabled() || !stream->exchange) continue;
+        const Exchange& exchange = *stream->exchange;
+        if (exchange.request_ended) {
+          stream->body_rate = BodyRate();
+          continue;
+        }
+        pending = true;
+        // Bytes the upstream has not taken yet: not the client's delay.
+        if (!exchange.request_body.empty()) continue;
+        if (stream->body_rate.Charge(waited)) {
+          GlobalMetrics().request_body_timeouts.Inc();
+          stream->body_rate = BodyRate();
+          ngtcp2_conn_shutdown_stream(conn_, 0, id,
+                                      NGHTTP3_H3_REQUEST_CANCELLED);
+        }
+      }
+    }
+    Flush();
+    if (pending) ArmBodyTimer();
+  }
+
   void CloseWithApplicationError(uint64_t code) {
     ngtcp2_ccerr error;
     ngtcp2_ccerr_default(&error);
@@ -585,6 +635,13 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
                          &exchange->request.headers);
     exchange->observed = std::move(stream.observed);
     exchange->request_ended = end_stream;
+    if (!end_stream && !BodyRateExempt(FindHeader(exchange->request.headers,
+                                                  "content-type"))) {
+      const ProxySettings& proxy = server_->context().proxy_settings;
+      stream.body_rate =
+          BodyRate(proxy.request_body_timeout, proxy.request_body_min_rate);
+      if (stream.body_rate.enabled()) ArmBodyTimer();
+    }
     const int64_t id = stream.id;
     std::weak_ptr<QuicConnection> weak = weak_from_this();
     exchange->wake_client = [weak, id] {
@@ -829,6 +886,7 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
       return 0;
     }
     // Credit comes back through request_consumed as the upstream reads.
+    stream->body_rate.Received(length);
     stream->exchange->PushRequestBody(std::span(data, length));
     return 0;
   }
@@ -972,6 +1030,9 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
   asio::ip::udp::endpoint remote_;
   asio::ip::udp::endpoint local_;
   asio::steady_timer timer_;
+  asio::steady_timer body_timer_;
+  std::chrono::steady_clock::time_point body_tick_;
+  bool body_timer_armed_ = false;
   ngtcp2_conn* conn_ = nullptr;
   SSL* ssl_ = nullptr;
   nghttp3_conn* h3_ = nullptr;
