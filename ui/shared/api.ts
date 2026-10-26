@@ -245,7 +245,10 @@ export const gatewayConfigSchema = z.object({
   }),
   attack: z.object({
     auto_rps: z.number(),
+    auto_rps_total: z.number(),
     auto_duration_ms: z.number(),
+    // admin.attack_file is set: entries survive a restart of the gateway.
+    persistent: z.boolean(),
   }),
   library: z.object({
     version: z.string(),
@@ -928,14 +931,29 @@ export const attackEntrySchema = z.object({
   signature: z
     .object({ kind: z.enum(['ip_prefix', 'asn', 'ja4']), value: z.string() })
     .optional(),
+  // Automatic entries: the requests/s threshold that tripped (for host "*",
+  // over all hosts together).
+  threshold: z.number().optional(),
 });
 export type AttackEntry = z.infer<typeof attackEntrySchema>;
 
+// An activation as the gateway recorded it, kept after it ends.
+export const attackRecordSchema = attackEntrySchema.extend({
+  ended: z.number().optional(),
+});
+export type AttackRecord = z.infer<typeof attackRecordSchema>;
+
 export const attackSchema = z.object({
   entries: z.array(attackEntrySchema),
+  // Activations, manual and automatic, newest first (the gateway's own
+  // record, kept across restarts with admin.attack_file).
+  history: z.array(attackRecordSchema),
   // Per host, requests per second; 0: only manual.
   auto_rps: z.number(),
+  // Over all hosts together; 0: off.
+  auto_rps_total: z.number(),
   auto_duration_ms: z.number(),
+  persistent: z.boolean(),
   rps: z.number().nullable(),
   // Requests per second of the busiest host over the last minute.
   busiest: z.object({ host: z.string(), rps: z.number() }).nullable(),

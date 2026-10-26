@@ -36,6 +36,12 @@
 namespace bot_shield {
 namespace {
 
+int64_t UnixSeconds() {
+  return std::chrono::duration_cast<std::chrono::seconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
 using asio::ip::tcp;
 
 constexpr int kListenBacklog = 4096;
@@ -346,10 +352,11 @@ Gateway::Gateway(const Config& config, const CertStore* certificates,
       certificates_(certificates),
       classifier_(config.passthrough_hosts, config.non_tls, config.no_sni),
       services_(std::move(services)),
-      attack_(config.attack_auto_rps,
+      attack_(config.attack_auto_rps, config.attack_auto_rps_total,
               std::chrono::duration_cast<std::chrono::seconds>(
                   config.attack_auto_duration)
-                  .count()) {
+                  .count(),
+              config.admin_attack_file) {
   if (services_.on_attack_auto) attack_.set_on_auto(services_.on_attack_auto);
 }
 
@@ -363,6 +370,7 @@ bool Gateway::Start(std::string* error) {
     *error = "no verdict set";
     return false;
   }
+  if (!attack_.Load(UnixSeconds(), error)) return false;
   GatewayContext shared;
   shared.config = &config_;
   shared.certificates = certificates_;
@@ -478,6 +486,13 @@ void Gateway::Stop() {
 void Gateway::Join() {
   for (auto& worker : workers_) worker->Join();
   if (admin_server_) admin_server_->Join();
+}
+
+void Gateway::SaveState() {
+  std::string error;
+  if (!attack_.SaveIfChanged(UnixSeconds(), &error)) {
+    log::Warn("attack state: {}", error);
+  }
 }
 
 bool Gateway::Healthy() const {

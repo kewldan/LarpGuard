@@ -1,11 +1,12 @@
 // Attack mode: challenge every client without a clearance token, for all
 // hosts or one, for a fixed time (manual) or automatically when a host's
-// request rate stays above attack.auto_rps (configured in the gateway).
+// request rate stays above attack.auto_rps, or the total above
+// attack.auto_rps_total (configured in the gateway).
 
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 
-import type { AttackEntry } from '../../shared/api.ts';
+import type { AttackEntry, AttackRecord } from '../../shared/api.ts';
 import { useCanOperate } from '../app/session.ts';
 import {
   compact,
@@ -18,7 +19,6 @@ import { useNow } from '../lib/hooks.ts';
 import {
   useAttack,
   useAttackRates,
-  useAudit,
   useDisableAttack,
   useEnableAttack,
   useHosts,
@@ -36,7 +36,9 @@ const DURATIONS = [
   { name: '12h', ttl: '12h' },
 ];
 
-const EFFECTS: { mark: string; text: string; bg: string; fg: string }[] = [
+type Effect = { mark: string; text: string; bg: string; fg: string };
+
+const EFFECTS: Effect[] = [
   {
     mark: '!',
     text: 'Every client without a valid clearance token gets the challenge, whatever its score, even on shadow hosts.',
@@ -55,13 +57,23 @@ const EFFECTS: { mark: string; text: string; bg: string; fg: string }[] = [
     bg: 'var(--color-allowed-soft)',
     fg: 'var(--color-allowed-text)',
   },
-  {
-    mark: '×',
-    text: 'The state is in memory: a restart of the gateway ends attack mode.',
-    bg: 'var(--color-surface-3)',
-    fg: 'var(--color-text-2)',
-  },
 ];
+
+function persistence(persistent: boolean): Effect {
+  return persistent
+    ? {
+        mark: '✓',
+        text: 'It survives a restart of the gateway (admin.attack_file), with the history below.',
+        bg: 'var(--color-allowed-soft)',
+        fg: 'var(--color-allowed-text)',
+      }
+    : {
+        mark: '×',
+        text: 'The state is in memory: a restart of the gateway ends attack mode (set admin.attack_file to keep it).',
+        bg: 'var(--color-surface-3)',
+        fg: 'var(--color-text-2)',
+      };
+}
 
 function RateChart({
   history,
@@ -138,10 +150,30 @@ function entryKey(entry: AttackEntry): string {
   return `${entry.host}|${entry.signature?.kind ?? ''}|${entry.signature?.value ?? ''}`;
 }
 
+function recordDetail(record: AttackRecord): string {
+  const trigger =
+    record.source === 'auto' && record.threshold
+      ? `over ${count(record.threshold)} rps${record.host === '*' ? ' in total' : ''}`
+      : 'by an operator';
+  const length =
+    record.ended !== undefined
+      ? `for ${duration((record.ended - record.since) * 1000)}`
+      : 'still on';
+  return `${trigger} · ${length}`;
+}
+
+// What switches attack mode on automatically, in words.
+function autoTriggers(perHost: number, total: number): string | null {
+  const parts = [
+    perHost > 0 ? `a host above ${count(perHost)} rps` : null,
+    total > 0 ? `all hosts above ${count(total)} rps together` : null,
+  ].filter((part) => part !== null);
+  return parts.length > 0 ? parts.join(' or ') : null;
+}
+
 export function Attack() {
   const attack = useAttack();
   const hosts = useHosts().data?.hosts ?? [];
-  const audit = useAudit().data;
   const enable = useEnableAttack();
   const disable = useDisableAttack();
   const canOperate = useCanOperate();
@@ -159,7 +191,8 @@ export function Attack() {
   if (!data) return <Skeleton loading rows={6} label="Loading attack mode" />;
 
   const active = data.entries.length > 0;
-  const armed = !active && data.auto_rps > 0;
+  const triggers = autoTriggers(data.auto_rps, data.auto_rps_total);
+  const armed = !active && triggers !== null;
   const primary =
     data.entries.find((entry) => entry.host === '*') ?? data.entries[0];
   const left = primary?.until ? primary.until - now / 1000 : null;
@@ -183,15 +216,21 @@ export function Attack() {
           className: `${styles.heroArmed} hatch`,
           title: 'Auto · armed',
           short: 'Armed',
-          sub: `Not active. Turns on for a host whose traffic stays above ${count(threshold)} rps, for ${duration(data.auto_duration_ms)}.`,
-          label: 'Headroom on the busiest host',
-          value: `${compact(Math.max(0, threshold - current))} rps`,
+          sub: `Not active. Turns on when ${triggers} for about ten seconds, for ${duration(data.auto_duration_ms)}.`,
+          label:
+            threshold > 0
+              ? 'Headroom on the busiest host'
+              : 'Headroom in total',
+          value:
+            threshold > 0
+              ? `${compact(Math.max(0, threshold - current))} rps`
+              : `${compact(Math.max(0, data.auto_rps_total - (data.rps ?? 0)))} rps`,
         }
       : {
           className: '',
           title: 'Off',
           short: 'Off',
-          sub: 'Normal per-host scoring. Nothing switches on automatically (attack.auto_rps is 0).',
+          sub: 'Normal per-host scoring. Nothing switches on automatically (attack.auto_rps and auto_rps_total are 0).',
           label: 'Current traffic',
           value: `${compact(data.rps ?? 0)} rps`,
         };
@@ -234,9 +273,7 @@ export function Attack() {
       },
     );
   };
-  const activations = (audit?.entries ?? [])
-    .filter((entry) => entry.kind === 'attack')
-    .slice(0, 6);
+  const records = data.history.slice(0, 8);
   const impact = data.impact;
   const pct = (n: number) =>
     impact?.requests ? Math.round((n / impact.requests) * 100) : 0;
@@ -283,9 +320,16 @@ export function Attack() {
               ],
               [
                 'Auto',
-                threshold > 0
-                  ? `Per host above ${compact(threshold)} rps`
-                  : 'Off in the config',
+                [
+                  threshold > 0
+                    ? `Per host above ${compact(threshold)} rps`
+                    : '',
+                  data.auto_rps_total > 0
+                    ? `all hosts above ${compact(data.auto_rps_total)} rps`
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(', ') || 'Off in the config',
                 armed || (active && primary?.source === 'auto'),
               ],
             ] as const
@@ -550,8 +594,15 @@ export function Attack() {
                 }}
               >
                 The threshold is <span className="mono">attack.auto_rps</span>{' '}
-                in the gateway&apos;s config, per host, for{' '}
-                {duration(data.auto_duration_ms)} once triggered.
+                in the gateway&apos;s config, per host
+                {data.auto_rps_total > 0 ? (
+                  <>
+                    {' '}
+                    (and <span className="mono">auto_rps_total</span>,{' '}
+                    {count(data.auto_rps_total)} rps over all hosts)
+                  </>
+                ) : null}
+                , for {duration(data.auto_duration_ms)} once triggered.
               </div>
             </div>
           </section>
@@ -561,7 +612,7 @@ export function Attack() {
               What attack mode does
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {EFFECTS.map((effect) => (
+              {[...EFFECTS, persistence(data.persistent)].map((effect) => (
                 <div key={effect.text} className={styles.effect}>
                   <span
                     className={`mono ${styles.mark}`}
@@ -662,19 +713,20 @@ export function Attack() {
               gap: 12,
             }}
           >
-            <h2 style={{ fontSize: 15, fontWeight: 600 }}>Recent changes</h2>
+            <h2 style={{ fontSize: 15, fontWeight: 600 }}>History</h2>
             <span style={{ fontSize: 12.5, color: 'var(--color-text-3)' }}>
               {data.auto_activations !== null
                 ? `${count(data.auto_activations)} automatic since the gateway started · `
                 : ''}
+              who switched it:{' '}
               <Link to="/log" search={{ kind: 'attack' }}>
                 Decision log
               </Link>
             </span>
           </div>
-          {activations.map((entry) => (
+          {records.map((record) => (
             <div
-              key={entry.id}
+              key={`${entryKey(record)}|${record.since}`}
               style={{
                 display: 'flex',
                 flexWrap: 'wrap',
@@ -693,7 +745,7 @@ export function Attack() {
                   fontSize: 12,
                 }}
               >
-                {dateTime(entry.ts)}
+                {dateTime(record.since * 1000)}
               </span>
               <span
                 className="mono"
@@ -704,16 +756,27 @@ export function Attack() {
                   padding: '0 7px',
                   borderRadius: 5,
                   fontSize: 11,
-                  background: 'var(--color-blocked-soft)',
-                  color: 'var(--color-blocked-text)',
+                  background:
+                    record.source === 'auto'
+                      ? 'var(--color-blocked-soft)'
+                      : 'var(--color-surface-3)',
+                  color:
+                    record.source === 'auto'
+                      ? 'var(--color-blocked-text)'
+                      : 'var(--color-text-2)',
                 }}
               >
-                {entry.actor}
+                {record.source === 'auto' ? 'auto' : 'manual'}
               </span>
-              <span style={{ flex: '1 1 260px' }}>{entry.what}</span>
+              <span className="mono" style={{ flex: '1 1 200px' }}>
+                {entryLabel(record)}
+              </span>
+              <span style={{ fontSize: 12.5, color: 'var(--color-text-3)' }}>
+                {recordDetail(record)}
+              </span>
             </div>
           ))}
-          {activations.length === 0 ? (
+          {records.length === 0 ? (
             <div
               style={{
                 padding: '18px 16px',
@@ -721,7 +784,7 @@ export function Attack() {
                 color: 'var(--color-text-3)',
               }}
             >
-              No attack mode changes from the console yet.
+              Attack mode has not been on yet.
             </div>
           ) : null}
         </section>

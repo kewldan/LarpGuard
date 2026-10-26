@@ -162,7 +162,7 @@ TEST(ListStoreTest, PersistsToStateFile) {
 }
 
 TEST(AttackModeTest, HostsWildcardsAndExpiry) {
-  AttackMode attack(0, 600);
+  AttackMode attack(0, 0, 600);
   EXPECT_FALSE(attack.Active("shop.test", kNow));
   std::string error;
   ASSERT_TRUE(attack.Enable({.host = "Shop.Test",
@@ -188,8 +188,8 @@ TEST(AttackModeTest, HostsWildcardsAndExpiry) {
       attack.Enable({.host = "*", .source = "admin", .since = kNow, .until = 0},
                     kNow, &error));
   EXPECT_TRUE(attack.Active("other.test", kNow));
-  EXPECT_TRUE(attack.Disable("*"));
-  EXPECT_FALSE(attack.Disable("*"));
+  EXPECT_TRUE(attack.Disable("*", kNow));
+  EXPECT_FALSE(attack.Disable("*", kNow));
   EXPECT_FALSE(attack.Active("other.test", kNow));
 }
 
@@ -223,7 +223,7 @@ TEST(AttackModeTest, PicksTheNarrowestDominantSignature) {
 
 TEST(AttackModeTest, NarrowsToTheAttackersThenWidens) {
   RateLimitStore store;
-  AttackMode attack(10, 600);
+  AttackMode attack(10, 0, 600);
   constexpr int64_t kSecond = 1'000'000'000;
   int64_t now_ns = kSecond;
   // A flood from one network (90 %) among ordinary clients.
@@ -267,14 +267,14 @@ TEST(AttackModeTest, NarrowsToTheAttackersThenWidens) {
     now_ns += kSecond / 40;
   }
   EXPECT_TRUE(attack.Active("shop.test", kNow));
-  EXPECT_TRUE(attack.Disable("shop.test"));
+  EXPECT_TRUE(attack.Disable("shop.test", kNow));
   EXPECT_TRUE(attack.Entries(kNow).empty());  // Every entry of the host.
 }
 
 TEST(AttackModeTest, SwitchesOnAboveAutoRps) {
   RateLimitStore store;
-  AttackMode off(0, 600);
-  AttackMode attack(10, 600);
+  AttackMode off(0, 0, 600);
+  AttackMode attack(10, 0, 600);
   constexpr int64_t kSecond = 1'000'000'000;
   int64_t now_ns = kSecond;
   // At the threshold the host never trips.
@@ -301,6 +301,90 @@ TEST(AttackModeTest, SwitchesOnAboveAutoRps) {
   EXPECT_EQ(entries[0].source, "auto");
   EXPECT_EQ(entries[0].until, kNow + 600);
   EXPECT_FALSE(attack.Active("shop.test", kNow + 600));
+}
+
+TEST(AttackModeTest, TotalRateCoversEveryHost) {
+  // A flood spread thin over many hosts: no host is above auto_rps, the
+  // total is above auto_rps_total.
+  RateLimitStore store;
+  AttackMode attack(100, 10, 600);
+  constexpr int64_t kSecond = 1'000'000'000;
+  int64_t now_ns = kSecond;
+  bool switched = false;
+  for (int i = 0; !switched && i < 2000; ++i) {
+    const std::string host = std::format("site{}.test", i % 50);
+    const std::string prefix = std::format("10.{}.0.0/24", i);
+    const AttackSubject who{.host = host, .ip_prefix = prefix, .asn = 0};
+    switched = attack.CountRequest(who, kNow, now_ns, &store);
+    now_ns += kSecond / 20;
+  }
+  ASSERT_TRUE(switched);
+  const std::vector<AttackEntry> entries = attack.Entries(kNow);
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].host, "*");
+  EXPECT_TRUE(entries[0].kind.empty());
+  EXPECT_EQ(entries[0].threshold, 10);
+  EXPECT_TRUE(attack.Active("anything.test", kNow));
+}
+
+TEST(AttackModeTest, KeepsHistoryAndSurvivesRestarts) {
+  const std::string path =
+      (std::filesystem::temp_directory_path() / "bs-attack-test.json").string();
+  std::remove(path.c_str());
+  std::string error;
+  {
+    AttackMode attack(0, 0, 600, path);
+    ASSERT_TRUE(attack.Load(kNow, &error)) << error;  // No file yet.
+    ASSERT_TRUE(attack.Enable({.host = "shop.test",
+                               .source = "admin",
+                               .since = kNow,
+                               .until = kNow + 60},
+                              kNow, &error));
+    // Renewed: the same activation, a later end.
+    ASSERT_TRUE(attack.Enable({.host = "shop.test",
+                               .source = "admin",
+                               .since = kNow,
+                               .until = kNow + 3600},
+                              kNow + 10, &error));
+    ASSERT_TRUE(attack.Enable({.host = "api.test",
+                               .source = "auto",
+                               .since = kNow,
+                               .until = kNow + 600,
+                               .kind = "asn",
+                               .value = "64500",
+                               .threshold = 50},
+                              kNow, &error));
+    ASSERT_TRUE(attack.Enable(
+        {.host = "old.test", .source = "admin", .since = kNow, .until = 0},
+        kNow, &error));
+    EXPECT_TRUE(attack.Disable("old.test", kNow + 5));
+    const std::vector<AttackRecord> history = attack.History(kNow + 20);
+    ASSERT_EQ(history.size(), 3u);
+    EXPECT_EQ(history[0].entry.host, "old.test");  // Newest first.
+    EXPECT_EQ(history[0].ended, kNow + 5);
+    EXPECT_EQ(history[2].entry.host, "shop.test");
+    EXPECT_EQ(history[2].entry.until, kNow + 3600);
+    EXPECT_EQ(history[2].ended, 0);
+    ASSERT_TRUE(attack.SaveIfChanged(kNow + 20, &error)) << error;
+  }
+  // Restarted after api.test expired.
+  AttackMode restarted(0, 0, 600, path);
+  ASSERT_TRUE(restarted.Load(kNow + 700, &error)) << error;
+  EXPECT_TRUE(restarted.Active("shop.test", kNow + 700));
+  EXPECT_FALSE(restarted.Active(AttackSubject{.host = "api.test", .asn = 64500},
+                                kNow + 700));
+  const std::vector<AttackRecord> history = restarted.History(kNow + 700);
+  ASSERT_EQ(history.size(), 3u);
+  EXPECT_EQ(history[1].entry.host, "api.test");
+  EXPECT_EQ(history[1].entry.threshold, 50);
+  EXPECT_EQ(history[1].ended, kNow + 600);
+  EXPECT_EQ(history[2].ended, 0);
+  std::remove(path.c_str());
+
+  std::ofstream(path) << "[1, 2]";
+  AttackMode broken(0, 0, 600, path);
+  EXPECT_FALSE(broken.Load(kNow, &error));
+  std::remove(path.c_str());
 }
 
 TEST(DecisionLogTest, BoundedNewestFirstWithFilters) {
@@ -360,7 +444,7 @@ class AdminServerTest : public ::testing::Test {
   DecisionLog decisions_{100};
   RateLimitStore store_;
   VerdictStore verdicts_;
-  AttackMode attack_{0, 600};
+  AttackMode attack_{0, 0, 600};
   ModeOverrides modes_{""};
   AsnStore asn_;
   AdminContext context_;
@@ -784,6 +868,10 @@ TEST_F(AdminServerTest, AttackMode) {
   ASSERT_EQ(response.body["entries"].size(), 2u);
   EXPECT_EQ(response.body["entries"][0]["source"], "admin");
   EXPECT_FALSE(response.body["entries"][1].contains("until"));
+  ASSERT_EQ(response.body["history"].size(), 2u);
+  EXPECT_EQ(response.body["history"][0]["host"], "*");
+  EXPECT_FALSE(response.body["history"][0].contains("ended"));
+  EXPECT_EQ(response.body["auto_rps_total"], 0);
   EXPECT_EQ(Call("GET", "/status").body["attack_entries"], 2);
 
   // An automatic entry for one network carries its signature.
@@ -812,6 +900,10 @@ TEST_F(AdminServerTest, AttackMode) {
   EXPECT_EQ(Call("DELETE", "/attack/shop.test").status, 200);
   EXPECT_EQ(Call("DELETE", "/attack/shop.test").status, 404);
   EXPECT_FALSE(attack_.Active("shop.test", kNow));
+  response = Call("GET", "/attack");
+  ASSERT_EQ(response.body["history"].size(), 3u);
+  EXPECT_EQ(response.body["history"][0]["ended"], kNow);
+  EXPECT_EQ(response.body["history"][0]["signature"]["kind"], "ip_prefix");
   EXPECT_EQ(Call("PUT", "/attack").status, 405);
 }
 

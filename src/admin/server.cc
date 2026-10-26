@@ -267,10 +267,12 @@ nlohmann::json AttackToJson(const AttackEntry& entry) {
   if (!entry.kind.empty()) {
     json["signature"] = {{"kind", entry.kind}, {"value", entry.value}};
   }
+  if (entry.threshold != 0) json["threshold"] = entry.threshold;
   return json;
 }
 
-// Under-attack mode: GET lists hosts, POST {"host": "<host>|*", "ttl":
+// Under-attack mode: GET lists hosts and the history of activations
+// (manual and automatic, newest first), POST {"host": "<host>|*", "ttl":
 // "1h"} switches one on (no ttl: until switched off), DELETE /attack/<host>
 // switches it off.
 AdminResponse Attack(std::string_view method, std::string_view rest,
@@ -282,8 +284,17 @@ AdminResponse Attack(std::string_view method, std::string_view rest,
     for (const AttackEntry& entry : context.attack->Entries(now_seconds)) {
       entries.push_back(AttackToJson(entry));
     }
+    nlohmann::json history = nlohmann::json::array();
+    for (const AttackRecord& record : context.attack->History(now_seconds)) {
+      nlohmann::json item = AttackToJson(record.entry);
+      if (record.ended != 0) item["ended"] = record.ended;
+      history.push_back(std::move(item));
+    }
     return {200,
-            {{"entries", entries}, {"auto_rps", context.attack->auto_rps()}}};
+            {{"entries", entries},
+             {"history", history},
+             {"auto_rps", context.attack->auto_rps()},
+             {"auto_rps_total", context.attack->auto_rps_total()}}};
   }
   if (rest.empty() && method == "POST") {
     const nlohmann::json json = nlohmann::json::parse(body, nullptr, false);
@@ -323,7 +334,7 @@ AdminResponse Attack(std::string_view method, std::string_view rest,
   }
   if (!rest.empty() && method == "DELETE") {
     const std::string host = PercentDecode(rest.substr(1));
-    if (!context.attack->Disable(host)) {
+    if (!context.attack->Disable(host, now_seconds)) {
       return Error(404, "host is not under attack");
     }
     log::Info("admin: under-attack mode off for {}", host);
@@ -470,6 +481,8 @@ AdminResponse ConfigView(const AdminContext& context) {
              {"rounds", config.captcha_rounds}}},
            {"attack",
             {{"auto_rps", config.attack_auto_rps},
+             {"auto_rps_total", config.attack_auto_rps_total},
+             {"persistent", !config.admin_attack_file.empty()},
              {"auto_duration_ms", Millis(config.attack_auto_duration)}}},
            {"library",
             {{"version", verdicts->library->version()},

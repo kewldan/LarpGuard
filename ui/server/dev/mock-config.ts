@@ -131,7 +131,12 @@ export const MOCK_CONFIG: GatewayConfig = {
     token_credit: 40,
   },
   captcha: { provider: 'builtin', escalate: true, rounds: 2 },
-  attack: { auto_rps: 8000, auto_duration_ms: 600_000 },
+  attack: {
+    auto_rps: 8000,
+    auto_rps_total: 0,
+    auto_duration_ms: 600_000,
+    persistent: true,
+  },
   library: {
     version: 'dev',
     profiles: 4,

@@ -3,6 +3,8 @@
 // without a gateway process.
 
 import type {
+  AttackEntry,
+  AttackRecord,
   GatewayConfig,
   ListEntry,
   SettingsDiff,
@@ -62,15 +64,32 @@ export function createMockAdmin(now: () => number): AdminApi {
   };
   const lists: ListEntry[] = [];
   let nextId = 1;
-  const attack = new Map<
-    string,
-    { host: string; source: string; since: number; until?: number }
-  >();
+  const attack = new Map<string, AttackEntry>();
   const seconds = () => Math.floor(now() / 1000);
+  // The gateway's record of activations, newest first. One automatic trip
+  // earlier today (the mock metrics count one).
+  const attackHistory: AttackRecord[] = [
+    {
+      host: 'api.example.com',
+      source: 'auto',
+      since: seconds() - 5 * 3600,
+      until: seconds() - 5 * 3600 + 600,
+      ended: seconds() - 5 * 3600 + 600,
+      signature: { kind: 'asn', value: '14061' },
+      threshold: config.attack.auto_rps,
+    },
+  ];
+  const endRecord = (host: string, at: number) => {
+    for (const record of attackHistory) {
+      if (record.host === host && record.ended === undefined) record.ended = at;
+    }
+  };
   const sweep = () => {
     for (const [host, entry] of attack) {
-      if (entry.until !== undefined && entry.until <= seconds())
+      if (entry.until !== undefined && entry.until <= seconds()) {
+        endRecord(host, entry.until);
         attack.delete(host);
+      }
     }
     for (let i = lists.length - 1; i >= 0; i -= 1) {
       const entry = lists[i];
@@ -179,21 +198,40 @@ export function createMockAdmin(now: () => number): AdminApi {
       sweep();
       return Promise.resolve({
         entries: [...attack.values()],
+        history: attackHistory.map((record) => ({ ...record })),
         auto_rps: config.attack.auto_rps,
+        auto_rps_total: config.attack.auto_rps_total,
       });
     },
     enableAttack: (host, ttl) => {
+      sweep();
       const name = host.toLowerCase();
       const duration = ttlSeconds(ttl);
-      attack.set(name, {
+      const entry: AttackEntry = {
         host: name,
         source: 'admin',
         since: seconds(),
         ...(duration === 0 ? {} : { until: seconds() + duration }),
-      });
+      };
+      const open = attackHistory.find(
+        (record) => record.host === name && record.ended === undefined,
+      );
+      if (attack.has(name) && open) {
+        if (entry.until === undefined) delete open.until;
+        else open.until = entry.until;
+      } else {
+        attackHistory.unshift({ ...entry });
+        attackHistory.splice(200);
+      }
+      attack.set(name, entry);
       return Promise.resolve();
     },
-    disableAttack: (host) => Promise.resolve(attack.delete(host.toLowerCase())),
+    disableAttack: (host) => {
+      const name = host.toLowerCase();
+      if (!attack.delete(name)) return Promise.resolve(false);
+      endRecord(name, seconds());
+      return Promise.resolve(true);
+    },
     testRule: (when, samples) => {
       try {
         const rule = compileRule(when);

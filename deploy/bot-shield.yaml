@@ -383,6 +383,10 @@ challenge:
 attack:
   # Requests per second per host; 0 = admin API only.
   auto_rps: 0
+  # Requests per second over all hosts together: above it every host gets
+  # the mode (entry "*"), for a flood spread thinly across many sites.
+  # 0 = off.
+  auto_rps_total: 0
   auto_duration: 10m
 
 # Notifications to the operator, sent from a background thread: under-attack
@@ -423,6 +427,9 @@ admin:
   # Host modes set from the console (POST /policy) survive restarts here;
   # they beat policy.hosts and labels ("" = memory only).
   modes_file: /var/lib/bot-shield/modes.json   # Not a default.
+  # Under-attack mode (entries and the history of activations, manual and
+  # automatic) survives restarts here ("" = memory only).
+  attack_file: /var/lib/bot-shield/attack.json   # Not a default.
   # Settings changed in the console: a YAML layer over this file, written
   # by the gateway (mode 0600, with <file>.history for rollback). Keys set
   # there beat this file; the console shows where each value comes from.

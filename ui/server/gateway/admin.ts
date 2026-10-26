@@ -10,6 +10,7 @@ import { z } from 'zod';
 import {
   type AsnInfo,
   attackEntrySchema,
+  attackRecordSchema,
   type GatewayConfig,
   gatewayConfigSchema,
   type ListEntry,
@@ -121,7 +122,9 @@ export type Decision = z.infer<typeof decisionSchema>;
 
 export const attackStateSchema = z.object({
   entries: z.array(attackEntrySchema),
+  history: z.array(attackRecordSchema),
   auto_rps: z.number(),
+  auto_rps_total: z.number(),
 });
 
 export const rulesTestSchema = z.object({

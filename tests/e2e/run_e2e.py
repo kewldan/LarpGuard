@@ -603,6 +603,7 @@ def main():
                                 f"bs-admin-{os.getpid()}.sock")
     lists_file = os.path.join(workdir, "lists.json")
     modes_file = os.path.join(workdir, "modes.json")
+    attack_file = os.path.join(workdir, "attack.json")
     settings_file = os.path.join(workdir, "settings.yaml")
     config_path = os.path.join(workdir, "bot-shield.yaml")
     keys_path = os.path.join(workdir, "keys.json")
@@ -765,6 +766,7 @@ admin:
   socket: {admin_socket}
   state_file: {lists_file}
   modes_file: {modes_file}
+  attack_file: {attack_file}
   settings_file: {settings_file}
   decisions: 1000
 metrics:
@@ -1869,8 +1871,20 @@ whoami: true
         expect(status == 200, (status, body))
         status, data = admin_call(admin_socket, "GET", "/attack")
         expect([e["host"] for e in data["entries"]] == ["a.test"], data)
+        # The entry reaches its file within a second (off the workers).
+        for _ in range(40):
+            if os.path.exists(attack_file) and [
+                    e["host"] for e in json.load(open(attack_file))["entries"]
+            ] == ["a.test"]:
+                break
+            time.sleep(0.05)
+        else:
+            expect(False, "attack file not written")
         status, _ = admin_call(admin_socket, "DELETE", "/attack/a.test")
         expect(status == 200, status)
+        status, data = admin_call(admin_socket, "GET", "/attack")
+        expect(data["entries"] == [] and data["history"][0]["host"] == "a.test"
+               and "ended" in data["history"][0], data)
         status, _, _ = h1_get(https_port, "a.test", ca_a, "/attack/page", html)
         expect(status == 200, status)
 
@@ -2071,12 +2085,18 @@ whoami: true
                fail_open_watchdog)
 
     def graceful_shutdown():
+        # Under-attack mode survives the restart: written on the way out.
+        status, _ = admin_call(admin_socket, "POST", "/attack",
+                               {"host": "www.a.test"})
+        expect(status == 201, status)
         started = time.monotonic()
         process.send_signal(signal.SIGTERM)
         code = process.wait(timeout=10)
         expect(code == 0, f"exit code {code}")
         elapsed = time.monotonic() - started
         expect(elapsed < 5, f"shutdown took {elapsed:.1f}s")
+        state = json.load(open(attack_file))
+        expect([e["host"] for e in state["entries"]] == ["www.a.test"], state)
 
     checks.run("graceful shutdown (pool drained)", graceful_shutdown)
 

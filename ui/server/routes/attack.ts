@@ -25,8 +25,11 @@ export function registerAttack(app: Hono<AppEnv>): void {
     ]);
     return send(c, attackSchema, {
       entries: state.entries,
+      history: state.history,
       auto_rps: state.auto_rps,
+      auto_rps_total: state.auto_rps_total,
       auto_duration_ms: config.attack.auto_duration_ms,
+      persistent: config.attack.persistent,
       rps: gateway?.rps ?? null,
       busiest,
       auto_activations:

@@ -829,7 +829,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     }
   }
   if (const YAML::Node attack = root["attack"]) {
-    if (!CheckKeys(attack, "attack", {"auto_rps", "auto_duration"}, error) ||
+    if (!CheckKeys(attack, "attack",
+                   {"auto_rps", "auto_rps_total", "auto_duration"}, error) ||
         !ReadDuration(attack, "attack", "auto_duration",
                       &config->attack_auto_duration, error)) {
       return false;
@@ -838,6 +839,13 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       config->attack_auto_rps = attack["auto_rps"].as<int64_t>();
       if (config->attack_auto_rps < 0) {
         *error = "attack.auto_rps: expected >= 0 (0 = off)";
+        return false;
+      }
+    }
+    if (attack["auto_rps_total"]) {
+      config->attack_auto_rps_total = attack["auto_rps_total"].as<int64_t>();
+      if (config->attack_auto_rps_total < 0) {
+        *error = "attack.auto_rps_total: expected >= 0 (0 = off)";
         return false;
       }
     }
@@ -891,8 +899,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   }
   if (const YAML::Node admin = root["admin"]) {
     if (!CheckKeys(admin, "admin",
-                   {"socket", "state_file", "modes_file", "settings_file",
-                    "decisions"},
+                   {"socket", "state_file", "modes_file", "attack_file",
+                    "settings_file", "decisions"},
                    error)) {
       return false;
     }
@@ -909,6 +917,11 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       config->admin_modes_file = admin["modes_file"].IsNull()
                                      ? ""
                                      : admin["modes_file"].as<std::string>();
+    }
+    if (admin["attack_file"]) {
+      config->admin_attack_file = admin["attack_file"].IsNull()
+                                      ? ""
+                                      : admin["attack_file"].as<std::string>();
     }
     if (admin["settings_file"]) {
       config->admin_settings_file =

@@ -228,6 +228,8 @@ struct Config {
   // its request rate stays above `attack_auto_rps` (0 = only by the admin
   // API) and keeps it for `attack_auto_duration`.
   int64_t attack_auto_rps = 0;
+  // The same over all hosts together: then every host gets it (entry "*").
+  int64_t attack_auto_rps_total = 0;
   std::chrono::milliseconds attack_auto_duration{std::chrono::minutes(10)};
   // Operator notifications ("notify" section, src/notify): a webhook
   // and/or a Telegram chat; neither = off. `notify_name` tells gateways
@@ -245,6 +247,9 @@ struct Config {
   // Host modes set through the admin API (the console) survive restarts in
   // this JSON file; empty: memory.
   std::string admin_modes_file;
+  // Under-attack entries and the history of activations survive restarts
+  // in this JSON file; empty: memory.
+  std::string admin_attack_file;
   // Settings changed through the admin API (the console): a YAML layer over
   // this file, written by the gateway (ADR-018); empty: read-only.
   std::string admin_settings_file;

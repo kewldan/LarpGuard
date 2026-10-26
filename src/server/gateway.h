@@ -142,6 +142,9 @@ class Gateway {
   bool finished() const;
   // False when a worker loop is stalled (see Heartbeats).
   bool Healthy() const;
+  // Writes changed under-attack state to admin.attack_file; blocks, so
+  // call it off the workers (main's control loop, once a second).
+  void SaveState();
   int worker_count() const { return static_cast<int>(workers_.size()); }
 
  private:

@@ -553,22 +553,23 @@ int Run(int argc, char** argv) {
   services.event_settings = &event_settings;
   services.verdicts = &verdicts;
   services.reload = reload;
-  services.on_attack_auto = [&notifier,
-                             &config](const bot_shield::AttackEntry& entry) {
+  services.on_attack_auto = [&notifier](const bot_shield::AttackEntry& entry) {
+    const std::string where =
+        entry.host == "*" ? std::string("all hosts") : entry.host;
     const std::string who =
-        entry.kind.empty() ? entry.host
+        entry.kind.empty() ? where
                            : std::format("{} {} on {}",
                                          entry.kind == "ip_prefix" ? "network"
                                          : entry.kind == "asn"     ? "AS"
                                                                    : "JA4",
-                                         entry.value, entry.host);
+                                         entry.value, where);
     notifier.Send(
         {"attack_auto", entry.host,
-         std::format("under-attack mode on for {} for {}: over {} requests/s",
+         std::format("under-attack mode on for {} for {}: over {} requests/s{}",
                      who,
                      bot_shield::FormatDuration(
                          std::chrono::seconds(entry.until - entry.since)),
-                     config.attack_auto_rps)});
+                     entry.threshold, entry.host == "*" ? " in total" : "")});
   };
   services.modes = &modes;
   services.publish_modes = publish_modes;
@@ -644,6 +645,16 @@ int Run(int argc, char** argv) {
     };
     ping_watchdog();
   }
+  // Under-attack state goes to disk from here, never from a worker.
+  asio::steady_timer state_timer(control);
+  std::function<void()> save_state = [&] {
+    gateway.SaveState();
+    state_timer.expires_after(std::chrono::seconds(1));
+    state_timer.async_wait([&](const std::error_code& ec) {
+      if (!ec) save_state();
+    });
+  };
+  save_state();
   asio::signal_set signals(control, SIGINT, SIGTERM);
   asio::steady_timer drain_timer(control);
   bool draining = false;
@@ -702,6 +713,7 @@ int Run(int argc, char** argv) {
   control.run();
   xdp.reset();  // Detaches before the workers go.
   gateway.Join();
+  gateway.SaveState();
   if (publisher) publisher->Stop();
   notifier.Stop();
   if (docker) docker->Stop();
