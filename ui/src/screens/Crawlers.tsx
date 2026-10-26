@@ -334,6 +334,16 @@ export function Crawlers() {
             <div>
               <div className={styles.eyebrowSmall}>Verification chain</div>
               <Chain crawler={current} data={data} />
+              <div
+                style={{
+                  fontSize: 12,
+                  color: 'var(--color-text-3)',
+                  marginTop: 6,
+                }}
+              >
+                Each request&apos;s own steps (ranges, reverse DNS, Web Bot
+                Auth, result) are in its detail on Requests.
+              </div>
             </div>
             <div>
               <div className={styles.eyebrowSmall}>Impostors caught · 24h</div>
@@ -351,7 +361,18 @@ export function Crawlers() {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="mono">{impostor.ip_prefix}</div>
+                      <Link
+                        className="mono"
+                        to="/requests"
+                        search={{
+                          reason: `fake_crawler:${current.id}`,
+                          ip_prefix: impostor.ip_prefix,
+                          range: '24h',
+                        }}
+                        title="Its requests; a request's detail shows each step of the check"
+                      >
+                        {impostor.ip_prefix}
+                      </Link>
                       <div
                         style={{ fontSize: 11.5, color: 'var(--color-text-3)' }}
                       >
