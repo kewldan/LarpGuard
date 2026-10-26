@@ -5,6 +5,7 @@
 import { z } from 'zod';
 
 import {
+  type ChallengeStep,
   type FingerprintKind,
   READINESS_EVIDENCE,
   type Readiness,
@@ -147,6 +148,55 @@ export interface StackRow {
   last_seen: number;
 }
 
+// What a request event says about the challenge, if anything: the page
+// served (action), or the answer at /__bs/* (its reason).
+export function challengeStep(event: {
+  ts: number;
+  request_id: string;
+  host: string;
+  path_group: string;
+  action: string;
+  reasons: readonly string[];
+}): ChallengeStep | null {
+  const base = {
+    ts: event.ts,
+    request_id: event.request_id,
+    host: event.host,
+    path_group: event.path_group,
+  };
+  for (const reason of event.reasons) {
+    if (reason === 'challenge:passed') {
+      return { ...base, step: 'passed', detail: '' };
+    }
+    if (reason.startsWith('challenge:failed:')) {
+      return { ...base, step: 'failed', detail: reason.slice(17) };
+    }
+    if (reason.startsWith('challenge:escalated:')) {
+      return { ...base, step: 'escalated', detail: reason.slice(20) };
+    }
+    if (reason === 'captcha:passed') {
+      return { ...base, step: 'captcha_passed', detail: '' };
+    }
+    if (reason.startsWith('captcha:')) {
+      const outcome = reason.slice(8);
+      if (outcome.startsWith('failed')) {
+        return {
+          ...base,
+          step: 'captcha_failed',
+          detail: outcome.replace(/^failed:?/, ''),
+        };
+      }
+    }
+  }
+  if (event.action === 'challenge') {
+    return { ...base, step: 'challenge', detail: '' };
+  }
+  if (event.action === 'captcha') {
+    return { ...base, step: 'captcha', detail: '' };
+  }
+  return null;
+}
+
 export interface Analytics {
   verdictSeries(range: Range, now: number): Promise<VerdictPoint[]>;
   topHosts(
@@ -173,6 +223,7 @@ export interface Analytics {
     >;
   }>;
   request(requestId: string, ts: number): Promise<DetailRow | null>;
+  challengeHistory(ipHash: string, ts: number): Promise<ChallengeStep[]>;
   fingerprints(
     kind: FingerprintKind,
     q: string | undefined,
@@ -339,6 +390,21 @@ export function createAnalytics(database: string, run: Run): Analytics {
     async request(requestId, ts) {
       const [row] = await run(sql.requestDetail(requestId, ts), detailRow);
       return row ?? null;
+    },
+
+    async challengeHistory(ipHash, ts) {
+      const rows = await run(
+        sql.challengeHistory(ipHash, ts),
+        z.object({
+          ts: num,
+          request_id: z.string(),
+          host: z.string(),
+          path_group: z.string(),
+          action: z.string(),
+          reasons: z.array(z.string()),
+        }),
+      );
+      return rows.flatMap((row) => challengeStep(row) ?? []);
     },
 
     async fingerprints(kind, q, now) {

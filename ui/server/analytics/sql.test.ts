@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { requestFilterSchema } from '../../shared/api.ts';
-import { createAnalytics } from './analytics.ts';
+import { challengeStep, createAnalytics } from './analytics.ts';
 import { type Query, Sql } from './sql.ts';
 
 const sql = new Sql('bot_shield');
@@ -21,6 +21,7 @@ describe('Sql', () => {
   it.each([
     ['requestRows', sql.requestRows(filter)],
     ['requestDetail', sql.requestDetail('abc-1-2', 1_000_000)],
+    ['challengeHistory', sql.challengeHistory('a1b2', 1_000_000_000)],
     ['ruleSamples', sql.ruleSamples(3600, 10, 200)],
   ])('%s filters on the column, not the ms alias', (_name, query) => {
     expect(query.sql).toContain('AS ts');
@@ -87,5 +88,39 @@ describe('readiness from ClickHouse rows', () => {
         last_seen: 1000,
       },
     ]);
+  });
+});
+
+describe('challengeStep', () => {
+  const event = (action: string, reasons: string[]) => ({
+    ts: 1,
+    request_id: 'r',
+    host: 'a.example',
+    path_group: '/__bs/verify',
+    action,
+    reasons,
+  });
+
+  it('reads the page served and the answer', () => {
+    expect(challengeStep(event('challenge', ['bot_score']))?.step).toBe(
+      'challenge',
+    );
+    expect(challengeStep(event('captcha', []))?.step).toBe('captcha');
+    expect(challengeStep(event('allow', ['challenge:passed']))?.step).toBe(
+      'passed',
+    );
+    expect(
+      challengeStep(event('block', ['challenge:failed:webdriver'])),
+    ).toMatchObject({ step: 'failed', detail: 'webdriver' });
+    expect(
+      challengeStep(event('allow', ['challenge:escalated:captcha'])),
+    ).toMatchObject({ step: 'escalated', detail: 'captcha' });
+    expect(challengeStep(event('allow', ['captcha:passed']))?.step).toBe(
+      'captcha_passed',
+    );
+    expect(
+      challengeStep(event('block', ['captcha:failed:timeout'])),
+    ).toMatchObject({ step: 'captcha_failed', detail: 'timeout' });
+    expect(challengeStep(event('allow', ['token_valid']))).toBeNull();
   });
 });

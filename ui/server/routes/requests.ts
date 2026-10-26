@@ -35,16 +35,22 @@ export function registerRequests(app: Hono<AppEnv>): void {
     if (!/^[\w.-]{1,128}$/.test(id)) fail(400, 'invalid request id');
     const row = await analytics(deps).request(id, ts);
     if (!row) return fail(404, 'request not found');
-    const [names, policy, decision] = await Promise.all([
+    const [names, policy, decision, challenges] = await Promise.all([
       asnNames(deps, [row.asn]),
       deps.admin.policy(row.host).catch(() => null),
       deps.admin.decision(id).catch(() => null),
+      row.ip_hash
+        ? analytics(deps)
+            .challengeHistory(row.ip_hash, ts)
+            .catch(() => [])
+        : Promise.resolve([]),
     ]);
     return send(c, requestDetailSchema, {
       row,
       asn: names.get(row.asn) ?? null,
       mode: policy && { mode: policy.mode, source: policy.mode_source },
       decision_available: decision !== null,
+      challenges,
     });
   });
 }

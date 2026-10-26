@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 
 import type {
   AsnInfo,
+  ChallengeStep,
   RequestDetail as Detail,
   GatewayConfig,
   RequestFilter,
@@ -352,6 +353,88 @@ function claimRows(row: Detail['row']) {
   ];
 }
 
+const STEP_TEXT: Record<
+  ChallengeStep['step'],
+  { text: string; color: string }
+> = {
+  challenge: {
+    text: 'challenge served',
+    color: 'var(--color-challenged-text)',
+  },
+  captcha: { text: 'CAPTCHA served', color: 'var(--color-challenged-text)' },
+  passed: { text: 'passed', color: 'var(--color-allowed-text)' },
+  failed: { text: 'failed', color: 'var(--color-blocked-text)' },
+  escalated: { text: 'escalated', color: 'var(--color-challenged-text)' },
+  captcha_passed: {
+    text: 'CAPTCHA passed',
+    color: 'var(--color-allowed-text)',
+  },
+  captcha_failed: {
+    text: 'CAPTCHA failed',
+    color: 'var(--color-blocked-text)',
+  },
+};
+
+// The client's way through challenges around this request (same ip_hash).
+function ChallengeHistory({
+  steps,
+  requestId,
+}: {
+  steps: readonly ChallengeStep[];
+  requestId: string;
+}) {
+  if (steps.length === 0) {
+    return (
+      <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+        No challenge for this client from a day before to an hour after.
+      </div>
+    );
+  }
+  return (
+    <ol
+      aria-label="Challenge history"
+      style={{
+        listStyle: 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        fontSize: 12,
+      }}
+    >
+      {steps.map((step) => {
+        const look = STEP_TEXT[step.step];
+        return (
+          <li
+            key={step.request_id}
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '2px 10px',
+              fontWeight: step.request_id === requestId ? 600 : undefined,
+            }}
+          >
+            <span
+              className="mono"
+              style={{ color: 'var(--color-text-3)', width: 128 }}
+            >
+              {dateTime(step.ts)}
+            </span>
+            <span style={{ color: look.color, width: 112 }}>{look.text}</span>
+            <span
+              className="mono"
+              style={{ color: 'var(--color-text-2)', overflowWrap: 'anywhere' }}
+            >
+              {step.host}
+              {step.path_group}
+              {step.detail ? ` · ${step.detail}` : ''}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function millis(micros: number | null): string {
   return micros === null ? '?' : `${(micros / 1000).toFixed(1)} ms`;
 }
@@ -672,6 +755,12 @@ function RequestDetailView({
             </div>
           ))}
         </div>
+
+        <h3 className={styles.h3}>Challenge history · this client</h3>
+        <ChallengeHistory
+          steps={detail.challenges}
+          requestId={row.request_id}
+        />
 
         <h3 className={styles.h3}>Browser probes · Web Bot Auth</h3>
         <div

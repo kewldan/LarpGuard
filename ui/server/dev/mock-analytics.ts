@@ -12,6 +12,7 @@ import {
 import {
   type Analytics,
   bucketStarts,
+  challengeStep,
   fillSeries,
   type HostCounts,
 } from '../analytics/analytics.ts';
@@ -226,6 +227,20 @@ export function createMockAnalytics(
     request(requestId) {
       return Promise.resolve(
         events.find((e) => e.request_id === requestId) ?? null,
+      );
+    },
+    challengeHistory(ipHash, ts) {
+      return Promise.resolve(
+        events
+          .filter(
+            (e) =>
+              e.ip_hash === ipHash &&
+              e.ts >= ts - 86_400_000 &&
+              e.ts <= ts + 3_600_000,
+          )
+          .flatMap((e) => challengeStep(e) ?? [])
+          .reverse()
+          .slice(0, 50),
       );
     },
     fingerprints(kind, q) {

@@ -561,6 +561,29 @@ export const requestPageSchema = z.object({
 });
 export type RequestPage = z.infer<typeof requestPageSchema>;
 
+// One step of a client's way through the challenge, from request events:
+// a challenge or CAPTCHA page served, then the answer at /__bs/verify or
+// /__bs/captcha (passed, failed with a reason, escalated to a CAPTCHA).
+export const CHALLENGE_STEPS = [
+  'challenge',
+  'captcha',
+  'passed',
+  'failed',
+  'escalated',
+  'captcha_passed',
+  'captcha_failed',
+] as const;
+export const challengeStepSchema = z.object({
+  ts: z.number(),
+  request_id: z.string(),
+  host: z.string(),
+  path_group: z.string(),
+  step: z.enum(CHALLENGE_STEPS),
+  // Why it failed, or what the escalation led to.
+  detail: z.string(),
+});
+export type ChallengeStep = z.infer<typeof challengeStepSchema>;
+
 export const requestDetailSchema = z.object({
   row: requestRowSchema.extend({
     http_version: z.string(),
@@ -591,6 +614,9 @@ export const requestDetailSchema = z.object({
   mode: hostModeInfoSchema.nullable(),
   // The gateway's decision record while it is still in its ring buffer.
   decision_available: z.boolean(),
+  // The same client's challenges from a day before to an hour after the
+  // request (by ip_hash), newest first.
+  challenges: z.array(challengeStepSchema),
 });
 export type RequestDetail = z.infer<typeof requestDetailSchema>;
 

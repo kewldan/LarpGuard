@@ -257,6 +257,23 @@ LIMIT 1`,
     };
   }
 
+  // A client's challenge steps around `ts` (by ip_hash): challenge and
+  // CAPTCHA pages served, answers at /__bs/* (reasons challenge:*,
+  // captcha:*).
+  challengeHistory(ipHash: string, ts: number): Query {
+    return {
+      sql: `SELECT toUnixTimestamp64Milli(ts) AS ts, request_id, host,
+  path_group, action, reasons
+FROM ${this.table}
+WHERE req.ts BETWEEN fromUnixTimestamp64Milli({from:Int64}) AND fromUnixTimestamp64Milli({to:Int64})
+  AND ip_hash = {ip_hash:String}
+  AND (action IN ('challenge', 'captcha')
+    OR arrayExists(r -> startsWith(r, 'challenge:') OR startsWith(r, 'captcha:'), reasons))
+ORDER BY req.ts DESC LIMIT 50`,
+      params: { ip_hash: ipHash, from: ts - 86_400_000, to: ts + 3_600_000 },
+    };
+  }
+
   fingerprints(kind: FingerprintKind, q: string | undefined): Query {
     const column = FINGERPRINT_COLUMNS[kind];
     return {
