@@ -66,7 +66,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build git python3 python3-venv \
-            openssl curl nodejs clang ca-certificates ccache
+            openssl curl nodejs clang ca-certificates ccache valkey-server
       - uses: actions/checkout@v7
       - name: Install clang-tidy
         if: matrix.tidy
@@ -97,6 +97,12 @@ jobs:
           ./build/tests/bot_shield_tests --gtest_filter='XdpTest.*' \
             | tee /tmp/xdp.log
           ! grep -q SKIPPED /tmp/xdp.log
+      - name: Valkey tests ran
+        if: ${{ !matrix.tidy }}
+        run: |
+          ./build/tests/bot_shield_tests --gtest_filter='ValkeyLimiterTest.*' \
+            | tee /tmp/valkey.log
+          ! grep -q SKIPPED /tmp/valkey.log
       - name: End-to-end tests
         if: ${{ !matrix.tidy }}
         run: python3 -I tests/e2e/run_e2e.py build/src/bot-shield

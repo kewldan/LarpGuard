@@ -123,7 +123,10 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   только проверяемые (пересчитанные или из спецификаций), не по памяти.
 - `src/ratelimit/` — GCRA (`gcra`), общее для всех воркеров шардированное
   хранилище (`store`: состояние не делить по воркерам — лимит умножится),
-  описание лимитов и ключей (`limits`). Лимиты проверяются после вердикта
+  описание лимитов и ключей (`limits`), режимы `synced`/`strict` через
+  Valkey (`valkey`: свой клиент RESP в своём потоке; `strict` держит
+  отправку запроса — `Exchange::HoldDispatch`/`ResumeDispatch` — а не
+  воркер; без Valkey всё локально). Лимиты проверяются после вердикта
   в `ConnectionObserver::CheckRateLimits`, лимиты соединений — в `accept`.
 - `src/docker/` — клиент Docker API по unix-сокету (`client`), разбор
   лейблов `botshield.*` в снапшот `LabelPolicies` (`labels`), опрос
@@ -234,7 +237,8 @@ clang-format/clang-tidy менять в CI вместе с локальной.
   (кроме взятия снапшотов). Всё сетевое (siteverify, ключи Web Bot Auth,
   загрузки) — в фоновых потоках; запрос только читает кеш.
 - Секреты настроек (`events.token`, `events.password`, `events.ip_salt`,
-  `captcha.secret`, `notify.webhook`, `notify.telegram.token`) только записываются: admin API отдаёт `set`, схема zod
+  `captcha.secret`, `notify.webhook`, `notify.telegram.token`,
+  `valkey.password`) только записываются: admin API отдаёт `set`, схема zod
   не пропускает значение, в аудит и логи идёт лишь «заменён/очищен».
 - Консоль не видит полный IP: из `/decisions` BFF оставляет только
   `ip_prefix`/`ip_hash`, браузер не ходит ни в admin-сокет, ни в ClickHouse.

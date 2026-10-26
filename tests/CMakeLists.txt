@@ -25,6 +25,7 @@ add_executable(bot_shield_tests
   proxy_protocol_test.cc
   proxy_test.cc
   ratelimit_test.cc
+  valkey_test.cc
   rules_test.cc
   scoring_test.cc
   settings_test.cc

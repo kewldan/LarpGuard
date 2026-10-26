@@ -2150,6 +2150,77 @@ metrics:
 
     checks.run("connection limits: new connections per IP", connection_limits)
 
+    def strict_limits_in_valkey():
+        server = shutil.which("valkey-server") or shutil.which("redis-server")
+        if server is None:
+            print("SKIP strict limits: no valkey-server")
+            return
+        valkey_port = free_port()
+        valkey = subprocess.Popen(
+            [server, "--port", str(valkey_port), "--bind", "127.0.0.1",
+             "--save", "", "--appendonly", "no"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        gateways = []
+        try:
+            wait_port(valkey_port)
+            ports = []
+            for name in ("one", "two"):
+                port = free_port()
+                ports.append(port)
+                acme = os.path.join(workdir, f"strict-{name}-acme.json")
+                write_atomic(acme, acme_json([(*gw_a, "a.test")]))
+                config = os.path.join(workdir, f"strict-{name}.yaml")
+                with open(config, "w") as f:
+                    f.write(f"""
+listen:
+  https: 127.0.0.1:{port}
+  http: ""
+traefik:
+  acme_json: {acme}
+  upstream_https: 127.0.0.1:{tls_port}
+mode: enforce
+rate_limits:
+  - name: strict-login
+    paths: [/strict*]
+    key: [ip]
+    rate: 3/m
+    burst: 3
+    mode: strict
+valkey:
+  address: 127.0.0.1:{valkey_port}
+  timeout: 500ms
+metrics:
+  listen: ""
+{OFFLINE}""")
+                gateways.append(subprocess.Popen(
+                    [binary, "--config", config],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            for port in ports:
+                wait_port(port)
+            time.sleep(0.3)  # Both connect to Valkey.
+            # One limit over two gateways: the fourth request is refused
+            # wherever it lands. The first carries a body, held until
+            # Valkey answers and then sent on.
+            body = b"x" * 20000
+            results = h1_exchange(
+                ports[0], "a.test", ca_a,
+                b"POST /strict/1 HTTP/1.1\r\nHost: a.test\r\n"
+                b"Content-Length: 20000\r\n\r\n" + body)
+            expect(results[0][0] == 200 and
+                   json.loads(results[0][2])["body_len"] == 20000, results)
+            statuses = [h1_get(ports[i % 2], "a.test", ca_a,
+                               f"/strict/{i}")[0] for i in range(1, 4)]
+            expect(statuses == [200, 200, 429], statuses)
+        finally:
+            for gateway in gateways:
+                gateway.send_signal(signal.SIGTERM)
+                gateway.wait(timeout=10)
+            valkey.terminate()
+            valkey.wait(timeout=10)
+
+    checks.run("rate limits: strict, shared through Valkey",
+               strict_limits_in_valkey)
+
     def notifications():
         hook = FakeHttp({"/hook": lambda method, query, body:
                          (200, "text/plain", b"ok")})

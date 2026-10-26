@@ -31,6 +31,7 @@
 #include "proxy/upstream_pool.h"
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
+#include "ratelimit/valkey.h"
 #include "score/policy.h"
 #include "score/rule_samples.h"
 #include "score/rules.h"
@@ -90,6 +91,8 @@ struct GatewayContext {
   // Recent requests for testing draft rules live; null without the admin
   // API.
   RuleSampleRing* rule_samples = nullptr;
+  // Valkey for synced and strict rate limits; null without valkey.address.
+  ValkeyLimiter* valkey = nullptr;
   // Per-IP connection limits at accept time (shared).
   ConnectionCounter* connection_counter = nullptr;
   // Per-IP connections still before their first request headers (shared).

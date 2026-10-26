@@ -84,6 +84,7 @@ export function createMockAdmin(
       rate: string;
       burst?: number;
       statuses?: number[];
+      mode?: 'local' | 'synced' | 'strict';
     };
     const parsed = (text: string) => {
       const [count, unit] = text.split('/');
@@ -103,6 +104,7 @@ export function createMockAdmin(
         ...parsed(limit.rate),
         burst: limit.burst ?? 1,
         statuses: limit.statuses ?? [],
+        mode: limit.mode ?? 'local',
       }),
     );
     const throttle = value('throttle') as Omit<LimitValue, 'name'> | null;
@@ -117,6 +119,7 @@ export function createMockAdmin(
           ...parsed(throttle.rate),
           burst: throttle.burst ?? 1,
           statuses: [],
+          mode: 'local',
         }
       : null;
     const ai = value('crawlers.ai');

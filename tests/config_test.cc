@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "common/log.h"
+#include "ratelimit/limits.h"
 #include "score/policy.h"
 
 namespace bot_shield {
@@ -394,6 +395,40 @@ connection_limits:
       ParseConfig("connection_limits: {open_per_ip: -1}\n", &config, &error));
   EXPECT_FALSE(ParseConfig("connection_limits: {pending_per_ip: -1}\n", &config,
                            &error));
+}
+
+TEST(ConfigTest, ParsesValkeyAndLimitModes) {
+  Config config;
+  std::string error;
+  EXPECT_FALSE(config.valkey_address.has_value());  // Off by default.
+  ASSERT_TRUE(ParseConfig(R"(
+valkey:
+  address: 127.0.0.1:6379
+  password: s
+  prefix: "site:"
+  timeout: 20ms
+  sync_interval: 100ms
+rate_limits:
+  - {name: login, key: [ip], rate: 5/m, mode: strict}
+  - {name: api, key: [ip], rate: 5/s, mode: synced}
+  - {name: page, key: [ip], rate: 5/s}
+)",
+                          &config, &error))
+      << error;
+  ASSERT_TRUE(config.valkey_address);
+  EXPECT_EQ(config.valkey_address->port, 6379);
+  EXPECT_EQ(config.valkey_password, "s");
+  EXPECT_EQ(config.valkey_prefix, "site:");
+  EXPECT_EQ(config.valkey_timeout, milliseconds(20));
+  EXPECT_EQ(config.valkey_sync_interval, milliseconds(100));
+  EXPECT_EQ(config.rate_limits[0].mode, RateLimitMode::kStrict);
+  EXPECT_EQ(config.rate_limits[1].mode, RateLimitMode::kSynced);
+  EXPECT_EQ(config.rate_limits[2].mode, RateLimitMode::kLocal);
+  EXPECT_FALSE(ParseConfig(
+      "rate_limits: [{name: a, key: [ip], rate: 1/s, mode: global}]\n", &config,
+      &error));
+  EXPECT_FALSE(ParseConfig("valkey: {address: nope}\n", &config, &error));
+  EXPECT_FALSE(ParseConfig("valkey: {timeout: 0s}\n", &config, &error));
 }
 
 TEST(ConfigTest, ParsesDocker) {

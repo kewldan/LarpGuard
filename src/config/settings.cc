@@ -99,6 +99,9 @@ Json RateLimits(const std::vector<RateLimitSpec>& limits) {
     // Only when set: limits written before statuses existed stay as they
     // are.
     if (!spec.statuses.empty()) limit["statuses"] = spec.statuses;
+    if (spec.mode != RateLimitMode::kLocal) {
+      limit["mode"] = RateLimitModeName(spec.mode);
+    }
     out.push_back(std::move(limit));
   }
   return out;
@@ -227,6 +230,15 @@ constexpr SettingKey kKeys[] = {
     Live("rules", T::kRules, [](C c) { return Rules(c.rules); }),
     Live("rate_limits", T::kRateLimits,
          [](C c) { return RateLimits(c.rate_limits); }),
+    Yaml("valkey.address", T::kEndpoint,
+         [](C c) { return OptionalEndpoint(c.valkey_address); }),
+    Secret("valkey.password", [](C c) -> Json { return c.valkey_password; }),
+    Restart("valkey.prefix", T::kString,
+            [](C c) -> Json { return c.valkey_prefix; }),
+    Restart("valkey.timeout", T::kDuration,
+            [](C c) { return Duration(c.valkey_timeout); }),
+    Restart("valkey.sync_interval", T::kDuration,
+            [](C c) { return Duration(c.valkey_sync_interval); }),
     Restart("connection_limits.open_per_ip", T::kInt,
             [](C c) -> Json { return c.open_connections_per_ip; }),
     Restart("connection_limits.new_per_ip", T::kRate,
@@ -801,7 +813,7 @@ bool CheckSettingValue(const SettingKey& key, const Json& value,
               if (!integers) return false;
               rest.erase(it);
             }
-            return CheckFields(rest, {"name", "rate"},
+            return CheckFields(rest, {"name", "rate", "mode"},
                                {"hosts", "paths", "methods", "classes", "key"},
                                {"burst"});
           });

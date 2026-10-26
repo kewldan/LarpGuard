@@ -60,6 +60,7 @@ export const MOCK_CONFIG: GatewayConfig = {
       period_ms: 60_000,
       burst: 5,
       statuses: [],
+      mode: 'local',
     },
     {
       name: 'search_api',
@@ -72,6 +73,7 @@ export const MOCK_CONFIG: GatewayConfig = {
       period_ms: 1000,
       burst: 20,
       statuses: [],
+      mode: 'local',
     },
     {
       name: 'api_default',
@@ -84,6 +86,7 @@ export const MOCK_CONFIG: GatewayConfig = {
       period_ms: 1000,
       burst: 100,
       statuses: [],
+      mode: 'local',
     },
   ],
   throttle: {
@@ -97,6 +100,7 @@ export const MOCK_CONFIG: GatewayConfig = {
     period_ms: 1000,
     burst: 5,
     statuses: [],
+    mode: 'local',
   },
   honeypot_paths: ['/.env', '/.git/*', '/wp-config.php*'],
   crawlers: {

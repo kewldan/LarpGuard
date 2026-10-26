@@ -28,6 +28,7 @@ function scope(limit: Limit): string {
     ...(limit.statuses.length
       ? [`counts ${limit.statuses.join('/')} responses`]
       : []),
+    ...(limit.mode !== 'local' ? [`${limit.mode} via Valkey`] : []),
   ];
   return parts.join(' · ');
 }

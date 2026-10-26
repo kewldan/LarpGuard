@@ -12,10 +12,18 @@
 #include "fp/http_request.h"
 #include "ratelimit/gcra.h"
 #include "ratelimit/store.h"
+#include "ratelimit/valkey.h"
 
 namespace bot_shield {
 
 // A request rate limit as written in the configuration.
+// Where a limit's state lives (8.2): this gateway only, shared through
+// Valkey with periodic exchange, or decided in Valkey per request.
+enum class RateLimitMode { kLocal, kSynced, kStrict };
+
+std::string_view RateLimitModeName(RateLimitMode mode);
+bool ParseRateLimitMode(std::string_view text, RateLimitMode* mode);
+
 struct RateLimitSpec {
   std::string name;
   // Filters; an empty list matches everything.
@@ -34,6 +42,9 @@ struct RateLimitSpec {
   // logins) instead of requests; a request is refused once they used up
   // the limit. Empty = count every request.
   std::vector<int> statuses;
+  // synced and strict need valkey; without it (or with statuses) they
+  // act like local.
+  RateLimitMode mode = RateLimitMode::kLocal;
 };
 
 // Parses "120/m": count per second (s), minute (m), hour (h) or day (d).
@@ -82,10 +93,14 @@ class RateLimitSet {
 
   // Limits with `statuses` are only looked at here; when `on_response` is
   // set, those that let the request through are added to it, to be counted
-  // with CountResponse once its status is known.
+  // with CountResponse once its status is known. With `valkey`, synced
+  // limits report what they let through, and strict limits go to `strict`
+  // (when set and Valkey is up) instead of being decided here.
   std::optional<RateLimitHit> Check(
       const RateLimitRequest& request, RateLimitStore* store, int64_t now_ns,
-      std::vector<ResponseCount>* on_response = nullptr) const;
+      std::vector<ResponseCount>* on_response = nullptr,
+      ValkeyLimiter* valkey = nullptr,
+      std::vector<StrictCheck>* strict = nullptr) const;
 
   // Limits whose host filter covers `host` (other filters ignored).
   std::vector<std::string> NamesForHost(std::string_view host) const;

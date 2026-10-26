@@ -423,11 +423,17 @@ AdminResponse Decisions(std::string_view rest, const QueryParams& params,
 int64_t Millis(std::chrono::milliseconds duration) { return duration.count(); }
 
 nlohmann::json LimitJson(const RateLimitSpec& spec) {
-  return {{"name", spec.name},       {"hosts", spec.hosts},
-          {"paths", spec.paths},     {"methods", spec.methods},
-          {"classes", spec.classes}, {"key", spec.key},
-          {"count", spec.count},     {"period_ms", Millis(spec.period)},
-          {"burst", spec.burst},     {"statuses", spec.statuses}};
+  return {{"name", spec.name},
+          {"hosts", spec.hosts},
+          {"paths", spec.paths},
+          {"methods", spec.methods},
+          {"classes", spec.classes},
+          {"key", spec.key},
+          {"count", spec.count},
+          {"period_ms", Millis(spec.period)},
+          {"burst", spec.burst},
+          {"statuses", spec.statuses},
+          {"mode", RateLimitModeName(spec.mode)}};
 }
 
 // GET /config: what decides verdicts right now (the last successful load

@@ -658,8 +658,13 @@ class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
       exchange->RespondLocally(405, "method not allowed\n");
       return;
     }
+    exchange->dispatch = [pool = server_->context().pool,
+                          name = client_.server_name,
+                          weak = std::weak_ptr<Exchange>(exchange)] {
+      if (auto held = weak.lock()) pool->Dispatch(name, held);
+    };
     if (hooks_.on_request) hooks_.on_request(*exchange);
-    if (!exchange->local) {
+    if (!exchange->local && !exchange->dispatch_held) {
       server_->context().pool->Dispatch(client_.server_name, exchange);
     }
   }

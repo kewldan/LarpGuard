@@ -246,6 +246,8 @@ const limitSchema = z.object({
   burst: z.number(),
   // Origin response statuses the limit counts; empty: every request.
   statuses: z.array(z.number()).default([]),
+  // local, or shared with other gateways through Valkey.
+  mode: z.enum(['local', 'synced', 'strict']).default('local'),
 });
 export type Limit = z.infer<typeof limitSchema>;
 

@@ -112,6 +112,12 @@ void Exchange::StartLocalStream(int status, std::size_t content_length,
   if (wake_client) wake_client();
 }
 
+void Exchange::ResumeDispatch() {
+  if (!dispatch_held) return;
+  dispatch_held = false;
+  if (!local && !client_cancelled && dispatch) dispatch();
+}
+
 void Exchange::DeferLocalResponse() {
   local = true;
   if (cancel_upstream) cancel_upstream();

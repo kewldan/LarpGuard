@@ -97,6 +97,16 @@ struct Config {
   std::vector<RuleSpec> rules;
   // Request rate limits ("rate_limits" section).
   std::vector<RateLimitSpec> rate_limits;
+  // Valkey for rate limits with mode synced or strict ("valkey" section,
+  // 8.2); unset: they act like local limits.
+  std::optional<Endpoint> valkey_address;
+  std::string valkey_password;
+  // Prepended to every key; gateways that share limits share it.
+  std::string valkey_prefix = "botshield:";
+  // A strict check waits this long, then the request is decided locally.
+  std::chrono::milliseconds valkey_timeout{50};
+  // How often synced limits exchange their counts.
+  std::chrono::milliseconds valkey_sync_interval{200};
   // Action "throttle": a lower limit for the requests it applies to
   // ("throttle" section: rate, burst, key; no filters). Unset: throttle
   // acts like allow.

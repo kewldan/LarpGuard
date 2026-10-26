@@ -67,6 +67,18 @@ void RateLimitStore::Forget(std::string_view key) {
   shard.tats.erase(std::string(key));
 }
 
+void RateLimitStore::Raise(std::string_view key, int64_t tat_ns) {
+  Shard& shard = shards_[ShardOf(key, kShards)];
+  std::scoped_lock lock(shard.mutex);
+  const std::string owned(key);
+  auto it = shard.tats.find(owned);
+  if (it == shard.tats.end()) {
+    if (shard.tats.size() >= max_keys_per_shard_) return;
+    it = shard.tats.emplace(owned, 0).first;
+  }
+  it->second = std::max(it->second, tat_ns);
+}
+
 std::size_t RateLimitStore::size() const {
   std::size_t total = 0;
   for (const Shard& shard : shards_) {

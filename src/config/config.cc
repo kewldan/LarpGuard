@@ -356,7 +356,7 @@ bool ParseRateLimits(const YAML::Node& node, Config* config,
   for (const auto& item : node) {
     if (!CheckKeys(item, "rate_limits[]",
                    {"name", "hosts", "paths", "methods", "classes", "key",
-                    "rate", "burst", "statuses"},
+                    "rate", "burst", "statuses", "mode"},
                    error)) {
       return false;
     }
@@ -385,6 +385,12 @@ bool ParseRateLimits(const YAML::Node& node, Config* config,
         spec.statuses.push_back(status.as<int>());
       }
     }
+    if (const YAML::Node mode = item["mode"];
+        mode && !ParseRateLimitMode(mode.as<std::string>(), &spec.mode)) {
+      *error = std::format(
+          "rate_limits '{}': mode must be local, synced or strict", spec.name);
+      return false;
+    }
     config->rate_limits.push_back(std::move(spec));
   }
   RateLimitSet compiled;
@@ -407,6 +413,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
                   "policy",
                   "rules",
                   "rate_limits",
+                  "valkey",
                   "connection_limits",
                   "docker",
                   "admin",
@@ -827,6 +834,28 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
         *error = "challenge.endpoint_burst: expected >= 1";
         return false;
       }
+    }
+  }
+  if (const YAML::Node valkey = root["valkey"]) {
+    if (!CheckKeys(
+            valkey, "valkey",
+            {"address", "password", "prefix", "timeout", "sync_interval"},
+            error) ||
+        !ReadOptionalEndpoint(valkey, "valkey", "address",
+                              &config->valkey_address, error) ||
+        !ReadDuration(valkey, "valkey", "timeout", &config->valkey_timeout,
+                      error) ||
+        !ReadDuration(valkey, "valkey", "sync_interval",
+                      &config->valkey_sync_interval, error)) {
+      return false;
+    }
+    if (valkey["password"]) {
+      config->valkey_password = valkey["password"].IsNull()
+                                    ? ""
+                                    : valkey["password"].as<std::string>();
+    }
+    if (valkey["prefix"]) {
+      config->valkey_prefix = valkey["prefix"].as<std::string>();
     }
   }
   if (const YAML::Node attack = root["attack"]) {

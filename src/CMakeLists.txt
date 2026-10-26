@@ -67,6 +67,7 @@ add_library(bot_shield_core STATIC
   ratelimit/gcra.cc
   ratelimit/limits.cc
   ratelimit/store.cc
+  ratelimit/valkey.cc
   score/policy.cc
   score/rule_samples.cc
   score/rules.cc

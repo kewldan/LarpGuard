@@ -29,6 +29,7 @@
 #include "proxy/upstream_pool.h"
 #include "ratelimit/gcra.h"
 #include "ratelimit/store.h"
+#include "ratelimit/valkey.h"
 #include "server/connection.h"
 #include "server/health.h"
 #include "server/metrics_server.h"
@@ -377,6 +378,17 @@ bool Gateway::Start(std::string* error) {
     return false;
   }
   if (!attack_.Load(UnixSeconds(), error)) return false;
+  if (config_.valkey_address) {
+    ValkeySettings valkey;
+    valkey.host = config_.valkey_address->host;
+    valkey.port = config_.valkey_address->port;
+    valkey.password = config_.valkey_password;
+    valkey.prefix = config_.valkey_prefix;
+    valkey.timeout = config_.valkey_timeout;
+    valkey.sync_interval = config_.valkey_sync_interval;
+    valkey_ =
+        std::make_unique<ValkeyLimiter>(std::move(valkey), &rate_limit_store_);
+  }
   GatewayContext shared;
   shared.config = &config_;
   shared.certificates = certificates_;
@@ -400,6 +412,7 @@ bool Gateway::Start(std::string* error) {
   shared.pending_counter = &pending_counter_;
   shared.attack = &attack_;
   if (!config_.admin_socket.empty()) shared.rule_samples = &rule_samples_;
+  shared.valkey = valkey_.get();
   shared.events = services_.events;
   shared.event_settings = services_.event_settings;
   if (!ResolveEndpoint(config_.upstream_https, &shared.upstream_https, error) ||

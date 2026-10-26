@@ -75,6 +75,24 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_request_body_timeouts_total", "",
                request_body_timeouts.Get());
 
+  AppendHeader(&out, "bot_shield_valkey_up", "gauge",
+               "Valkey reachable for synced and strict rate limits.");
+  AppendSample(&out, "bot_shield_valkey_up", "", valkey_up.Get());
+  AppendHeader(&out, "bot_shield_valkey_errors_total", "counter",
+               "Valkey commands that failed (network, timeout, reply).");
+  AppendSample(&out, "bot_shield_valkey_errors_total", "", valkey_errors.Get());
+  AppendHeader(&out, "bot_shield_valkey_synced_keys_total", "counter",
+               "Synced rate limit keys exchanged with Valkey.");
+  AppendSample(&out, "bot_shield_valkey_synced_keys_total", "",
+               valkey_synced_keys.Get());
+  AppendHeader(&out, "bot_shield_valkey_strict_checks_total", "counter",
+               "Requests checked against strict limits, in Valkey or "
+               "locally when Valkey could not decide.");
+  AppendSample(&out, "bot_shield_valkey_strict_checks_total",
+               R"(where="valkey")", valkey_strict_checks.Get());
+  AppendSample(&out, "bot_shield_valkey_strict_checks_total",
+               R"(where="local")", valkey_strict_local.Get());
+
   AppendHeader(&out, "bot_shield_connection_request_limit_total", "counter",
                "Client connections ended after max_requests_per_connection.");
   AppendSample(&out, "bot_shield_connection_request_limit_total", "",

@@ -140,12 +140,18 @@ rules: []
 # statuses: count only origin responses with these statuses (e.g. failed
 # logins: 401, 403) instead of every request; once they use up the limit,
 # requests are refused. The gateway's own answers never count.
+# mode: local (this gateway, the default), synced (several gateways share
+# the limit through valkey: each decides locally and they exchange counts
+# every sync_interval, ±5-10 %) or strict (an atomic check in valkey per
+# request, for logins and payments; the request waits for it, the gateway
+# does not). Without valkey, or with statuses, every limit is local.
 rate_limits: []
 #  - name: login
 #    paths: [/login]
 #    methods: [POST]
 #    key: [ip]
 #    rate: 5/m
+#    mode: strict
 #  - name: login-failures
 #    paths: [/login]
 #    methods: [POST]
@@ -162,6 +168,21 @@ rate_limits: []
 #    key: ["header:x-api-key"]
 #    rate: 100/s
 #    burst: 200
+
+# Valkey (or Redis) for rate limits with mode synced or strict, shared by
+# several gateways. Keys are SHA-256 hashes of the limit keys (no addresses
+# or header values leave the gateway). Down or slow: those limits act
+# locally; nothing is refused for lack of Valkey.
+valkey:
+  # host:port; "" = off.
+  address: ""
+  password: ""
+  # Prefix of every key: gateways with the same prefix share limits.
+  prefix: "botshield:"
+  # A strict check waits this long, then the request is decided locally.
+  timeout: 50ms
+  # How often synced limits exchange counts with the others.
+  sync_interval: 200ms
 
 # Per-IP limits checked right after accept, before TLS. 0 / "" = off; mind
 # clients sharing one address behind NAT.

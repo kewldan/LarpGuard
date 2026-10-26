@@ -39,6 +39,7 @@
 #include "quic/h3_server.h"
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
+#include "ratelimit/valkey.h"
 #include "score/policy.h"
 #include "score/rules.h"
 #include "score/scorer.h"
@@ -161,6 +162,9 @@ class Gateway {
   AttackMode attack_;
   // Live samples for rule tests (only with the admin API).
   RuleSampleRing rule_samples_;
+  // Synced and strict rate limits (valkey.address); after the store it
+  // raises.
+  std::unique_ptr<ValkeyLimiter> valkey_;
   std::unique_ptr<Heartbeats> heartbeats_;
   std::vector<std::unique_ptr<Worker>> workers_;
   // After admin_ and the stores it points to: stopped and joined first.

@@ -74,6 +74,7 @@
 #include "ratelimit/gcra.h"
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
+#include "ratelimit/valkey.h"
 #include "score/policy.h"
 #include "score/rule_samples.h"
 #include "score/rules.h"
@@ -133,13 +134,36 @@ class ActiveConnection {
   ActiveConnection& operator=(const ActiveConnection&) = delete;
 };
 
-// Host part of an authority, normalized ("Shop.Test:443" -> "shop.test").
 int64_t SteadyNanos() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
 }
 
+// A refusal by a rate limit: 429 in enforce mode, recorded as what
+// enforce would do in shadow mode.
+void ApplyRateLimitHit(Exchange& exchange, const RateLimitHit& hit,
+                       bool enforce, Action would_action) {
+  exchange.rate_limit = hit.name;
+  Metrics& metrics = GlobalMetrics();
+  if (!enforce) {
+    metrics.rate_limited_shadow.Inc();
+    if (would_action == Action::kAllow) exchange.would_action = "rate_limit";
+    return;
+  }
+  metrics.rate_limited.Inc();
+  exchange.action = "rate_limit";
+  exchange.would_action = "rate_limit";
+  const int64_t retry_after = RetryAfterSeconds(hit.result.retry_after_ns);
+  exchange.RespondLocally(
+      429, "too many requests\n",
+      {{"retry-after", std::to_string(retry_after)},
+       {"ratelimit-policy", std::format(R"("{}";q={};w={})", hit.name,
+                                        hit.burst, hit.window_seconds)},
+       {"ratelimit", std::format(R"("{}";r=0;t={})", hit.name, retry_after)}});
+}
+
+// Host part of an authority, normalized ("Shop.Test:443" -> "shop.test").
 std::string HostOnly(std::string_view authority) {
   if (authority.starts_with('[')) {
     return NormalizeHost(authority.substr(0, authority.find(']') + 1));
@@ -1170,9 +1194,11 @@ class ConnectionObserver {
     }
     // Limits on origin responses (statuses): counted in OnProxyDone.
     std::vector<ResponseCount> counts;
+    std::vector<StrictCheck> strict;
     if (configured) {
       std::optional<RateLimitHit> limit_hit = verdicts_->rate_limits.Check(
-          request, context_.rate_limit_store, now, &counts);
+          request, context_.rate_limit_store, now, &counts, context_.valkey,
+          executor_ ? &strict : nullptr);
       if (!hit) hit = std::move(limit_hit);
     }
     if (labelled) {
@@ -1184,28 +1210,62 @@ class ConnectionObserver {
     if (!counts.empty()) {
       response_counts_.insert_or_assign(exchange.request_id, std::move(counts));
     }
-    if (!hit) return;
-
-    exchange.rate_limit = hit->name;
-    Metrics& metrics = GlobalMetrics();
-    if (!decision.enforce) {
-      metrics.rate_limited_shadow.Inc();
-      if (decision.would_action == Action::kAllow) {
-        exchange.would_action = "rate_limit";
-      }
+    if (hit) {
+      ApplyRateLimitHit(exchange, *hit, decision.enforce,
+                        decision.would_action);
       return;
     }
-    metrics.rate_limited.Inc();
-    exchange.action = "rate_limit";
-    exchange.would_action = "rate_limit";
-    const int64_t retry_after = RetryAfterSeconds(hit->result.retry_after_ns);
-    exchange.RespondLocally(
-        429, "too many requests\n",
-        {{"retry-after", std::to_string(retry_after)},
-         {"ratelimit-policy", std::format(R"("{}";q={};w={})", hit->name,
-                                          hit->burst, hit->window_seconds)},
-         {"ratelimit",
-          std::format(R"("{}";r=0;t={})", hit->name, retry_after)}});
+    if (!strict.empty()) HoldForStrict(exchange, std::move(strict), decision);
+  }
+
+  // Strict limits are decided in Valkey by its thread; the request waits
+  // (its dispatch is held), the worker does not. Without an answer in time
+  // the local state decides, as for a local limit.
+  void HoldForStrict(Exchange& exchange, std::vector<StrictCheck> checks,
+                     const PolicyDecision& decision) {
+    const std::shared_ptr<Exchange> self = exchange.shared_from_this();
+    const asio::any_io_executor executor = executor_;
+    RateLimitStore* store = context_.rate_limit_store;
+    const bool enforce = decision.enforce;
+    const Action would_action = decision.would_action;
+    auto shared = std::make_shared<std::vector<StrictCheck>>(std::move(checks));
+    const auto finish = [self, store, enforce, would_action, shared](
+                            std::optional<GcraResult> result,
+                            std::size_t refused) {
+      if (self->client_cancelled) return;
+      std::optional<RateLimitHit> hit;
+      const std::vector<StrictCheck>& all = *shared;
+      if (result) {
+        GlobalMetrics().valkey_strict_checks.Inc();
+        if (!result->allowed && refused < all.size()) {
+          hit = RateLimitHit{all[refused].name, *result, all[refused].burst,
+                             all[refused].window_seconds};
+        }
+      } else {
+        GlobalMetrics().valkey_strict_local.Inc();
+        for (const StrictCheck& check : all) {
+          const GcraResult local =
+              store->Check(check.key, check.params, SteadyNanos());
+          if (!local.allowed && !hit) {
+            hit = RateLimitHit{check.name, local, check.burst,
+                               check.window_seconds};
+          }
+        }
+      }
+      if (hit) {
+        ApplyRateLimitHit(*self, *hit, enforce, would_action);
+        if (self->local) return;
+      }
+      self->ResumeDispatch();
+    };
+    exchange.HoldDispatch();
+    const bool queued = context_.valkey->Strict(
+        *shared, [executor, finish](std::optional<GcraResult> result,
+                                    std::size_t refused) {
+          asio::post(executor,
+                     [finish, result, refused] { finish(result, refused); });
+        });
+    if (!queued) finish(std::nullopt, 0);
   }
 
   // Score rules adjust the verdict, then the first allow/block rule may

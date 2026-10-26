@@ -38,6 +38,12 @@ struct Metrics {
   Counter rejected_pending_per_ip;
   Counter request_header_timeouts;
   Counter request_body_timeouts;
+  // Valkey (synced and strict rate limits).
+  Gauge valkey_up;
+  Counter valkey_errors;
+  Counter valkey_synced_keys;
+  Counter valkey_strict_checks;
+  Counter valkey_strict_local;
   Counter connection_request_limits;
   Counter h2_client_resets;
   Counter challenge_endpoint_limited;

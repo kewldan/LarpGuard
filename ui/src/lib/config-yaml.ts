@@ -62,6 +62,7 @@ export function limitSpec(
     rate: change?.rate ?? formatRate(limit.count, limit.period_ms),
     burst: change?.burst ?? limit.burst,
     ...(limit.statuses.length > 0 ? { statuses: limit.statuses } : {}),
+    ...(limit.mode !== 'local' ? { mode: limit.mode } : {}),
   };
 }
 
@@ -83,6 +84,7 @@ export function limitYaml(limit: Limit, rps: number, burst: number): string {
     `    rate: ${rps >= 1 ? `${Math.round(rps)}/s` : `${Math.round(rps * 60)}/m`}`,
   );
   lines.push(`    burst: ${burst}`);
+  if (limit.mode !== 'local') lines.push(`    mode: ${limit.mode}`);
   return `rate_limits:\n${lines.join('\n')}`;
 }
 

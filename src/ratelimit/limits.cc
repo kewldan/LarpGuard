@@ -21,6 +21,7 @@
 #include "fp/library.h"
 #include "ratelimit/gcra.h"
 #include "ratelimit/store.h"
+#include "ratelimit/valkey.h"
 
 namespace bot_shield {
 namespace {
@@ -36,6 +37,31 @@ bool IsKnownComponent(std::string_view component) {
 }
 
 }  // namespace
+
+std::string_view RateLimitModeName(RateLimitMode mode) {
+  switch (mode) {
+    case RateLimitMode::kLocal:
+      return "local";
+    case RateLimitMode::kSynced:
+      return "synced";
+    case RateLimitMode::kStrict:
+      return "strict";
+  }
+  return "local";
+}
+
+bool ParseRateLimitMode(std::string_view text, RateLimitMode* mode) {
+  if (text == "local") {
+    *mode = RateLimitMode::kLocal;
+  } else if (text == "synced") {
+    *mode = RateLimitMode::kSynced;
+  } else if (text == "strict") {
+    *mode = RateLimitMode::kStrict;
+  } else {
+    return false;
+  }
+  return true;
+}
 
 bool ParseRate(std::string_view text, int64_t* count,
                std::chrono::milliseconds* period) {
@@ -211,25 +237,36 @@ std::vector<std::string> RateLimitSet::NamesForHost(
 
 std::optional<RateLimitHit> RateLimitSet::Check(
     const RateLimitRequest& request, RateLimitStore* store, int64_t now_ns,
-    std::vector<ResponseCount>* on_response) const {
+    std::vector<ResponseCount>* on_response, ValkeyLimiter* valkey,
+    std::vector<StrictCheck>* strict) const {
   std::optional<RateLimitHit> hit;
   for (const Limit& limit : limits_) {
     if (!Matches(limit, request)) continue;
     std::string key = BuildKey(limit, request);
     if (key.empty()) continue;
     const bool by_response = !limit.spec.statuses.empty();
+    const int64_t window =
+        std::chrono::duration_cast<std::chrono::seconds>(limit.spec.period)
+            .count();
+    if (limit.spec.mode == RateLimitMode::kStrict && !by_response &&
+        valkey != nullptr && strict != nullptr && valkey->available()) {
+      strict->push_back(StrictCheck{limit.spec.name, std::move(key),
+                                    limit.params, limit.spec.burst, window});
+      continue;
+    }
     const GcraResult result = by_response
                                   ? store->Peek(key, limit.params, now_ns)
                                   : store->Check(key, limit.params, now_ns);
+    if (!by_response && result.allowed && valkey != nullptr &&
+        limit.spec.mode == RateLimitMode::kSynced) {
+      valkey->NoteSynced(key, limit.params);
+    }
     if (by_response && result.allowed && on_response != nullptr) {
       on_response->push_back(
           ResponseCount{std::move(key), limit.params, limit.spec.statuses});
     }
     if (!result.allowed && !hit) {
-      hit = RateLimitHit{
-          limit.spec.name, result, limit.spec.burst,
-          std::chrono::duration_cast<std::chrono::seconds>(limit.spec.period)
-              .count()};
+      hit = RateLimitHit{limit.spec.name, result, limit.spec.burst, window};
     }
   }
   return hit;

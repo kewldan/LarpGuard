@@ -36,6 +36,9 @@ class RateLimitStore {
                   int64_t now_ns) const;
   // Drops a key: its next request starts from a full burst.
   void Forget(std::string_view key);
+  // Moves the key's state to `tat_ns` unless it is ahead already (synced
+  // limits: what other gateways used of the shared limit).
+  void Raise(std::string_view key, int64_t tat_ns);
 
   std::size_t size() const;
   uint64_t untracked() const { return untracked_.load(); }

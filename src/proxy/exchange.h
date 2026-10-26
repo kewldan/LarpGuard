@@ -62,6 +62,12 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
   // The gateway answers, but later (a CAPTCHA verified by its provider):
   // nothing goes to Traefik and the client waits for RespondLocally().
   void DeferLocalResponse();
+  // Whether the request goes to Traefik is decided later (a strict rate
+  // limit checked off the worker): the client side does not dispatch it;
+  // ResumeDispatch() does, or RespondLocally() answers instead. The body
+  // keeps buffering (and throttling) meanwhile.
+  void HoldDispatch() { dispatch_held = true; }
+  void ResumeDispatch();
 
   // Drops the unread response body, giving its bytes back to the upstream
   // flow-control window (they were received but will never be read).
@@ -94,6 +100,8 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
   bool client_cancelled = false;
   // Answered by the gateway; never sent to Traefik.
   bool local = false;
+  // See HoldDispatch().
+  bool dispatch_held = false;
 
   // What the client sent, for fingerprints and events.
   HttpRequest observed;
@@ -138,6 +146,8 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
   // Set by the client side.
   std::function<void()> wake_client;
   std::function<void(std::size_t)> request_consumed;
+  // Sends the exchange to Traefik (the upstream pool).
+  std::function<void()> dispatch;
 };
 
 }  // namespace bot_shield

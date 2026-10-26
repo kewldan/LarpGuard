@@ -277,8 +277,14 @@ void H2ServerConnection::OnRequestHeaders(Stream& stream, bool end_stream) {
     exchange->RespondLocally(405, kMethodNotAllowed);
     return;
   }
+  exchange->dispatch = [pool = pool_, name = client_.server_name,
+                        weak = std::weak_ptr<Exchange>(exchange)] {
+    if (auto held = weak.lock()) pool->Dispatch(name, held);
+  };
   if (hooks_.on_request) hooks_.on_request(*exchange);
-  if (!exchange->local) pool_->Dispatch(client_.server_name, exchange);
+  if (!exchange->local && !exchange->dispatch_held) {
+    pool_->Dispatch(client_.server_name, exchange);
+  }
 }
 
 void H2ServerConnection::OnResponseProgress(int32_t id) {
