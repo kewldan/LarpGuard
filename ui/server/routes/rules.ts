@@ -87,18 +87,23 @@ function reloadStates(changes: ReloadChange[]): {
 export function registerRules(app: Hono<AppEnv>): void {
   app.get('/api/rules', async (c) => {
     const deps = c.get('deps');
-    const [config, hits] = await Promise.all([
+    const [config, hits, settings] = await Promise.all([
       deps.admin.config(),
       deps.analytics
         ? deps.analytics.reasonCounts('rule:', 3600).catch(() => null)
         : Promise.resolve(null),
+      deps.admin.settings().catch(() => null),
     ]);
+    const key = settings?.keys.find((item) => item.path === 'rules');
     return send(c, rulesSchema, {
       generation: config.generation,
       rules: config.rules.map((rule) => ({
         ...rule,
         hits_1h: hits?.get(rule.name) ?? 0,
       })),
+      source: key?.source ?? 'file',
+      editable: settings?.editable ?? false,
+      revision: settings?.revision ?? null,
     });
   });
 

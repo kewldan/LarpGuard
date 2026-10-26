@@ -243,6 +243,7 @@ function mainFile(): Map<string, SettingValue> {
         when: rule.when,
         action: rule.action,
         ...(rule.action === 'score' ? { score: rule.score ?? 0 } : {}),
+        ...(rule.disabled ? { disabled: true } : {}),
       })),
     ],
     [

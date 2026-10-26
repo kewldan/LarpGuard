@@ -218,6 +218,8 @@ export const gatewayConfigSchema = z.object({
       when: z.string(),
       action: z.union([actionSchema, z.literal('score')]),
       score: z.number().optional(),
+      // Kept and checked, not applied.
+      disabled: z.boolean().default(false),
     }),
   ),
   rate_limits: z.array(limitSchema),
@@ -711,10 +713,18 @@ export const rulesSchema = z.object({
       when: z.string(),
       action: z.union([actionSchema, z.literal('score')]),
       score: z.number().optional(),
+      disabled: z.boolean(),
       // Requests with "rule:<name>" in their reasons, last hour.
       hits_1h: z.number(),
     }),
   ),
+  // Where the list comes from: the main file, or the console's settings
+  // layer (ADR-018), which the console can change.
+  source: settingSourceSchema,
+  // The layer can be written (admin.settings_file), and its revision for
+  // the change; null when the gateway's settings are unavailable.
+  editable: z.boolean(),
+  revision: z.string().nullable(),
 });
 export type Rules = z.infer<typeof rulesSchema>;
 
@@ -861,6 +871,11 @@ export const limitsSchema = z.object({
       refused: z.number(),
     }),
   ),
+  // As for rules: where `rate_limits` comes from, and whether the console
+  // can change it (admin.settings_file) at which revision.
+  source: settingSourceSchema,
+  editable: z.boolean(),
+  revision: z.string().nullable(),
 });
 export type Limits = z.infer<typeof limitsSchema>;
 

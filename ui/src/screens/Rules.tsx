@@ -1,7 +1,9 @@
 // Rules: the rules in effect (first match wins), an editor that
 // type-checks with the gateway's own parser as you type, and a test of the
-// draft against a sample of the last hour. Rules live in the gateway's YAML:
-// the editor gives the snippet to paste, then the config is reloaded.
+// draft against a sample of the last hour. Saving, switching off,
+// deleting and reordering go to the gateway's settings layer (the `rules`
+// key, ADR-018) and apply at once; the YAML snippet is there for those who
+// keep rules in the main file.
 
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -11,10 +13,11 @@ import { ACTIONS, type Action } from '../../shared/domain.ts';
 import { useCanOperate } from '../app/session.ts';
 import { ActionChip } from '../domain/verdict.tsx';
 import { ApiError } from '../lib/api.ts';
-import { type RuleDraft, ruleYaml } from '../lib/config-yaml.ts';
+import { type RuleDraft, ruleSpec, ruleYaml } from '../lib/config-yaml.ts';
 import { clock, compact, count, lineColumn, percent } from '../lib/format.ts';
 import { useCompact } from '../lib/media.ts';
 import {
+  useApplySettings,
   useGatewayConfig,
   useReload,
   useRuleCheck,
@@ -79,8 +82,11 @@ function fromRule(rule: RulesData['rules'][number]): Draft {
     when: rule.when,
     action: rule.action,
     score: rule.score ?? 0,
+    disabled: rule.disabled,
   };
 }
+
+const RULE_NAME = /^[\w.-]{1,64}$/;
 
 function Editor({
   value,
@@ -461,6 +467,8 @@ export function Rules() {
   const canOperate = useCanOperate();
   const compactLayout = useCompact();
   const reload = useReload();
+  const apply = useApplySettings();
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const check = useRuleCheck();
   const test = useRuleTest();
   const toast = useToast();
@@ -517,6 +525,111 @@ export function Rules() {
   const tested = test.data !== undefined && testedKey === key;
   const result = tested ? test.data : undefined;
 
+  // The whole list goes to the settings layer: the gateway checks it with
+  // its own parser and applies it at once (or refuses, nothing changes).
+  const saveRules = (next: Draft[], done: string, after?: () => void) => {
+    const revision = rules.data?.revision;
+    if (!revision) return;
+    apply.mutate(
+      { base_revision: revision, set: { rules: next.map(ruleSpec) } },
+      {
+        onSuccess: () => {
+          toast(done);
+          after?.();
+        },
+        onError: (error) => {
+          toast(error.message);
+        },
+      },
+    );
+  };
+  const inEffect = list.map(fromRule);
+  // The main file decides again (the layer's `rules` key goes).
+  const backToFile = () => {
+    const revision = rules.data?.revision;
+    if (!revision) return;
+    apply.mutate(
+      { base_revision: revision, reset: ['rules'] },
+      {
+        onSuccess: () => {
+          toast('Rules from bot-shield.yaml again');
+        },
+        onError: (error) => {
+          toast(error.message);
+        },
+      },
+    );
+  };
+  const save = () => {
+    if (!draft) return;
+    const next = original
+      ? inEffect.map((rule) =>
+          rule.name === original.name
+            ? { ...draft, disabled: rule.disabled ?? false }
+            : rule,
+        )
+      : [...inEffect, { ...draft, disabled: false }];
+    saveRules(next, `Saved ${draft.name}`, discard);
+  };
+  const setDisabled = (disabled: boolean) => {
+    if (!original) return;
+    saveRules(
+      inEffect.map((rule) =>
+        rule.name === original.name ? { ...rule, disabled } : rule,
+      ),
+      `${original.name} ${disabled ? 'switched off' : 'switched on'}`,
+    );
+  };
+  const remove = () => {
+    if (!original) return;
+    const name = original.name;
+    saveRules(
+      inEffect.filter((rule) => rule.name !== name),
+      `Deleted ${name}`,
+      () => {
+        setConfirmDelete(null);
+        void navigate({ search: {} });
+      },
+    );
+  };
+  const move = (by: -1 | 1) => {
+    if (!original) return;
+    const from = names.indexOf(original.name);
+    const to = from + by;
+    if (to < 0 || to >= inEffect.length) return;
+    const next = [...inEffect];
+    const [moved] = next.splice(from, 1);
+    if (moved) next.splice(to, 0, moved);
+    saveRules(next, `Moved ${original.name} to ${to + 1}`);
+  };
+  const rename = (name: string) => {
+    if (!draft || original || !selected) return;
+    const rest = Object.fromEntries(
+      Object.entries(drafts).filter(([key]) => key !== selected),
+    );
+    const next = { ...rest, [name]: { ...draft, name } };
+    setDrafts(next);
+    saveDrafts(next);
+    void navigate({ search: { rule: name } });
+  };
+  const nameProblem =
+    draft && !original
+      ? !RULE_NAME.test(draft.name)
+        ? 'Letters, digits, ".", "-" and "_" only.'
+        : names.includes(draft.name)
+          ? 'A rule has this name already.'
+          : null
+      : null;
+  const canSave =
+    canOperate &&
+    rules.data?.editable === true &&
+    draft !== undefined &&
+    dirty &&
+    draft.when.trim() !== '' &&
+    compileError === null &&
+    nameProblem === null &&
+    !apply.isPending;
+
   const newRule = () => {
     let n = 1;
     while (names.includes(`new_rule_${n}`) || drafts[`new_rule_${n}`]) n += 1;
@@ -536,7 +649,13 @@ export function Rules() {
   };
 
   const items = useMemo<
-    { name: string; action: RuleAction; when: string; hits: number | null }[]
+    {
+      name: string;
+      action: RuleAction;
+      when: string;
+      hits: number | null;
+      disabled: boolean;
+    }[]
   >(
     () => [
       ...list.map((rule) => ({
@@ -544,12 +663,14 @@ export function Rules() {
         action: rule.action,
         when: rule.when,
         hits: rule.hits_1h,
+        disabled: rule.disabled,
       })),
       ...newNames.map((name) => ({
         name,
         action: drafts[name]?.action ?? 'allow',
         when: drafts[name]?.when ?? '',
         hits: null,
+        disabled: false,
       })),
     ],
     [list, newNames, drafts],
@@ -585,6 +706,7 @@ export function Rules() {
             className={styles.listItem}
             aria-current={item.name === selected}
             onClick={() => void navigate({ search: { rule: item.name } })}
+            style={item.disabled ? { opacity: 0.55 } : undefined}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span
@@ -621,7 +743,14 @@ export function Rules() {
                   }}
                 />
               ) : null}
-              {item.action === 'score' ? (
+              {item.disabled ? (
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, color: 'var(--color-text-3)' }}
+                >
+                  off
+                </span>
+              ) : item.action === 'score' ? (
                 <span
                   className="mono"
                   style={{ fontSize: 11, color: 'var(--color-text-2)' }}
@@ -697,16 +826,38 @@ export function Rules() {
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 11.5, color: 'var(--color-text-3)' }}>
                 {original
-                  ? `Rule ${names.indexOf(original.name) + 1} of ${names.length} · set ${rules.data.generation}`
+                  ? `Rule ${names.indexOf(original.name) + 1} of ${names.length} · set ${rules.data.generation}${original.disabled ? ' · switched off' : ''}`
                   : 'New rule · not in the configuration yet'}
                 {dirty ? ' · edited' : ''}
               </div>
-              <div
-                className="mono"
-                style={{ fontSize: 16, fontWeight: 500, marginTop: 2 }}
-              >
-                {draft.name}
-              </div>
+              {original ? (
+                <div
+                  className="mono"
+                  style={{ fontSize: 16, fontWeight: 500, marginTop: 2 }}
+                >
+                  {draft.name}
+                </div>
+              ) : (
+                <input
+                  aria-label="Rule name"
+                  aria-invalid={nameProblem ? true : undefined}
+                  title={nameProblem ?? undefined}
+                  className="mono"
+                  value={draft.name}
+                  onChange={(event) => {
+                    rename(event.target.value);
+                  }}
+                  style={{
+                    marginTop: 2,
+                    fontSize: 15,
+                    height: 30,
+                    padding: '0 8px',
+                    borderRadius: 6,
+                    border: `1px solid ${nameProblem ? 'var(--color-blocked)' : 'var(--color-line-strong)'}`,
+                    background: 'var(--color-surface-1)',
+                  }}
+                />
+              )}
             </div>
             <div style={{ flex: 1 }} />
             {drafts[draft.name] ? (
@@ -726,14 +877,82 @@ export function Rules() {
               {test.isPending ? <Spinner size={14} /> : null}
               {tested ? 'Test again' : 'Test against 1h'}
             </Button>
+            {canOperate && rules.data.editable && original && !dirty ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="Move up"
+                  disabled={
+                    apply.isPending || names.indexOf(original.name) === 0
+                  }
+                  onClick={() => {
+                    move(-1);
+                  }}
+                >
+                  ↑
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="Move down"
+                  disabled={
+                    apply.isPending ||
+                    names.indexOf(original.name) === names.length - 1
+                  }
+                  onClick={() => {
+                    move(1);
+                  }}
+                >
+                  ↓
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={apply.isPending}
+                  onClick={() => {
+                    setDisabled(!original.disabled);
+                  }}
+                >
+                  {original.disabled ? 'Switch on' : 'Switch off'}
+                </Button>
+                {confirmDelete === original.name ? (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={apply.isPending}
+                    onClick={remove}
+                  >
+                    Delete {original.name}?
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="dangerOutline"
+                    onClick={() => {
+                      setConfirmDelete(original.name);
+                    }}
+                  >
+                    Delete
+                  </Button>
+                )}
+              </>
+            ) : null}
+            {canOperate && rules.data.editable ? (
+              <Button variant="primary" disabled={!canSave} onClick={save}>
+                {apply.isPending ? <Spinner size={14} /> : null}
+                {original ? 'Save' : 'Add rule'}
+              </Button>
+            ) : null}
             {canOperate ? (
               <Button
-                variant="primary"
+                variant="ghost"
                 disabled={reload.isPending}
                 onClick={() => {
                   reload.mutate(undefined, {
                     onSuccess: (result) => {
-                      toast(`Reloaded: ${result.summary}`);
+                      toast(
+                        `Reloaded: ${result.changes.length === 0 ? 'nothing changed' : `${result.changes.length} changed`}`,
+                      );
                     },
                     onError: (error) => {
                       toast(`Reload failed: ${error.message}`);
@@ -977,6 +1196,37 @@ export function Rules() {
               )}
             </section>
 
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '6px 12px',
+                fontSize: 12,
+                color: 'var(--color-text-3)',
+              }}
+            >
+              <span style={{ flex: '1 1 320px' }}>
+                {rules.data.editable
+                  ? rules.data.source === 'console'
+                    ? 'The rules come from the console (settings layer) and win over bot-shield.yaml.'
+                    : "The rules come from bot-shield.yaml. Saving here moves the whole list to the console's settings layer, which then wins over the file."
+                  : 'The gateway has no admin.settings_file: rules change only in bot-shield.yaml. Copy the snippet below and reload.'}
+              </span>
+              {canOperate &&
+              rules.data.editable &&
+              rules.data.source === 'console' ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={apply.isPending}
+                  onClick={backToFile}
+                >
+                  Back to the file&apos;s rules
+                </Button>
+              ) : null}
+            </div>
+
             <section aria-label="Configuration snippet">
               <div
                 style={{
@@ -1004,8 +1254,8 @@ export function Rules() {
               {!canOperate ? (
                 <div style={{ marginTop: 12 }}>
                   <PermissionNote>
-                    You can draft and test rules; reloading the configuration
-                    needs the operator role.
+                    You can draft and test rules; saving them or reloading the
+                    configuration needs the operator role.
                   </PermissionNote>
                 </div>
               ) : null}

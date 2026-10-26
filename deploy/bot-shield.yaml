@@ -106,7 +106,8 @@ policy:
 # score; then the first matching "allow"/"block" rule overrides the action of
 # the class (mode still decides whether it is carried out). Matches show up
 # in X-Bot-Reasons and events as rule:<name>. Language: docs/architecture.md
-# section 6.1.
+# section 6.1. "disabled: true" keeps a rule (still checked) without
+# applying it.
 rules: []
 #  - name: monitoring
 #    when: 'cidr("10.0.0.0/8") and header("x-monitor") == "secret"'

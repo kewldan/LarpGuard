@@ -824,7 +824,7 @@ bool RuleSet::Compile(const std::vector<RuleSpec>& specs, RuleSet* rules,
       *error = std::format("rule '{}': {}", spec.name, condition_error);
       return false;
     }
-    out.rules_.push_back(std::move(rule));
+    if (!spec.disabled) out.rules_.push_back(std::move(rule));
   }
   *rules = std::move(out);
   return true;

@@ -9,7 +9,7 @@ import { send } from '../http.ts';
 export function registerLimits(app: Hono<AppEnv>): void {
   app.get('/api/limits', async (c) => {
     const deps = c.get('deps');
-    const [config, refused, consumers] = await Promise.all([
+    const [config, refused, consumers, settings] = await Promise.all([
       deps.admin.config(),
       deps.analytics
         ? deps.analytics.refusedByLimit(3600).catch(() => null)
@@ -17,7 +17,9 @@ export function registerLimits(app: Hono<AppEnv>): void {
       deps.analytics
         ? deps.analytics.consumers(60).catch(() => [])
         : Promise.resolve([]),
+      deps.admin.settings().catch(() => null),
     ]);
+    const key = settings?.keys.find((item) => item.path === 'rate_limits');
     return send(c, limitsSchema, {
       limits: config.rate_limits.map((limit) => ({
         ...limit,
@@ -25,6 +27,9 @@ export function registerLimits(app: Hono<AppEnv>): void {
       })),
       throttle: config.throttle,
       consumers,
+      source: key?.source ?? 'file',
+      editable: settings?.editable ?? false,
+      revision: settings?.revision ?? null,
     });
   });
 }

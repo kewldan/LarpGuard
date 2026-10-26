@@ -438,6 +438,7 @@ AdminResponse ConfigView(const AdminContext& context) {
     nlohmann::json json = {
         {"name", rule.name}, {"when", rule.when}, {"action", rule.action}};
     if (rule.action == "score") json["score"] = rule.score;
+    if (rule.disabled) json["disabled"] = true;
     rules.push_back(std::move(json));
   }
   nlohmann::json limits = nlohmann::json::array();

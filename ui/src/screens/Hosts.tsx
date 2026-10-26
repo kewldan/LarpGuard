@@ -2,7 +2,7 @@
 // mode comes from; switching shadow/enforce from the console (an override
 // that beats the config until reverted), and the policy settings in effect.
 
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import type { GatewayConfig, HostRow } from '../../shared/api.ts';
@@ -99,7 +99,14 @@ function PolicySettings({ config }: { config: GatewayConfig }) {
             margin: '4px 0 12px',
           }}
         >
-          What enforce mode does per class (the same for every host).
+          What enforce mode does per class (the same for every host).{' '}
+          <Link to="/config" search={{ section: 'policy' }}>
+            Change the policy
+          </Link>{' '}
+          ·{' '}
+          <Link to="/config" search={{ section: 'crawlers' }}>
+            AI crawlers
+          </Link>
         </div>
         <div className={styles.facts}>
           {(
@@ -168,8 +175,16 @@ function PolicySettings({ config }: { config: GatewayConfig }) {
         <div
           style={{ fontSize: 12, color: 'var(--color-text-3)', marginTop: 10 }}
         >
-          These live in <span className="mono">bot-shield.yaml</span>; change
-          them there and reload.
+          Change them in{' '}
+          <Link to="/config" search={{ section: 'challenge' }}>
+            Configuration · Challenge
+          </Link>{' '}
+          and{' '}
+          <Link to="/config" search={{ section: 'captcha' }}>
+            CAPTCHA
+          </Link>{' '}
+          (they apply after a restart of the gateway), or in{' '}
+          <span className="mono">bot-shield.yaml</span>.
         </div>
       </section>
     </>

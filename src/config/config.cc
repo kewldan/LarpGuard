@@ -506,8 +506,8 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
     }
     config->rules.clear();
     for (const auto& item : rules) {
-      if (!CheckKeys(item, "rules[]", {"name", "when", "action", "score"},
-                     error)) {
+      if (!CheckKeys(item, "rules[]",
+                     {"name", "when", "action", "score", "disabled"}, error)) {
         return false;
       }
       RuleSpec spec;
@@ -515,6 +515,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       if (item["when"]) spec.when = item["when"].as<std::string>();
       if (item["action"]) spec.action = item["action"].as<std::string>();
       if (item["score"]) spec.score = item["score"].as<int>();
+      if (item["disabled"]) spec.disabled = item["disabled"].as<bool>();
       config->rules.push_back(std::move(spec));
     }
     // Compile now so --check-config reports bad rules.

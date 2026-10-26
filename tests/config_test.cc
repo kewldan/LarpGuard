@@ -322,12 +322,15 @@ rules:
     when: 'cidr("198.51.100.0/24")'
     action: score
     score: -30
+    disabled: true
 )";
   Config config;
   std::string error;
   ASSERT_TRUE(ParseConfig(yaml, &config, &error)) << error;
   ASSERT_EQ(config.rules.size(), 2u);
   EXPECT_EQ(config.rules[1].score, -30);
+  EXPECT_FALSE(config.rules[0].disabled);
+  EXPECT_TRUE(config.rules[1].disabled);
   EXPECT_FALSE(
       ParseConfig("rules: [{name: x, when: 'hots == \"a\"', "
                   "action: block}]\n",

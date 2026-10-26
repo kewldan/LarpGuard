@@ -219,6 +219,27 @@ TEST_F(RulesTest, RuleSetValidation) {
   EXPECT_FALSE(RuleSet::Compile({{"a", "true", "score", 0}}, &rules, &error));
   EXPECT_FALSE(RuleSet::Compile({{"a", "score", "block", 0}}, &rules, &error));
   EXPECT_NE(error.find("rule 'a'"), std::string::npos) << error;
+  // A disabled rule is still checked, and its name still taken.
+  EXPECT_FALSE(
+      RuleSet::Compile({{"a", "nope ==", "block", 0, true}}, &rules, &error));
+  EXPECT_FALSE(RuleSet::Compile(
+      {{"a", "true", "block", 0, true}, {"a", "true", "allow", 0}}, &rules,
+      &error));
+}
+
+TEST_F(RulesTest, DisabledRulesAreNotEvaluated) {
+  RuleSet rules;
+  std::string error;
+  ASSERT_TRUE(
+      RuleSet::Compile({{"admin", R"(path ~ "/admin*")", "block", 0, true},
+                        {"bonus", "true", "score", 10, true}},
+                       &rules, &error))
+      << error;
+  std::vector<std::string> matched;
+  EXPECT_EQ(rules.ScoreDelta(context_, &matched), 0);
+  EXPECT_EQ(rules.Decide(context_, &matched), std::nullopt);
+  EXPECT_TRUE(matched.empty());
+  EXPECT_TRUE(rules.empty());
 }
 
 TEST(PolicyOverrideTest, RulesOverrideClassActions) {

@@ -79,6 +79,7 @@ Json Rules(const std::vector<RuleSpec>& rules) {
     Json json = {
         {"name", rule.name}, {"when", rule.when}, {"action", rule.action}};
     if (rule.action == "score") json["score"] = rule.score;
+    if (rule.disabled) json["disabled"] = true;
     out.push_back(std::move(json));
   }
   return out;
@@ -509,7 +510,8 @@ bool IsStringArray(const Json& value) {
 bool CheckFields(const Json& value,
                  std::initializer_list<std::string_view> strings,
                  std::initializer_list<std::string_view> lists,
-                 std::initializer_list<std::string_view> integers) {
+                 std::initializer_list<std::string_view> integers,
+                 std::initializer_list<std::string_view> bools = {}) {
   if (!value.is_object()) return false;
   for (const auto& [key, item] : value.items()) {
     if (std::ranges::find(strings, key) != strings.end()) {
@@ -518,6 +520,8 @@ bool CheckFields(const Json& value,
       if (!IsStringArray(item)) return false;
     } else if (std::ranges::find(integers, key) != integers.end()) {
       if (!item.is_number_integer()) return false;
+    } else if (std::ranges::find(bools, key) != bools.end()) {
+      if (!item.is_boolean()) return false;
     } else {
       return false;
     }
@@ -775,11 +779,11 @@ bool CheckSettingValue(const SettingKey& key, const Json& value,
       expected = "host: mode pairs";
       break;
     case T::kRules:
-      ok =
-          value.is_array() && std::ranges::all_of(value, [](const Json& rule) {
-            return CheckFields(rule, {"name", "when", "action"}, {}, {"score"});
-          });
-      expected = "a list of {name, when, action, score}";
+      ok = value.is_array() && std::ranges::all_of(value, [](const Json& rule) {
+             return CheckFields(rule, {"name", "when", "action"}, {}, {"score"},
+                                {"disabled"});
+           });
+      expected = "a list of {name, when, action, score, disabled}";
       break;
     case T::kRateLimits:
       ok =

@@ -20,23 +20,32 @@ export const MOCK_CONFIG: GatewayConfig = {
       name: 'monitoring',
       when: 'cidr("10.0.0.0/8") and header("x-monitor") == "1"',
       action: 'allow',
+      disabled: false,
     },
     {
       name: 'hosting_scrapers',
       when: 'asn_hosting and score > 40\n  and class != "verified_bot"',
       action: 'challenge',
+      disabled: false,
     },
     {
       name: 'honeypot_paths',
       when: 'path ~ "/.env*" or path ~ "/wp-login*"',
       action: 'decoy',
+      disabled: false,
     },
-    { name: 'hard_block', when: 'score >= 85', action: 'block' },
+    {
+      name: 'hard_block',
+      when: 'score >= 85',
+      action: 'block',
+      disabled: false,
+    },
     {
       name: 'mobile_app',
       when: 'ua_tool == "okhttp" and host == "api.example.com"',
       action: 'score',
       score: -40,
+      disabled: false,
     },
   ],
   rate_limits: [

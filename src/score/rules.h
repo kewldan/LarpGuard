@@ -90,6 +90,9 @@ struct RuleSpec {
   std::string when;
   std::string action;  // An action (see ParseAction) or "score".
   int score = 0;       // For "score".
+  // Kept and checked, but never evaluated (switched off from the console
+  // without losing it).
+  bool disabled = false;
 };
 
 // Ordered rules. All "score" rules adjust the score first; then the first

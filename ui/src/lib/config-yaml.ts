@@ -9,10 +9,60 @@ export interface RuleDraft {
   when: string;
   action: Action | 'score';
   score: number;
+  disabled?: boolean;
+}
+
+// A rule as the gateway's settings take it (the `rules` key).
+export function ruleSpec(draft: RuleDraft): {
+  name: string;
+  when: string;
+  action: string;
+  score?: number;
+  disabled?: boolean;
+} {
+  return {
+    name: draft.name,
+    when: draft.when,
+    action: draft.action,
+    ...(draft.action === 'score' ? { score: draft.score } : {}),
+    ...(draft.disabled ? { disabled: true } : {}),
+  };
 }
 
 export function perSecond(limit: Pick<Limit, 'count' | 'period_ms'>): number {
   return limit.period_ms > 0 ? (limit.count * 1000) / limit.period_ms : 0;
+}
+
+// "30/m" as the gateway writes a rate (FormatRate).
+export function formatRate(count: number, periodMs: number): string {
+  if (periodMs === 86_400_000) return `${count}/d`;
+  if (periodMs === 3_600_000) return `${count}/h`;
+  if (periodMs === 60_000) return `${count}/m`;
+  return `${count}/s`;
+}
+
+// A what-if rate in requests per second as a rate setting.
+export function rateOf(rps: number): string {
+  return rps >= 1 ? `${Math.round(rps)}/s` : `${Math.round(rps * 60)}/m`;
+}
+
+// A limit as the gateway's settings take it (the `rate_limits` key);
+// `rate` and `burst` replace its own when given.
+export function limitSpec(
+  limit: Limit,
+  change?: { rate: string; burst: number },
+): Record<string, string | number | string[] | number[]> {
+  return {
+    name: limit.name,
+    hosts: limit.hosts,
+    paths: limit.paths,
+    methods: limit.methods,
+    classes: limit.classes,
+    key: limit.key,
+    rate: change?.rate ?? formatRate(limit.count, limit.period_ms),
+    burst: change?.burst ?? limit.burst,
+    ...(limit.statuses.length > 0 ? { statuses: limit.statuses } : {}),
+  };
 }
 
 export function limitYaml(limit: Limit, rps: number, burst: number): string {
@@ -43,6 +93,7 @@ export function ruleYaml(draft: RuleDraft): string {
     `    action: ${draft.action}`,
   ];
   if (draft.action === 'score') lines.push(`    score: ${draft.score}`);
+  if (draft.disabled) lines.push('    disabled: true');
   return `rules:\n${lines.join('\n')}`;
 }
 

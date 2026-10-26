@@ -475,6 +475,7 @@ class AdminServerTest : public ::testing::Test {
     spec.period = std::chrono::minutes(1);
     spec.hosts = {"shop.test"};
     config_.rate_limits = {spec};
+    config_.rules = {{"off-for-now", "true", "block", 0, true}};
     std::string error;
     std::shared_ptr<const VerdictSet> verdicts;
     ASSERT_TRUE(VerdictSet::Build(config_, &verdicts, &error)) << error;
@@ -652,6 +653,8 @@ TEST_F(AdminServerTest, ConfigView) {
   EXPECT_EQ(body["rate_limits"][0]["period_ms"], 60000);
   EXPECT_EQ(body["rate_limits"][0]["key"][0], "ip");
   EXPECT_TRUE(body["throttle"].is_null());
+  EXPECT_EQ(body["rules"][0]["name"], "off-for-now");
+  EXPECT_EQ(body["rules"][0]["disabled"], true);
   EXPECT_FALSE(body["library"]["weights"].empty());
   EXPECT_TRUE(body["library"]["automation"].is_array());
   // Browser profiles, for the console's library candidates.

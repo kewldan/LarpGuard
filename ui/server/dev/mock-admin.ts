@@ -53,8 +53,57 @@ export function createMockAdmin(now: () => number): AdminApi {
       verified_bot_action: value('policy.actions.verified_bot') as Action,
       block_status: value('policy.block_status') as number,
     };
-    config.rules = value('rules') as GatewayConfig['rules'];
+    config.rules = (
+      value('rules') as (Omit<GatewayConfig['rules'][number], 'disabled'> & {
+        disabled?: boolean;
+      })[]
+    ).map((rule) => ({ ...rule, disabled: rule.disabled ?? false }));
     config.honeypot_paths = value('honeypot.paths') as string[];
+    type LimitValue = {
+      name: string;
+      hosts?: string[];
+      paths?: string[];
+      methods?: string[];
+      classes?: string[];
+      key?: string[];
+      rate: string;
+      burst?: number;
+      statuses?: number[];
+    };
+    const parsed = (text: string) => {
+      const [count, unit] = text.split('/');
+      const period = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[
+        (unit ?? 's') as 's' | 'm' | 'h' | 'd'
+      ];
+      return { count: Number(count), period_ms: period };
+    };
+    config.rate_limits = (value('rate_limits') as LimitValue[]).map(
+      (limit) => ({
+        name: limit.name,
+        hosts: limit.hosts ?? [],
+        paths: limit.paths ?? [],
+        methods: limit.methods ?? [],
+        classes: limit.classes ?? [],
+        key: limit.key ?? [],
+        ...parsed(limit.rate),
+        burst: limit.burst ?? 1,
+        statuses: limit.statuses ?? [],
+      }),
+    );
+    const throttle = value('throttle') as Omit<LimitValue, 'name'> | null;
+    config.throttle = throttle
+      ? {
+          name: 'throttle',
+          hosts: [],
+          paths: [],
+          methods: [],
+          classes: [],
+          key: throttle.key ?? [],
+          ...parsed(throttle.rate),
+          burst: throttle.burst ?? 1,
+          statuses: [],
+        }
+      : null;
     const ai = value('crawlers.ai');
     config.crawlers = {
       ...config.crawlers,

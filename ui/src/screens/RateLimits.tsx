@@ -1,18 +1,20 @@
 // Rate limits: the GCRA limits in effect, what they refused in the last
-// hour, and the busiest client networks right now. Limits live in the
-// gateway's YAML; the sliders here are a what-if against live traffic.
+// hour, and the busiest client networks right now. The sliders are a
+// what-if against live traffic; an operator applies the result to the
+// gateway's settings layer (ADR-018), or copies the YAML for the file.
 
 import { useState } from 'react';
 
 import type { Limit, Limits } from '../../shared/api.ts';
-import { limitYaml, perSecond } from '../lib/config-yaml.ts';
+import { useCanOperate } from '../app/session.ts';
+import { limitSpec, limitYaml, perSecond, rateOf } from '../lib/config-yaml.ts';
 import { compact, count, duration } from '../lib/format.ts';
-import { useLimits } from '../lib/queries.ts';
+import { useApplySettings, useLimits } from '../lib/queries.ts';
 import { Button } from '../ui/Button.tsx';
 import { PageHead } from '../ui/Card.tsx';
 import { Icon } from '../ui/Icon.tsx';
 import { EmptyState, ErrorState, Skeleton } from '../ui/states.tsx';
-import { useCopy } from '../ui/toast-context.ts';
+import { useCopy, useToast } from '../ui/toast-context.ts';
 import styles from './screens.module.css';
 
 type Row = Limits['limits'][number];
@@ -33,6 +35,9 @@ function scope(limit: Limit): string {
 export function RateLimits() {
   const limits = useLimits();
   const copy = useCopy();
+  const toast = useToast();
+  const canOperate = useCanOperate();
+  const apply = useApplySettings();
   const [selected, setSelected] = useState<string | null>(null);
   // What-if values for one limit (identified by its settings, so a reload
   // that changes them drops the what-if).
@@ -78,6 +83,36 @@ export function RateLimits() {
   const dirty =
     current !== undefined &&
     (Math.abs(rps - perSecond(current)) > 1e-9 || burst !== current.burst);
+  const isThrottle =
+    current !== undefined &&
+    limits.data.throttle !== null &&
+    !limits.data.limits.some((limit) => limit.name === current.name);
+  // The new rate and burst go to the settings layer: the whole
+  // `rate_limits` list (or `throttle`), checked and applied by the gateway.
+  const applyWhatIf = () => {
+    const revision = limits.data?.revision;
+    if (!current || !revision || !limits.data) return;
+    const change = { rate: rateOf(rps), burst };
+    const set = isThrottle
+      ? { throttle: { rate: change.rate, burst, key: current.key } }
+      : {
+          rate_limits: limits.data.limits.map((limit) =>
+            limitSpec(limit, limit.name === current.name ? change : undefined),
+          ),
+        };
+    apply.mutate(
+      { base_revision: revision, set },
+      {
+        onSuccess: () => {
+          setWhatIf(null);
+          toast(`${current.name}: ${change.rate}, burst ${burst}`);
+        },
+        onError: (error) => {
+          toast(error.message);
+        },
+      },
+    );
+  };
 
   return (
     <>
@@ -96,6 +131,32 @@ export function RateLimits() {
           </span>{' '}
           refused · last 1h
         </div>
+        {canOperate &&
+        limits.data.editable &&
+        limits.data.source === 'console' ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={apply.isPending}
+            onClick={() => {
+              const revision = limits.data?.revision;
+              if (!revision) return;
+              apply.mutate(
+                { base_revision: revision, reset: ['rate_limits'] },
+                {
+                  onSuccess: () => {
+                    toast('Limits from bot-shield.yaml again');
+                  },
+                  onError: (error) => {
+                    toast(error.message);
+                  },
+                },
+              );
+            }}
+          >
+            Back to the file&apos;s limits
+          </Button>
+        ) : null}
       </PageHead>
 
       <div
@@ -330,6 +391,16 @@ export function RateLimits() {
                     >
                       <Icon name="copy" size={13} /> Copy YAML
                     </Button>
+                    {canOperate && limits.data.editable ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={apply.isPending}
+                        onClick={applyWhatIf}
+                      >
+                        Apply to the gateway
+                      </Button>
+                    ) : null}
                   </>
                 ) : null}
               </div>

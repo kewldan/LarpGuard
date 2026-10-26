@@ -114,6 +114,45 @@ test('a rule is type-checked as you type and tested on the last hour', async ({
   await page.getByRole('button', { name: 'Discard draft' }).click();
 });
 
+test('a rule is added, switched off and deleted, then the file rules are back', async ({
+  page,
+}) => {
+  await open(page, '/rules');
+  await page.getByRole('button', { name: '+ New rule' }).click();
+  await page.getByLabel('Rule name').fill('e2e_rule');
+  await page.getByLabel('Expression').fill('score >= 95');
+  await expect(page.getByText(/Type-checks · bool expression/)).toBeVisible();
+  await page.getByRole('button', { name: 'Add rule' }).click();
+  await expect(page.getByText('Saved e2e_rule')).toBeVisible();
+  await expect(page.getByText(/Rule 6 of 6/)).toBeVisible();
+  await page.getByRole('button', { name: 'Switch off' }).click();
+  await expect(
+    page.getByText(/Rule 6 of 6 · set \d+ · switched off/),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Move up' }).click();
+  await expect(page.getByText(/Rule 5 of 6/)).toBeVisible();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete e2e_rule?' }).click();
+  await expect(page.getByText('Deleted e2e_rule')).toBeVisible();
+  await page.getByRole('button', { name: "Back to the file's rules" }).click();
+  await expect(
+    page.getByText(/The rules come from bot-shield.yaml/),
+  ).toBeVisible();
+});
+
+test('a limit what-if is applied to the gateway, then the file is back', async ({
+  page,
+}) => {
+  await open(page, '/limits');
+  await page.getByLabel(/^Burst/).fill('15');
+  await page.getByRole('button', { name: 'Apply to the gateway' }).click();
+  await expect(page.getByText(/burst 15$/)).toBeVisible();
+  await page.getByRole('button', { name: "Back to the file's limits" }).click();
+  await expect(
+    page.getByText('Limits from bot-shield.yaml again'),
+  ).toBeVisible();
+});
+
 test('switch a host to enforce and back', async ({ page }) => {
   await open(page, '/hosts?host=shop.example.com');
   await page.getByRole('radio', { name: /ENFORCE/ }).click();
