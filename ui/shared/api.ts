@@ -144,8 +144,16 @@ export const statusSchema = z.object({
       uptime_s: z.number(),
       mode: z.enum(['shadow', 'enforce']),
       generation: z.number(),
+      // Of the effective configuration, without secret values: equal on
+      // gateways that run the same configuration.
+      config_hash: z.string(),
       built_at_ms: z.number(),
       workers: z.number(),
+      // Workers whose loop has seen the current verdict set.
+      workers_acked: z.number(),
+      // The longest a worker loop has gone without a beat (ms); null when
+      // the gateway does not say.
+      heartbeat_age_ms: z.number().nullable(),
       connections_active: z.number(),
       nats_connected: z.boolean(),
       events_dropped: z.number(),
@@ -754,9 +762,27 @@ export const ruleTestResultSchema = z.object({
 });
 export type RuleTestResult = z.infer<typeof ruleTestResultSchema>;
 
+// One key a reload changed in the effective configuration (both files):
+// its value before and after, for a secret only whether it is set.
+export const reloadChangeSchema = z.object({
+  path: z.string(),
+  apply: z.enum(SETTING_APPLY),
+  secret: z.boolean(),
+  // A restart key the running gateway does not use yet.
+  pending_restart: z.boolean(),
+  before: settingValueSchema.optional(),
+  after: settingValueSchema.optional(),
+  set_before: z.boolean().optional(),
+  set_after: z.boolean().optional(),
+});
+export type ReloadChange = z.infer<typeof reloadChangeSchema>;
+
 export const reloadResultSchema = z.object({
   reloaded: z.literal(true),
   summary: z.string(),
+  changes: z.array(reloadChangeSchema),
+  // Of the configuration now in effect (GET /status config_hash).
+  config_hash: z.string(),
 });
 export type ReloadResult = z.infer<typeof reloadResultSchema>;
 

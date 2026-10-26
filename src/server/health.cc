@@ -8,13 +8,18 @@ namespace bot_shield {
 
 Heartbeats::Heartbeats(int workers, int64_t now_ms)
     : workers_(workers),
-      beats_(std::make_unique<std::atomic<int64_t>[]>(workers)) {
-  for (int i = 0; i < workers_; ++i) beats_[i].store(now_ms);
+      beats_(std::make_unique<std::atomic<int64_t>[]>(workers)),
+      generations_(std::make_unique<std::atomic<uint64_t>[]>(workers)) {
+  for (int i = 0; i < workers_; ++i) {
+    beats_[i].store(now_ms);
+    generations_[i].store(0);
+  }
 }
 
-void Heartbeats::Beat(int worker, int64_t now_ms) {
+void Heartbeats::Beat(int worker, int64_t now_ms, uint64_t generation) {
   if (worker >= 0 && worker < workers_) {
     beats_[worker].store(now_ms, std::memory_order_relaxed);
+    generations_[worker].store(generation, std::memory_order_relaxed);
   }
 }
 

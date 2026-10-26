@@ -43,9 +43,15 @@ export function registerStatus(app: Hono<AppEnv>): void {
         uptime_s: admin.uptime_s,
         mode: admin.mode,
         generation: admin.verdicts_generation,
+        config_hash: admin.config_hash,
         built_at_ms:
           config.status === 'fulfilled' ? config.value.built_at_ms : 0,
         workers: admin.workers,
+        workers_acked: admin.worker_beats.filter((beat) => beat.acked).length,
+        heartbeat_age_ms:
+          admin.worker_beats.length > 0
+            ? Math.max(...admin.worker_beats.map((beat) => beat.age_ms))
+            : null,
         connections_active: admin.connections_active,
         nats_connected: admin.nats_connected,
         events_dropped: admin.events_dropped,

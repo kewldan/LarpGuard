@@ -166,8 +166,11 @@ export function Shell() {
             {health.text}
           </div>
           {gateway ? (
-            <div className={`mono ${styles.footMeta}`}>
-              set {gateway.generation}
+            <div
+              className={`mono ${styles.footMeta}`}
+              title={`Configuration hash ${gateway.config_hash}, verdict set ${gateway.generation}`}
+            >
+              config {gateway.config_hash.slice(0, 6)}
               {gateway.built_at_ms
                 ? ` · loaded ${ago(gateway.built_at_ms)}`
                 : ''}

@@ -145,6 +145,30 @@ TEST(SettingsRegistryTest, Formats) {
   EXPECT_EQ(FormatRate(7, std::chrono::seconds(1)), "7/s");
 }
 
+TEST(SettingsRegistryTest, HashAndDiffLeaveSecretsOut) {
+  Config a;
+  Config b = a;
+  EXPECT_EQ(ConfigHash(a), ConfigHash(b));
+  EXPECT_EQ(ConfigHash(a).size(), 12u);
+  b.events_token = "one";
+  Config c = a;
+  c.events_token = "two";
+  // A secret's value does not reach the hash, only that it is set.
+  EXPECT_NE(ConfigHash(a), ConfigHash(b));
+  EXPECT_EQ(ConfigHash(b), ConfigHash(c));
+  EXPECT_TRUE(DiffSettings(a, a, a).empty());
+  const nlohmann::json changes = DiffSettings(b, c, a);
+  ASSERT_EQ(changes.size(), 1u);
+  EXPECT_EQ(changes[0]["path"], "events.token");
+  EXPECT_EQ(changes[0].dump().find("two"), std::string::npos);
+  c.captcha_rounds = 3;
+  const nlohmann::json restart = DiffSettings(b, c, b);
+  ASSERT_EQ(restart.size(), 2u);
+  EXPECT_EQ(restart[1]["path"], "captcha.rounds");
+  EXPECT_EQ(restart[1]["pending_restart"], true);
+  EXPECT_EQ(DiffSettings(b, c, c)[1]["pending_restart"], false);
+}
+
 TEST(SettingsLayerTreeTest, KeysAndEdits) {
   Json layer = Json::object();
   SetLayerValue(&layer, "captcha.rounds", 3);

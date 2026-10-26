@@ -5,6 +5,7 @@
 import type { Hono } from 'hono';
 
 import {
+  type ReloadChange,
   type RuleTestResult,
   reloadResultSchema,
   ruleCheckSchema,
@@ -62,6 +63,25 @@ function toEvent(sample: SampleEvent): RuleSampleEvent {
 // What enforce mode does with a request now: the would-be action.
 function current(sample: SampleEvent): string {
   return sample.would_action || sample.action || 'allow';
+}
+
+// Before and after of what a reload changed, for the decision log's diff;
+// a secret shows only whether it is set.
+function reloadStates(changes: ReloadChange[]): {
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+} {
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  for (const change of changes) {
+    before[change.path] = change.secret
+      ? { set: change.set_before ?? false }
+      : change.before;
+    after[change.path] = change.secret
+      ? { set: change.set_after ?? false }
+      : change.after;
+  }
+  return { before, after };
 }
 
 export function registerRules(app: Hono<AppEnv>): void {
@@ -167,14 +187,31 @@ export function registerRules(app: Hono<AppEnv>): void {
   app.post('/api/reload', requireRole('operator'), async (c) => {
     const deps = c.get('deps');
     try {
-      const summary = await deps.admin.reload();
+      const result = await deps.admin.reload();
+      const { before, after } = reloadStates(result.changes);
+      const waiting = result.changes.filter((change) => change.pending_restart);
       deps.audit.append({
         kind: 'reload',
         actor: actor(c),
-        what: 'Configuration reloaded',
-        facts: [['Summary', summary]],
+        what:
+          result.changes.length === 0
+            ? 'Configuration reloaded, nothing changed'
+            : `Configuration reloaded: ${result.changes.map((change) => change.path).join(', ')}`,
+        ...(result.changes.length > 0 ? { before, after } : {}),
+        facts: [
+          ['Summary', result.summary],
+          ['Config', result.config_hash],
+          ...(waiting.length > 0
+            ? ([
+                [
+                  'Waits for a restart',
+                  waiting.map((change) => change.path).join(', '),
+                ],
+              ] as [string, string][])
+            : []),
+        ],
       });
-      return send(c, reloadResultSchema, { reloaded: true, summary });
+      return send(c, reloadResultSchema, result);
     } catch (error) {
       deps.audit.append({
         kind: 'reload',

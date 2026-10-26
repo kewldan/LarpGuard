@@ -20,14 +20,23 @@ class Heartbeats {
   // All workers start as just beaten at `now_ms` (steady clock).
   Heartbeats(int workers, int64_t now_ms);
 
-  void Beat(int worker, int64_t now_ms);
+  // `generation`: the verdict set the worker's loop saw at this beat
+  // (every request after it uses that set or a newer one).
+  void Beat(int worker, int64_t now_ms, uint64_t generation = 0);
   // A worker that has not beaten for longer than kMaxAge, or -1.
   int Stalled(int64_t now_ms) const;
   int workers() const { return workers_; }
+  int64_t last_beat(int worker) const {
+    return beats_[worker].load(std::memory_order_relaxed);
+  }
+  uint64_t generation(int worker) const {
+    return generations_[worker].load(std::memory_order_relaxed);
+  }
 
  private:
   int workers_;
   std::unique_ptr<std::atomic<int64_t>[]> beats_;
+  std::unique_ptr<std::atomic<uint64_t>[]> generations_;
 };
 
 }  // namespace bot_shield

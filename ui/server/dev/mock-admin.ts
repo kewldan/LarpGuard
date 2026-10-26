@@ -20,6 +20,8 @@ import { MOCK_CONFIG } from './mock-config.ts';
 import { MOCK_ASNS, MOCK_HOSTS } from './mock-data.ts';
 import { createMockSettings } from './mock-settings.ts';
 
+export const MOCK_CONFIG_HASH = '7a1e2f04c9b3';
+
 export const MOCK_SHADOW_HOSTS = new Set([
   'shop.example.com',
   'docs.example.com',
@@ -134,7 +136,14 @@ export function createMockAdmin(now: () => number): AdminApi {
         uptime_s: 86_400 * 3,
         mode: 'shadow',
         verdicts_generation: config.generation,
+        config_hash: MOCK_CONFIG_HASH,
         workers: 16,
+        // Every loop beats twice a second; all on the current set.
+        worker_beats: Array.from({ length: 16 }, (_, i) => ({
+          age_ms: 40 + ((i * 97) % 420),
+          generation: config.generation,
+          acked: true,
+        })),
         certificates: 6,
         label_hosts: 0,
         connections_active: 1840,
@@ -281,9 +290,13 @@ export function createMockAdmin(now: () => number): AdminApi {
     reload: () => {
       config.generation += 1;
       config.built_at_ms = now();
-      return Promise.resolve(
-        `generation ${config.generation}: 5 rules, 3 limits (mock)`,
-      );
+      return Promise.resolve({
+        reloaded: true as const,
+        summary: `generation ${config.generation}: 5 rules, 3 limits (mock)`,
+        // The mock has no files: a reload changes nothing.
+        changes: [],
+        config_hash: MOCK_CONFIG_HASH,
+      });
     },
   };
 }

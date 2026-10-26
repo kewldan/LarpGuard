@@ -16,6 +16,7 @@ import {
   type ListEntry,
   listEntrySchema,
   type NewListEntry,
+  reloadChangeSchema,
   type Settings,
   type SettingsDiff,
   type SettingsHistory,
@@ -51,7 +52,15 @@ export const adminStatusSchema = z.object({
   uptime_s: z.number(),
   mode: z.enum(['shadow', 'enforce']),
   verdicts_generation: z.number(),
+  config_hash: z.string(),
   workers: z.number(),
+  worker_beats: z.array(
+    z.object({
+      age_ms: z.number(),
+      generation: z.number(),
+      acked: z.boolean(),
+    }),
+  ),
   certificates: z.number(),
   label_hosts: z.number(),
   connections_active: z.number(),
@@ -150,6 +159,8 @@ const asnResponseSchema = z.object({
 const reloadSchema = z.object({
   reloaded: z.literal(true),
   summary: z.string(),
+  changes: z.array(reloadChangeSchema),
+  config_hash: z.string(),
 });
 
 // A settings change as the gateway takes it (secrets in `set` as strings).
@@ -203,7 +214,7 @@ export interface AdminApi {
     samples: RuleSampleEvent[],
   ): Promise<RulesTestResponse>;
   asns(numbers: number[]): Promise<AsnInfo[]>;
-  reload(): Promise<string>;
+  reload(): Promise<z.infer<typeof reloadSchema>>;
   settings(): Promise<Settings>;
   validateSettings(change: GatewaySettingsChange): Promise<SettingsDiff>;
   applySettings(change: GatewaySettingsChange): Promise<SettingsDiff>;
@@ -395,7 +406,7 @@ export function createAdminClient(socketPath: string): AdminApi {
       );
       return response.asns;
     },
-    reload: async () => (await must(reloadSchema, 'POST', '/reload')).summary,
+    reload: () => must(reloadSchema, 'POST', '/reload'),
     settings: () => must(settingsSchema, 'GET', '/settings'),
     validateSettings: (change) =>
       must(settingsDiffSchema, 'POST', '/settings/validate', change),

@@ -27,9 +27,11 @@
 #include "config/config.h"
 #include "events/events.h"
 #include "net/asn.h"
+#include "proxy/proxy_hooks.h"
 #include "ratelimit/limits.h"
 #include "ratelimit/store.h"
 #include "score/policy.h"
+#include "server/health.h"
 #include "server/verdicts.h"
 #include "tls/cert_store.h"
 
@@ -509,26 +511,67 @@ TEST_F(AdminServerTest, Reload) {
   EXPECT_EQ(Call("POST", "/reload").status, 501);
   EXPECT_EQ(Call("GET", "/reload").status, 405);
   bool succeed = true;
+  const std::string hash_before = Call("GET", "/status").body["config_hash"];
   context_.reload = [&](std::string* summary) {
     *summary = succeed ? "generation 2" : "rules: bad rule";
-    return succeed;
+    if (!succeed) return false;
+    // The file changed a live key, a restart key and a secret.
+    Config fresh = config_;
+    fresh.policy.block_status = 451;
+    fresh.idle_timeout = std::chrono::seconds(60);
+    fresh.events_token = "new-secret";
+    std::shared_ptr<const VerdictSet> next;
+    std::string error;
+    if (!VerdictSet::Build(fresh, &next, &error)) return false;
+    verdicts_.set(next);
+    return true;
   };
   AdminResponse response = Call("POST", "/reload");
   EXPECT_EQ(response.status, 200);
   EXPECT_EQ(response.body["summary"], "generation 2");
+  const nlohmann::json& changes = response.body["changes"];
+  ASSERT_EQ(changes.size(), 3u) << changes.dump();
+  EXPECT_EQ(changes[0]["path"], "timeouts.idle");
+  EXPECT_EQ(changes[0]["before"], "5m");
+  EXPECT_EQ(changes[0]["after"], "1m");
+  EXPECT_EQ(changes[0]["pending_restart"], true);
+  EXPECT_EQ(changes[1]["path"], "events.token");
+  EXPECT_FALSE(changes[1].contains("after"));
+  EXPECT_EQ(changes[1]["set_after"], true);
+  EXPECT_EQ(changes[2]["path"], "policy.block_status");
+  EXPECT_EQ(changes[2]["after"], 451);
+  EXPECT_EQ(changes[2]["apply"], "live");
+  EXPECT_NE(response.body["config_hash"], hash_before);
+  EXPECT_EQ(response.body["config_hash"],
+            Call("GET", "/status").body["config_hash"]);
+  EXPECT_EQ(response.body.dump().find("new-secret"), std::string::npos);
   succeed = false;
   response = Call("POST", "/reload");
   EXPECT_EQ(response.status, 422);
   EXPECT_EQ(response.body["error"], "rules: bad rule");
-  EXPECT_EQ(Call("GET", "/status").body["verdicts_generation"], 1);
+  EXPECT_EQ(Call("GET", "/status").body["verdicts_generation"], 2);
 }
 
 TEST_F(AdminServerTest, Status) {
-  const AdminResponse response = Call("GET", "/status");
+  AdminResponse response = Call("GET", "/status");
   EXPECT_EQ(response.status, 200);
   EXPECT_EQ(response.body["uptime_s"], 100);
   EXPECT_EQ(response.body["mode"], "shadow");
   EXPECT_EQ(response.body["workers"], 2);
+  EXPECT_EQ(response.body["config_hash"].get<std::string>().size(), 12u);
+  EXPECT_TRUE(response.body["worker_beats"].empty());
+  // One worker has seen the current set, the other is a set behind.
+  Heartbeats beats(2, SteadyMillis() - 2000);
+  beats.Beat(0, SteadyMillis(), verdicts_.snapshot()->generation);
+  context_.heartbeats = &beats;
+  response = Call("GET", "/status");
+  const nlohmann::json& workers = response.body["worker_beats"];
+  ASSERT_EQ(workers.size(), 2u);
+  EXPECT_EQ(workers[0]["acked"], true);
+  EXPECT_LT(workers[0]["age_ms"].get<int64_t>(), 1000);
+  EXPECT_EQ(workers[1]["acked"], false);
+  EXPECT_GE(workers[1]["age_ms"].get<int64_t>(), 2000);
+  context_.heartbeats = nullptr;
   EXPECT_EQ(Call("POST", "/status").status, 405);
   EXPECT_EQ(Call("GET", "/nope").status, 404);
 }

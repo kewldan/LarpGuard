@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/hash.h"
 #include "common/log.h"
 #include "config/config.h"
 #include "ratelimit/limits.h"
@@ -586,6 +587,50 @@ std::string FormatDuration(milliseconds duration) {
   if (ms != 0 && ms % kMinute == 0) return std::format("{}m", ms / kMinute);
   if (ms % kSecond == 0) return std::format("{}s", ms / kSecond);
   return std::format("{}ms", ms);
+}
+
+namespace {
+
+bool SecretSet(const SettingKey& key, const Config& config) {
+  const nlohmann::json value = key.get(config);
+  return value.is_string() && !value.get<std::string>().empty();
+}
+
+}  // namespace
+
+std::string ConfigHash(const Config& config) {
+  nlohmann::json all = nlohmann::json::array();
+  for (const SettingKey& key : SettingKeys()) {
+    all.push_back({key.path, key.secret ? nlohmann::json(SecretSet(key, config))
+                                        : key.get(config)});
+  }
+  return Sha256Hex(all.dump(), 12);
+}
+
+nlohmann::json DiffSettings(const Config& before, const Config& after,
+                            const Config& running) {
+  nlohmann::json changes = nlohmann::json::array();
+  for (const SettingKey& key : SettingKeys()) {
+    const nlohmann::json old_value = key.get(before);
+    const nlohmann::json new_value = key.get(after);
+    if (old_value == new_value) continue;
+    nlohmann::json change = {
+        {"path", key.path},
+        {"apply", SettingApplyName(key.apply)},
+        {"secret", key.secret},
+        {"pending_restart",
+         key.apply == SettingApply::kRestart && key.get(running) != new_value}};
+    if (key.secret) {
+      change["value_changed"] = true;
+      change["set_before"] = SecretSet(key, before);
+      change["set_after"] = SecretSet(key, after);
+    } else {
+      change["before"] = old_value;
+      change["after"] = new_value;
+    }
+    changes.push_back(std::move(change));
+  }
+  return changes;
 }
 
 std::string FormatRate(int64_t count, milliseconds period) {

@@ -213,6 +213,9 @@ log_level: info
     expect(status.mode).toBe('shadow');
     expect(status.workers).toBe(1);
     expect(status.certificates).toBeGreaterThan(0);
+    expect(status.config_hash).toMatch(/^[0-9a-f]{12}$/);
+    expect(status.worker_beats).toHaveLength(1);
+    expect(status.worker_beats[0]?.age_ms).toBeLessThan(5000);
   });
 
   it('config', async () => {
@@ -405,7 +408,11 @@ log_level: info
   });
 
   it('reload', async () => {
-    expect(await admin.reload()).toMatch(/\S/);
+    const result = await admin.reload();
+    expect(result.summary).toMatch(/\S/);
+    // The files did not change: nothing to report, the same hash.
+    expect(result.changes).toEqual([]);
+    expect(result.config_hash).toBe((await admin.status()).config_hash);
   });
 
   it('settings: read, validate, apply, history, rollback', async () => {

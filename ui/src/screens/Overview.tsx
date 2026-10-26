@@ -454,14 +454,18 @@ export function Health({ status }: { status: Status | undefined }) {
       name: 'Workers',
       state: health.workers,
       value: gateway
-        ? `${health.workers === 'ok' ? gateway.workers : '?'} / ${gateway.workers}`
+        ? `${gateway.workers_acked} / ${gateway.workers} acked`
         : '—',
       sub:
-        health.workers === 'ok'
-          ? 'every loop beating'
-          : health.workers === 'degraded'
-            ? 'a worker stalled'
-            : 'no answer from /health',
+        health.workers === 'down'
+          ? 'no answer from /health'
+          : `${
+              gateway?.heartbeat_age_ms != null
+                ? `slowest beat ${(gateway.heartbeat_age_ms / 1000).toFixed(1)} s ago`
+                : health.workers === 'ok'
+                  ? 'every loop beating'
+                  : 'a worker stalled'
+            }${health.workers === 'degraded' ? ' · a worker stalled' : ''}`,
     },
     {
       name: 'Admin API',

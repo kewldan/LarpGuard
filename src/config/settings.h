@@ -83,6 +83,17 @@ void SetLayerValue(nlohmann::json* layer, std::string_view path,
 // Removes `path` and parents left empty.
 void RemoveLayerValue(nlohmann::json* layer, std::string_view path);
 
+// SHA-256 of every key's value in registry order (for a secret, only
+// whether it is set), 12 hex digits: equal configurations hash equally on
+// any gateway, and nothing about a secret can be guessed from it.
+std::string ConfigHash(const Config& config);
+
+// Keys whose value differs from `before` to `after`, in registry order:
+// [{path, apply, secret, before, after (not for secrets: value_changed),
+// pending_restart (a restart key `running` does not have yet)}].
+nlohmann::json DiffSettings(const Config& before, const Config& after,
+                            const Config& running);
+
 // Checks the JSON shape of `value` for `key` (a bool for kBool, ...), so
 // errors name the key; the configuration parser checks the rest.
 bool CheckSettingValue(const SettingKey& key, const nlohmann::json& value,

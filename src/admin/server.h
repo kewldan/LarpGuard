@@ -22,6 +22,7 @@
 #include "events/events.h"
 #include "net/asn.h"
 #include "ratelimit/store.h"
+#include "server/health.h"
 #include "server/verdicts.h"
 #include "tls/cert_store.h"
 
@@ -56,6 +57,8 @@ struct AdminContext {
       apply_settings;
   int64_t started_ms = 0;
   int workers = 0;
+  // Worker loop beats and the verdict set each saw; may be null.
+  const Heartbeats* heartbeats = nullptr;
 };
 
 struct AdminResponse {

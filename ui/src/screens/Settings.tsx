@@ -33,6 +33,7 @@ export function Settings() {
           'Verdict set',
           `${gateway.generation}${config ? ` · library ${config.library.version}` : ''}`,
         ],
+        ['Configuration', gateway.config_hash],
         ['Global mode', gateway.mode],
       ]
     : [];

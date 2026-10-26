@@ -47,6 +47,7 @@
 #include "common/url.h"
 #include "common/version.h"
 #include "config/config.h"
+#include "config/settings.h"
 #include "crawler/crawlers.h"
 #include "docker/labels.h"
 #include "events/events.h"
@@ -56,6 +57,7 @@
 #include "net/asn.h"
 #include "net/watchdog.h"
 #include "proxy/http_message.h"
+#include "proxy/proxy_hooks.h"
 #include "ratelimit/limits.h"
 #include "score/policy.h"
 #include "score/rules.h"
@@ -78,19 +80,38 @@ AdminResponse Error(int status, std::string_view message) {
   return {status, {{"error", message}}};
 }
 
+// Per worker: milliseconds since its loop last beat, and whether it has
+// seen the current verdict set ("acked").
+nlohmann::json WorkerBeats(const AdminContext& context,
+                           std::size_t generation) {
+  nlohmann::json beats = nlohmann::json::array();
+  if (context.heartbeats == nullptr) return beats;
+  const int64_t now_ms = SteadyMillis();
+  for (int i = 0; i < context.heartbeats->workers(); ++i) {
+    beats.push_back(
+        {{"age_ms",
+          std::max<int64_t>(0, now_ms - context.heartbeats->last_beat(i))},
+         {"generation", context.heartbeats->generation(i)},
+         {"acked", context.heartbeats->generation(i) >= generation}});
+  }
+  return beats;
+}
+
 AdminResponse Status(const AdminContext& context, int64_t now_seconds) {
   const Metrics& metrics = GlobalMetrics();
+  const auto verdicts = context.verdicts->snapshot();
   const auto labels =
       context.labels != nullptr ? context.labels->snapshot() : nullptr;
   return {
       200,
       {{"version", kVersion},
        {"uptime_s", now_seconds - context.started_ms / 1000},
-       {"mode", context.verdicts->snapshot()->policy->global_enforce()
-                    ? "enforce"
-                    : "shadow"},
-       {"verdicts_generation", context.verdicts->snapshot()->generation},
+       {"mode", verdicts->policy->global_enforce() ? "enforce" : "shadow"},
+       {"verdicts_generation", verdicts->generation},
+       {"config_hash",
+        verdicts->config ? ConfigHash(*verdicts->config) : std::string()},
        {"workers", context.workers},
+       {"worker_beats", WorkerBeats(context, verdicts->generation)},
        {"certificates", context.certificates->snapshot()->certificate_count()},
        {"label_hosts", labels ? labels->host_count() : 0},
        {"connections_active", metrics.connections_active.Get()},
@@ -791,9 +812,20 @@ AdminResponse HandleAdminRequest(std::string_view method,
   if (path == "/reload") {
     if (method != "POST") return Error(405, "method not allowed");
     if (!context.reload) return Error(501, "reload is not available");
+    const std::shared_ptr<const Config> before =
+        context.verdicts->snapshot()->config;
     std::string summary;
     if (!context.reload(&summary)) return Error(422, summary);
-    return {200, {{"reloaded", true}, {"summary", summary}}};
+    const std::shared_ptr<const Config> after =
+        context.verdicts->snapshot()->config;
+    nlohmann::json body = {{"reloaded", true}, {"summary", summary}};
+    if (before && after) {
+      // What this reload changed in the effective configuration (both
+      // files), without secret values.
+      body["changes"] = DiffSettings(*before, *after, *context.config);
+      body["config_hash"] = ConfigHash(*after);
+    }
+    return {200, std::move(body)};
   }
   if (path == "/settings" || path.starts_with("/settings/")) {
     return HandleSettingsRequest(method, path.substr(9), body, context,

@@ -312,6 +312,72 @@ describe('changes', () => {
     ).toBe(409);
   });
 
+  it('log what a reload changed', async () => {
+    const changes = [
+      {
+        path: 'policy.block_status',
+        apply: 'live' as const,
+        secret: false,
+        pending_restart: false,
+        before: 403,
+        after: 451,
+      },
+      {
+        path: 'events.token',
+        apply: 'restart' as const,
+        secret: true,
+        pending_restart: true,
+        set_before: false,
+        set_after: true,
+      },
+    ];
+    const admin = createMockAdmin(() => clock);
+    const app = build({
+      admin: {
+        ...admin,
+        reload: () =>
+          Promise.resolve({
+            reloaded: true as const,
+            summary: 'generation 2',
+            changes,
+            config_hash: 'abcdef012345',
+          }),
+      },
+    });
+    const session = await signIn(app);
+    const response = await send(app, session, 'POST', '/api/reload');
+    expect(response.status).toBe(200);
+    const audit = (await (
+      await send(app, session, 'GET', '/api/audit')
+    ).json()) as {
+      entries: {
+        kind: string;
+        what: string;
+        before?: unknown;
+        after?: unknown;
+        facts: [string, string][];
+        revertible: boolean;
+      }[];
+    };
+    const entry = audit.entries.find((e) => e.kind === 'reload');
+    expect(entry?.what).toBe(
+      'Configuration reloaded: policy.block_status, events.token',
+    );
+    expect(entry?.before).toEqual({
+      'policy.block_status': 403,
+      'events.token': { set: false },
+    });
+    expect(entry?.after).toEqual({
+      'policy.block_status': 451,
+      'events.token': { set: true },
+    });
+    expect(entry?.facts).toContainEqual([
+      'Waits for a restart',
+      'events.token',
+    ]);
+    expect(entry?.revertible).toBe(false);
+  });
+
   it('extend list entries in place and revert that', async () => {
     const app = build();
     const session = await signIn(app);

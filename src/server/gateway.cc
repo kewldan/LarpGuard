@@ -308,7 +308,8 @@ void Worker::Run(Heartbeats* heartbeats) {
       io_context_,
       [](Worker* self, Heartbeats* beats) -> asio::awaitable<void> {
         while (!self->draining_) {
-          beats->Beat(self->index_, SteadyMillis());
+          beats->Beat(self->index_, SteadyMillis(),
+                      self->context_.verdicts->snapshot()->generation);
           self->heartbeat_timer_.expires_after(Heartbeats::kInterval);
           co_await self->heartbeat_timer_.async_wait(
               asio::as_tuple(asio::use_awaitable));
@@ -458,6 +459,7 @@ bool Gateway::Start(std::string* error) {
                             std::chrono::system_clock::now().time_since_epoch())
                             .count();
     admin_.workers = count;
+    admin_.heartbeats = heartbeats_.get();
     admin_server_ = std::make_unique<AdminServer>();
     if (!admin_server_->Start(config_.admin_socket, &admin_, error)) {
       return false;
