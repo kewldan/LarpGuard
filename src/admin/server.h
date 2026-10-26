@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "admin/attack.h"
+#include "admin/audit_signer.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/modes.h"
@@ -59,6 +60,8 @@ struct AdminContext {
   int workers = 0;
   // Worker loop beats and the verdict set each saw; may be null.
   const Heartbeats* heartbeats = nullptr;
+  // Signs audit entries of the console (admin.audit_key_file); may be null.
+  const AuditSigner* audit_signer = nullptr;
 };
 
 struct AdminResponse {
@@ -77,6 +80,7 @@ struct AdminResponse {
 //   POST   /rules/test       (a condition on sample events)
 //   GET    /asn?numbers=<n>,<n>
 //   POST   /reload           (rules, limits, policy, library, model)
+//   GET    /audit/key        POST /audit/sign   (the console's audit log)
 //   GET    /settings         POST /settings     POST /settings/validate
 //   GET    /settings/history POST /settings/rollback   (ADR-018)
 AdminResponse HandleAdminRequest(std::string_view method,

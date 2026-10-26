@@ -901,7 +901,7 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
   if (const YAML::Node admin = root["admin"]) {
     if (!CheckKeys(admin, "admin",
                    {"socket", "state_file", "modes_file", "attack_file",
-                    "settings_file", "decisions"},
+                    "audit_key_file", "settings_file", "decisions"},
                    error)) {
       return false;
     }
@@ -923,6 +923,12 @@ bool ParseRoot(const YAML::Node& root, Config* config, std::string* error) {
       config->admin_attack_file = admin["attack_file"].IsNull()
                                       ? ""
                                       : admin["attack_file"].as<std::string>();
+    }
+    if (admin["audit_key_file"]) {
+      config->admin_audit_key_file =
+          admin["audit_key_file"].IsNull()
+              ? ""
+              : admin["audit_key_file"].as<std::string>();
     }
     if (admin["settings_file"]) {
       config->admin_settings_file =

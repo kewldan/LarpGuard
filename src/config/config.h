@@ -250,6 +250,9 @@ struct Config {
   // Under-attack entries and the history of activations survive restarts
   // in this JSON file; empty: memory.
   std::string admin_attack_file;
+  // Ed25519 key (created when missing) that signs the console's audit log
+  // over the admin socket; empty: no signatures.
+  std::string admin_audit_key_file;
   // Settings changed through the admin API (the console): a YAML layer over
   // this file, written by the gateway (ADR-018); empty: read-only.
   std::string admin_settings_file;

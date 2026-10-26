@@ -126,11 +126,16 @@ function planRevert(entry: StoredEntry): Revert | null {
 }
 
 export function registerAudit(app: Hono<AppEnv>): void {
-  app.get('/api/audit', (c) => {
+  app.get('/api/audit', async (c) => {
     const deps = c.get('deps');
+    const signatures = await deps.audit.signatures();
     return send(c, auditSchema, {
-      entries: deps.audit.list((entry) => planRevert(entry) !== null),
+      entries: deps.audit.list(
+        (entry) => planRevert(entry) !== null,
+        signatures?.of,
+      ),
       intact: deps.audit.intact,
+      signing: signatures?.state ?? null,
     });
   });
 

@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "admin/attack.h"
+#include "admin/audit_signer.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/modes.h"
@@ -578,6 +579,18 @@ int Run(int argc, char** argv) {
   services.labels = docker ? &labels : nullptr;
   services.lists = &lists;
   services.decisions = &decisions;
+  // The console's audit log is signed with a key kept here.
+  std::unique_ptr<bot_shield::AuditSigner> audit_signer;
+  if (!config.admin_audit_key_file.empty()) {
+    audit_signer =
+        bot_shield::AuditSigner::Load(config.admin_audit_key_file, &error);
+    if (!audit_signer) {
+      Error("admin: {}", error);
+      return 1;
+    }
+    Info("admin: audit entries signed with key {}", audit_signer->key_id());
+    services.audit_signer = audit_signer.get();
+  }
   bot_shield::Gateway gateway(config, &certificates, services);
   if (!gateway.Start(&error)) {
     Error("startup: {}", error);

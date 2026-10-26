@@ -12,6 +12,7 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { ed25519Key, verifySeal } from '../audit.ts';
 import {
   type AdminApi,
   AdminError,
@@ -182,6 +183,8 @@ admin:
   socket: ${socket}
   state_file: ${join(dir, 'lists.json')}
   modes_file: ${join(dir, 'modes.json')}
+  attack_file: ${join(dir, 'attack.json')}
+  audit_key_file: ${join(dir, 'audit.key')}
   settings_file: ${join(dir, 'settings.yaml')}
   decisions: 100
 metrics:
@@ -345,7 +348,15 @@ log_level: info
     expect(await admin.disableAttack(HOST)).toBe(true);
     expect(await admin.disableAttack(`www.${HOST}`)).toBe(true);
     expect(await admin.disableAttack(HOST)).toBe(false);
-    expect((await admin.attack()).entries).toEqual([]);
+    const after = await admin.attack();
+    expect(after.entries).toEqual([]);
+    // Both activations stay in the history, ended.
+    expect(after.history.map((record) => record.host)).toEqual(
+      expect.arrayContaining([HOST, `www.${HOST}`]),
+    );
+    expect(after.history.every((record) => record.ended !== undefined)).toBe(
+      true,
+    );
   });
 
   it('rule tests: compile and errors', async () => {
@@ -405,6 +416,19 @@ log_level: info
       expect.objectContaining({ asn: 64500, org: 'Contract-ISP Example' }),
     );
     expect(asns.map((info) => info.asn)).not.toContain(65535);
+  });
+
+  it('audit signatures', async () => {
+    const key = await admin.auditKey();
+    expect(key?.key_id).toMatch(/^[0-9a-f]{16}$/);
+    const hash = 'ab'.repeat(32);
+    const signed = await admin.signAudit(hash);
+    expect(signed?.key_id).toBe(key?.key_id);
+    const publicKey = ed25519Key(key?.public_key ?? '');
+    expect(verifySeal(hash, signed?.signature ?? '', publicKey)).toBe(true);
+    expect(
+      verifySeal('cd'.repeat(32), signed?.signature ?? '', publicKey),
+    ).toBe(false);
   });
 
   it('reload', async () => {

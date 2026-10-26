@@ -35,6 +35,13 @@ const KIND_LOOK: Record<AuditKind, [string, string]> = {
   attack: ['var(--color-blocked)', 'var(--color-on-blocked-chip)'],
 };
 
+const SIGNATURE_TEXT: Record<NonNullable<AuditEntry['signature']>, string> = {
+  valid: 'valid',
+  invalid: 'does not match this entry',
+  other_key: 'made with another key',
+  missing: 'none (the gateway was not reachable)',
+};
+
 function stateLines(value: unknown): string[] {
   return value === undefined || value === null
     ? []
@@ -74,7 +81,16 @@ function Detail({ entry }: { entry: AuditEntry }) {
   const revert = useRevert();
   const toast = useToast();
   const diff = diffLines(stateLines(entry.before), stateLines(entry.after));
-  const facts: [string, string][] = [['Actor', entry.actor], ...entry.facts];
+  const facts: [string, string][] = [
+    ['Actor', entry.actor],
+    ...entry.facts,
+    ...(entry.signature
+      ? ([['Gateway signature', SIGNATURE_TEXT[entry.signature]]] as [
+          string,
+          string,
+        ][])
+      : []),
+  ];
   return (
     <section
       aria-label="Entry detail"
@@ -462,6 +478,32 @@ export function AuditLog() {
           ? 'Entries are append-only; each one carries the SHA-256 of the one before it, and the chain checks out.'
           : 'The log file does not check out: a line was edited or removed since it was written.'}
       </div>
+      {audit.data.signing ? (
+        <div
+          style={{
+            fontSize: 12,
+            color:
+              audit.data.signing.invalid > 0
+                ? 'var(--color-blocked-text)'
+                : 'var(--color-text-3)',
+          }}
+        >
+          Signed by the gateway&apos;s key{' '}
+          <span className="mono">{audit.data.signing.key_id}</span>:{' '}
+          {audit.data.signing.valid} valid
+          {audit.data.signing.missing > 0
+            ? `, ${audit.data.signing.missing} unsigned`
+            : ''}
+          {audit.data.signing.invalid > 0
+            ? `, ${audit.data.signing.invalid} that do not check out (rewritten, or signed by another key)`
+            : ''}
+          .
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--color-text-3)' }}>
+          The gateway does not sign entries (admin.audit_key_file is off).
+        </div>
+      )}
     </>
   );
 }

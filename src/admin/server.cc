@@ -828,6 +828,28 @@ AdminResponse HandleAdminRequest(std::string_view method,
     }
     return {200, std::move(body)};
   }
+  if (path == "/audit/key" || path == "/audit/sign") {
+    if (context.audit_signer == nullptr) {
+      return Error(404, "audit signing is off (admin.audit_key_file)");
+    }
+    const AuditSigner& signer = *context.audit_signer;
+    if (path == "/audit/key") {
+      if (method != "GET") return Error(405, "method not allowed");
+      return {200,
+              {{"key_id", signer.key_id()},
+               {"public_key", signer.public_key()},
+               {"algorithm", "ed25519"}}};
+    }
+    if (method != "POST") return Error(405, "method not allowed");
+    const nlohmann::json json = nlohmann::json::parse(body, nullptr, false);
+    std::string signature;
+    if (json.is_discarded() || !json.is_object() || !json.contains("hash") ||
+        !json["hash"].is_string() ||
+        !signer.Sign(json["hash"].get<std::string>(), &signature)) {
+      return Error(400, R"(expected {"hash": "<64 lowercase hex digits>"})");
+    }
+    return {200, {{"signature", signature}, {"key_id", signer.key_id()}}};
+  }
   if (path == "/settings" || path.starts_with("/settings/")) {
     return HandleSettingsRequest(method, path.substr(9), body, context,
                                  now_seconds * 1000);

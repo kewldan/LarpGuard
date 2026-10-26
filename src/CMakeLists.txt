@@ -7,6 +7,7 @@ add_library(bot_shield_core STATIC
   challenge/scripts.cc
   challenge/token.cc
   admin/attack.cc
+  admin/audit_signer.cc
   admin/decision_log.cc
   admin/lists.cc
   admin/modes.cc

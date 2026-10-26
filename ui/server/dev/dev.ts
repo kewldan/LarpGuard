@@ -71,12 +71,16 @@ const metrics: MetricsApi = {
   },
 };
 
+const admin = createMockAdmin(now);
 const app = createApp({
   config,
-  admin: createMockAdmin(now),
+  admin,
   analytics: createMockAnalytics(events, now),
   metrics,
-  audit: new AuditLog(null, now),
+  audit: new AuditLog(null, now, {
+    sign: (hash) => admin.signAudit(hash),
+    key: () => admin.auditKey(),
+  }),
   sessions: new SessionStore({
     idleMs: config.session.idle,
     maxMs: config.session.max,

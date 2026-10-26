@@ -2,6 +2,8 @@
 // behaviour (lists, attack mode, console modes, rule tests, settings)
 // without a gateway process.
 
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+
 import type {
   AttackEntry,
   AttackRecord,
@@ -28,6 +30,15 @@ export const MOCK_SHADOW_HOSTS = new Set([
 ]);
 
 export function createMockAdmin(now: () => number): AdminApi {
+  // An audit key of its own, as the gateway's admin.audit_key_file.
+  const auditKeys = generateKeyPairSync('ed25519');
+  const rawPublic = auditKeys.publicKey
+    .export({ format: 'der', type: 'spki' })
+    .subarray(12);
+  const auditKey = {
+    key_id: createHash('sha256').update(rawPublic).digest('hex').slice(0, 16),
+    public_key: rawPublic.toString('base64url'),
+  };
   const config: GatewayConfig = {
     ...MOCK_CONFIG,
     built_at_ms: now() - 12 * 60_000,
@@ -336,6 +347,20 @@ export function createMockAdmin(now: () => number): AdminApi {
     settingsHistory: () => Promise.resolve(settings.history()),
     rollbackSettings: (revision, base) =>
       Promise.resolve().then(() => applied(settings.rollback(revision, base))),
+    auditKey: () => Promise.resolve(auditKey),
+    signAudit: (hash) =>
+      Promise.resolve(
+        /^[0-9a-f]{64}$/.test(hash)
+          ? {
+              signature: sign(
+                null,
+                Buffer.from(`larpguard-audit-v1\n${hash}`),
+                auditKeys.privateKey,
+              ).toString('base64url'),
+              key_id: auditKey.key_id,
+            }
+          : null,
+      ),
     reload: () => {
       config.generation += 1;
       config.built_at_ms = now();

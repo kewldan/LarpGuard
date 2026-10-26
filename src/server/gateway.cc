@@ -455,6 +455,7 @@ bool Gateway::Start(std::string* error) {
     admin_.settings = services_.settings;
     admin_.apply_settings = services_.apply_settings;
     admin_.asn = services_.asn;
+    admin_.audit_signer = services_.audit_signer;
     admin_.started_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::system_clock::now().time_since_epoch())
                             .count();

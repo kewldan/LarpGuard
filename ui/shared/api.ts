@@ -1075,6 +1075,18 @@ export const AUDIT_KINDS = [
 export const auditKindSchema = z.enum(AUDIT_KINDS);
 export type AuditKind = z.infer<typeof auditKindSchema>;
 
+// The gateway's signature on an entry (admin.audit_key_file): valid, not
+// matching the entry (rewritten), made with another key than the
+// gateway's current one, or none (written while the gateway was away).
+export const AUDIT_SIGNATURES = [
+  'valid',
+  'invalid',
+  'other_key',
+  'missing',
+] as const;
+export const auditSignatureSchema = z.enum(AUDIT_SIGNATURES);
+export type AuditSignature = z.infer<typeof auditSignatureSchema>;
+
 export const auditEntrySchema = z.object({
   id: z.string(),
   ts: z.number(),
@@ -1088,6 +1100,8 @@ export const auditEntrySchema = z.object({
   // Another entry this one reverted.
   reverts: z.string().optional(),
   revertible: z.boolean(),
+  // Absent when the gateway does not sign entries.
+  signature: auditSignatureSchema.optional(),
 });
 export type AuditEntry = z.infer<typeof auditEntrySchema>;
 
@@ -1095,6 +1109,15 @@ export const auditSchema = z.object({
   entries: z.array(auditEntrySchema),
   // The hash chain of the log file checks out.
   intact: z.boolean(),
+  // Null when the gateway does not sign entries.
+  signing: z
+    .object({
+      key_id: z.string(),
+      valid: z.number(),
+      invalid: z.number(),
+      missing: z.number(),
+    })
+    .nullable(),
 });
 export type Audit = z.infer<typeof auditSchema>;
 

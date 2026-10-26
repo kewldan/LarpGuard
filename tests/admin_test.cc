@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/ip/address.hpp>
 #include <chrono>
 #include <cstdint>
@@ -18,6 +19,7 @@
 #include <vector>
 
 #include "admin/attack.h"
+#include "admin/audit_signer.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/modes.h"
@@ -444,6 +446,35 @@ TEST(AttackModeTest, KeepsHistoryAndSurvivesRestarts) {
   std::remove(path.c_str());
 }
 
+TEST(AuditSignerTest, KeyFileSignAndVerify) {
+  const std::string path =
+      (std::filesystem::temp_directory_path() / "bs-audit-test.key").string();
+  std::remove(path.c_str());
+  std::string error;
+  const auto created = AuditSigner::Load(path, &error);
+  ASSERT_TRUE(created) << error;
+  EXPECT_EQ(
+      std::filesystem::status(path).permissions() & std::filesystem::perms::all,
+      std::filesystem::perms(0600));
+  // The same key on the next start.
+  const auto loaded = AuditSigner::Load(path, &error);
+  ASSERT_TRUE(loaded) << error;
+  EXPECT_EQ(loaded->public_key(), created->public_key());
+  EXPECT_EQ(loaded->key_id().size(), 16u);
+  const std::string hash(64, 'a');
+  std::string signature;
+  ASSERT_TRUE(created->Sign(hash, &signature));
+  EXPECT_TRUE(loaded->Verify(hash, signature));
+  EXPECT_FALSE(loaded->Verify(std::string(64, 'b'), signature));
+  EXPECT_FALSE(created->Sign("not a hash", &signature));
+  EXPECT_FALSE(created->Sign(std::string(64, 'A'), &signature));
+  std::remove(path.c_str());
+
+  std::ofstream(path) << "short";
+  EXPECT_FALSE(AuditSigner::Load(path, &error));
+  std::remove(path.c_str());
+}
+
 TEST(DecisionLogTest, BoundedNewestFirstWithFilters) {
   DecisionLog log(3);
   for (int i = 0; i < 5; ++i) {
@@ -551,6 +582,27 @@ TEST_F(AdminServerTest, Reload) {
   EXPECT_EQ(response.status, 422);
   EXPECT_EQ(response.body["error"], "rules: bad rule");
   EXPECT_EQ(Call("GET", "/status").body["verdicts_generation"], 2);
+}
+
+TEST_F(AdminServerTest, AuditSigning) {
+  EXPECT_EQ(Call("GET", "/audit/key").status, 404);
+  std::array<uint8_t, 32> seed{};
+  seed.fill(7);
+  const auto signer = AuditSigner::FromSeed(seed);
+  context_.audit_signer = signer.get();
+  AdminResponse response = Call("GET", "/audit/key");
+  ASSERT_EQ(response.status, 200);
+  EXPECT_EQ(response.body["key_id"], signer->key_id());
+  EXPECT_EQ(response.body["algorithm"], "ed25519");
+  const std::string hash(64, 'c');
+  response = Call("POST", "/audit/sign", R"({"hash":")" + hash + R"("})");
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_TRUE(
+      signer->Verify(hash, response.body["signature"].get<std::string>()));
+  EXPECT_EQ(Call("POST", "/audit/sign", R"({"hash":"zz"})").status, 400);
+  EXPECT_EQ(Call("POST", "/audit/sign", "[]").status, 400);
+  EXPECT_EQ(Call("GET", "/audit/sign").status, 405);
+  context_.audit_signer = nullptr;
 }
 
 TEST_F(AdminServerTest, Status) {

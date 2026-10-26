@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "admin/attack.h"
+#include "admin/audit_signer.h"
 #include "admin/decision_log.h"
 #include "admin/lists.h"
 #include "admin/modes.h"
@@ -113,6 +114,7 @@ struct GatewayServices {
   const LabelStore* labels = nullptr;  // Null: Docker off.
   ListStore* lists = nullptr;
   DecisionLog* decisions = nullptr;
+  const AuditSigner* audit_signer = nullptr;  // Null: no audit signatures.
   const Challenger* challenger = nullptr;
   Captcha* captcha = nullptr;
   CrawlerVerifier* crawler_verifier = nullptr;

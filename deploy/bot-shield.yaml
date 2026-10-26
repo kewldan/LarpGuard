@@ -431,6 +431,11 @@ admin:
   # Under-attack mode (entries and the history of activations, manual and
   # automatic) survives restarts here ("" = memory only).
   attack_file: /var/lib/bot-shield/attack.json   # Not a default.
+  # Ed25519 key that signs every entry of the console's audit log (POST
+  # /audit/sign); created on first start (mode 0600). The key never leaves
+  # the gateway, so the console's own files cannot forge an entry.
+  # "" = entries are only hash-chained.
+  audit_key_file: /var/lib/bot-shield/audit.key   # Not a default.
   # Settings changed in the console: a YAML layer over this file, written
   # by the gateway (mode 0600, with <file>.history for rollback). Keys set
   # there beat this file; the console shows where each value comes from.

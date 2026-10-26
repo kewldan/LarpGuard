@@ -215,6 +215,11 @@ export interface AdminApi {
   ): Promise<RulesTestResponse>;
   asns(numbers: number[]): Promise<AsnInfo[]>;
   reload(): Promise<z.infer<typeof reloadSchema>>;
+  // Null: the gateway does not sign audit entries (no audit_key_file).
+  auditKey(): Promise<{ key_id: string; public_key: string } | null>;
+  signAudit(
+    hash: string,
+  ): Promise<{ signature: string; key_id: string } | null>;
   settings(): Promise<Settings>;
   validateSettings(change: GatewaySettingsChange): Promise<SettingsDiff>;
   applySettings(change: GatewaySettingsChange): Promise<SettingsDiff>;
@@ -407,6 +412,22 @@ export function createAdminClient(socketPath: string): AdminApi {
       return response.asns;
     },
     reload: () => must(reloadSchema, 'POST', '/reload'),
+    auditKey: () =>
+      json(
+        z.object({ key_id: z.string(), public_key: z.string() }),
+        'GET',
+        '/audit/key',
+        undefined,
+        true,
+      ),
+    signAudit: (hash) =>
+      json(
+        z.object({ signature: z.string(), key_id: z.string() }),
+        'POST',
+        '/audit/sign',
+        { hash },
+        true,
+      ),
     settings: () => must(settingsSchema, 'GET', '/settings'),
     validateSettings: (change) =>
       must(settingsDiffSchema, 'POST', '/settings/validate', change),

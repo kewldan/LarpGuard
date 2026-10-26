@@ -44,15 +44,20 @@ function serveCommand(argv: string[]): void {
   const config = loadConsoleConfig(values.config);
   const clickhouse =
     config.clickhouse && createClickHouseRun(config.clickhouse);
+  const admin = createAdminClient(config.gateway.admin_socket);
   const app = createApp({
     config,
-    admin: createAdminClient(config.gateway.admin_socket),
+    admin,
     analytics:
       config.clickhouse && clickhouse
         ? createAnalytics(config.clickhouse.database, clickhouse.run)
         : null,
     metrics: createMetricsClient(config.gateway.metrics_url),
-    audit: new AuditLog(config.audit_log),
+    // Each entry is sealed by the gateway's key when it has one.
+    audit: new AuditLog(config.audit_log, Date.now, {
+      sign: (hash) => admin.signAudit(hash),
+      key: () => admin.auditKey(),
+    }),
     sessions: new SessionStore({
       idleMs: config.session.idle,
       maxMs: config.session.max,

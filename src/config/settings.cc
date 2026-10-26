@@ -396,6 +396,8 @@ constexpr SettingKey kKeys[] = {
          [](C c) -> Json { return c.admin_modes_file; }),
     Yaml("admin.attack_file", T::kString,
          [](C c) -> Json { return c.admin_attack_file; }),
+    Yaml("admin.audit_key_file", T::kString,
+         [](C c) -> Json { return c.admin_audit_key_file; }),
     Yaml("admin.settings_file", T::kString,
          [](C c) -> Json { return c.admin_settings_file; }),
     Restart("admin.decisions", T::kInt,
