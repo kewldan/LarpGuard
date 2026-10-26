@@ -64,6 +64,7 @@
 #include "net/prefixed_stream.h"
 #include "net/proxy_protocol.h"
 #include "net/socket_options.h"
+#include "net/splice.h"
 #include "net/watchdog.h"
 #include "proxy/exchange.h"
 #include "proxy/h1_server.h"
@@ -315,10 +316,19 @@ class ConnectionObserver {
   }
 
   void OnClientData(std::span<const uint8_t> data) {
-    record_.bytes_in += data.size();
-    GlobalMetrics().bytes_client_to_upstream.Inc(data.size());
+    OnClientBytes(data.size());
     if (h1_ && h1_->active()) h1_->Feed(data);
   }
+
+  // Bytes relayed without being read (spliced passthrough).
+  void OnClientBytes(std::size_t size) {
+    record_.bytes_in += size;
+    GlobalMetrics().bytes_client_to_upstream.Inc(size);
+  }
+
+  // Something reads the client's bytes (the port 80 tap): they must pass
+  // through user space.
+  bool ReadsClientData() const { return h1_ && h1_->active(); }
 
   void OnUpstreamData(std::span<const uint8_t> data) {
     OnBytesToClient(data.size());
@@ -1229,9 +1239,11 @@ class ConnectionObserver {
     const bool enforce = decision.enforce;
     const Action would_action = decision.would_action;
     auto shared = std::make_shared<std::vector<StrictCheck>>(std::move(checks));
+    // `resume`: the dispatch was held and must be let go here (the async
+    // answer); otherwise the client side dispatches after this hook.
     const auto finish = [self, store, enforce, would_action, shared](
                             std::optional<GcraResult> result,
-                            std::size_t refused) {
+                            std::size_t refused, bool resume) {
       if (self->client_cancelled) return;
       std::optional<RateLimitHit> hit;
       const std::vector<StrictCheck>& all = *shared;
@@ -1256,20 +1268,24 @@ class ConnectionObserver {
         ApplyRateLimitHit(*self, *hit, enforce, would_action);
         if (self->local) return;
       }
-      self->ResumeDispatch();
+      if (resume) self->ResumeDispatch();
     };
+    // Held first: the answer is posted to this executor, so it runs after
+    // this hook returns, never before the hold.
     exchange.HoldDispatch();
     const bool queued = context_.valkey->Strict(
         *shared, [executor, finish](std::optional<GcraResult> result,
                                     std::size_t refused) {
-          asio::post(executor,
-                     [finish, result, refused] { finish(result, refused); });
+          asio::post(executor, [finish, result, refused] {
+            finish(result, refused, true);
+          });
         });
-    if (!queued) finish(std::nullopt, 0);
+    if (!queued) {
+      exchange.dispatch_held = false;
+      finish(std::nullopt, 0, false);
+    }
   }
 
-  // Score rules adjust the verdict, then the first allow/block rule may
-  // override the action. Matches are added to the reasons as "rule:<name>".
   // Everything rules read about the request; views into `exchange`,
   // `record_`, `ua` and `verdict`, which must outlive it.
   RuleContext RuleContextFor(const Exchange& exchange,
@@ -1358,6 +1374,8 @@ class ConnectionObserver {
     context_.rule_samples->Add(std::move(sample));
   }
 
+  // Score rules adjust the verdict, then the first allow/block rule may
+  // override the action. Matches are added to the reasons as "rule:<name>".
   std::optional<Action> ApplyRules(const Exchange& exchange,
                                    const ScoringInput& input,
                                    std::string_view host,
@@ -1592,7 +1610,34 @@ asio::awaitable<void> Pump(From& from, To& to, Watchdog& watchdog,
   }
 }
 
-// Bidirectional TCP relay with half-close support.
+// One direction of a relay: spliced in the kernel when `splice` (nothing
+// reads the bytes), else copied by Pump. `on_bytes` counts what passed.
+template <typename OnData, typename OnBytes, typename OnEof, typename OnError>
+asio::awaitable<void> Forward(tcp::socket& from, tcp::socket& to,
+                              Watchdog& watchdog, bool splice, OnData on_data,
+                              OnBytes on_bytes, OnEof on_eof,
+                              OnError on_error) {
+  if (splice) {
+    const SpliceEnd end =
+        co_await SpliceStream(from, to, [&watchdog, &on_bytes](std::size_t n) {
+          watchdog.Touch();
+          on_bytes(n);
+        });
+    if (end == SpliceEnd::kEof) {
+      on_eof();
+      co_return;
+    }
+    if (end == SpliceEnd::kError) {
+      on_error();
+      co_return;
+    }
+    GlobalMetrics().splice_unavailable.Inc();
+  }
+  co_await Pump(from, to, watchdog, on_data, on_eof, on_error);
+}
+
+// Bidirectional TCP relay with half-close support. Spliced (zero copy, on
+// Linux) unless something reads the client's bytes.
 asio::awaitable<void> RelayTcp(tcp::socket& client, tcp::socket& upstream,
                                const Config& config,
                                ConnectionObserver& observer) {
@@ -1612,11 +1657,15 @@ asio::awaitable<void> RelayTcp(tcp::socket& client, tcp::socket& upstream,
   auto on_upstream_data = [&observer](std::span<const uint8_t> data) {
     observer.OnUpstreamData(data);
   };
-  co_await (Pump(
-                client, upstream, *idle, on_client_data,
+  const bool splice = SpliceSupported() && !observer.ReadsClientData();
+  if (splice) GlobalMetrics().spliced_connections.Inc();
+  co_await (Forward(
+                client, upstream, *idle, splice, on_client_data,
+                [&observer](std::size_t n) { observer.OnClientBytes(n); },
                 [&upstream] { ShutdownSend(upstream); }, close_both) &&
-            Pump(
-                upstream, client, *idle, on_upstream_data,
+            Forward(
+                upstream, client, *idle, splice, on_upstream_data,
+                [&observer](std::size_t n) { observer.OnBytesToClient(n); },
                 [&client] { ShutdownSend(client); }, close_both));
 }
 

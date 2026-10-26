@@ -98,7 +98,8 @@ class AttackMode {
   // whole-host entries.
   bool Active(const AttackSubject& subject, int64_t now) const;
   bool Active(std::string_view host, int64_t now) const {
-    return Active(AttackSubject{.host = host}, now);
+    return Active(
+        AttackSubject{.host = host, .ip_prefix = {}, .ja4 = {}, .asn = 0}, now);
   }
 
   // Counts a request not covered by an entry (call it only when Active()
@@ -110,7 +111,9 @@ class AttackMode {
                     RateLimitStore* store);
   bool CountRequest(std::string_view host, int64_t now, int64_t now_ns,
                     RateLimitStore* store) {
-    return CountRequest(AttackSubject{.host = host}, now, now_ns, store);
+    return CountRequest(
+        AttackSubject{.host = host, .ip_prefix = {}, .ja4 = {}, .asn = 0}, now,
+        now_ns, store);
   }
 
   // Adds the entry or replaces the one for the same host. False (with

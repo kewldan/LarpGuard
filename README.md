@@ -85,7 +85,9 @@ over ports 443/80, and Traefik moves to loopback behind it.
   loads.
 - 🚦 **Rate limiting.** GCRA with composite keys: IP, subnet, ASN,
   fingerprint, API key, cookie or session. Filters by host, path, method and
-  class. Per-IP connection limits apply before TLS.
+  class. Limits are local, or shared by several gateways through Valkey
+  (`synced`, or `strict` for logins and payments). Per-IP connection limits
+  apply before TLS, and slow request bodies are cut off.
 - 🌍 **ASN, country and reputation.** The iptoasn.com database refreshes in
   the background. It provides `asn`, `asn_org`, `asn_country` and
   `asn_hosting` in rules and events, plus a hosting-network signal.
@@ -409,7 +411,7 @@ src/
 ├── crawler/    crawler catalogue, rDNS, IP ranges, Web Bot Auth
 ├── behavior/   behaviour signals and honeypot marks
 ├── action/     tarpit and decoy responses
-├── ratelimit/  GCRA, sharded store, limit keys
+├── ratelimit/  GCRA, sharded store, limit keys, Valkey modes
 ├── model/      feature extraction and GBDT evaluation
 ├── docker/     Docker API client and botshield.* labels
 ├── admin/      admin API, lists, decision log, under-attack mode

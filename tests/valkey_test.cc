@@ -9,6 +9,7 @@
 #include <signal.h>      // IWYU pragma: keep
 #include <sys/signal.h>  // IWYU pragma: keep
 #include <sys/socket.h>
+#include <sys/types.h>  // IWYU pragma: keep (pid_t on Linux)
 #include <sys/wait.h>
 #include <unistd.h>
 

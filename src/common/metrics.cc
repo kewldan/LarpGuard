@@ -75,6 +75,15 @@ std::string Metrics::RenderPrometheus() const {
   AppendSample(&out, "bot_shield_request_body_timeouts_total", "",
                request_body_timeouts.Get());
 
+  AppendHeader(&out, "bot_shield_spliced_connections_total", "counter",
+               "Passthrough connections relayed with splice(2), no copy.");
+  AppendSample(&out, "bot_shield_spliced_connections_total", "",
+               spliced_connections.Get());
+  AppendHeader(&out, "bot_shield_splice_fallbacks_total", "counter",
+               "Relay directions that could not splice and copied instead.");
+  AppendSample(&out, "bot_shield_splice_fallbacks_total", "",
+               splice_unavailable.Get());
+
   AppendHeader(&out, "bot_shield_valkey_up", "gauge",
                "Valkey reachable for synced and strict rate limits.");
   AppendSample(&out, "bot_shield_valkey_up", "", valkey_up.Get());

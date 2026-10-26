@@ -374,7 +374,8 @@ TEST(AttackModeTest, TotalRateCoversEveryHost) {
   for (int i = 0; !switched && i < 2000; ++i) {
     const std::string host = std::format("site{}.test", i % 50);
     const std::string prefix = std::format("10.{}.0.0/24", i);
-    const AttackSubject who{.host = host, .ip_prefix = prefix, .asn = 0};
+    const AttackSubject who{
+        .host = host, .ip_prefix = prefix, .ja4 = {}, .asn = 0};
     switched = attack.CountRequest(who, kNow, now_ns, &store);
     now_ns += kSecond / 20;
   }
@@ -431,8 +432,10 @@ TEST(AttackModeTest, KeepsHistoryAndSurvivesRestarts) {
   AttackMode restarted(0, 0, 600, path);
   ASSERT_TRUE(restarted.Load(kNow + 700, &error)) << error;
   EXPECT_TRUE(restarted.Active("shop.test", kNow + 700));
-  EXPECT_FALSE(restarted.Active(AttackSubject{.host = "api.test", .asn = 64500},
-                                kNow + 700));
+  EXPECT_FALSE(restarted.Active(
+      AttackSubject{
+          .host = "api.test", .ip_prefix = {}, .ja4 = {}, .asn = 64500},
+      kNow + 700));
   const std::vector<AttackRecord> history = restarted.History(kNow + 700);
   ASSERT_EQ(history.size(), 3u);
   EXPECT_EQ(history[1].entry.host, "api.test");

@@ -11,8 +11,10 @@ ClickHouse, HTTP-прокси с вердиктами и правилами, rat
 и admin API, JS-челлендж и проверка краулеров, fail-open, поведение и
 honeypot, tarpit/decoy, модель-сигнал, gRPC, HTTP/3, горячая перезагрузка.
 Roadmap (раздел 14, «Статус: roadmap»): пробы челленджа, капча, IP-диапазоны
-краулеров, Web Bot Auth, база ASN, XDP. Веб-консоль (`ui/`, ADR-017) —
-отдельное приложение с BFF поверх admin API и ClickHouse.
+краулеров, Web Bot Auth, база ASN, XDP — сделано; отложенное закрыто
+ADR-019 (Valkey, `splice`; io_uring, ONNX, CEL, gossip, мобильный SDK
+отклонены с причинами). Веб-консоль (`ui/`, ADR-017) — отдельное
+приложение с BFF поверх admin API и ClickHouse.
 
 ## Команды
 

@@ -38,6 +38,9 @@ struct Metrics {
   Counter rejected_pending_per_ip;
   Counter request_header_timeouts;
   Counter request_body_timeouts;
+  // Passthrough relays spliced in the kernel, and fallbacks to copying.
+  Counter spliced_connections;
+  Counter splice_unavailable;
   // Valkey (synced and strict rate limits).
   Gauge valkey_up;
   Counter valkey_errors;

@@ -1721,6 +1721,11 @@ whoami: true
     def passthrough_policy():
         fields, _, _ = line_request(https_port, "grpc.a.test", ca_up)
         expect(fields["sni"] == "grpc.a.test", fields)
+        # TLS passthrough is relayed with splice(2) on Linux: no copy.
+        if sys.platform.startswith("linux"):
+            values = read_metrics(metrics_url)
+            expect(values["bot_shield_spliced_connections_total"] > 0, values)
+            expect(values["bot_shield_splice_fallbacks_total"] == 0, values)
 
     def plain_http_passthrough():
         with socket.create_connection(("127.0.0.1", http_port),
@@ -2211,12 +2216,20 @@ metrics:
             statuses = [h1_get(ports[i % 2], "a.test", ca_a,
                                f"/strict/{i}")[0] for i in range(1, 4)]
             expect(statuses == [200, 200, 429], statuses)
+            # Valkey gone: the limit is decided locally, nothing hangs.
+            valkey.terminate()
+            valkey.wait(timeout=10)
+            started = time.monotonic()
+            status, _, _ = h1_get(ports[1], "a.test", ca_a, "/strict/5")
+            expect(status in (200, 429), status)
+            expect(time.monotonic() - started < 3, "answer after Valkey died")
         finally:
             for gateway in gateways:
                 gateway.send_signal(signal.SIGTERM)
                 gateway.wait(timeout=10)
-            valkey.terminate()
-            valkey.wait(timeout=10)
+            if valkey.poll() is None:
+                valkey.terminate()
+                valkey.wait(timeout=10)
 
     checks.run("rate limits: strict, shared through Valkey",
                strict_limits_in_valkey)
