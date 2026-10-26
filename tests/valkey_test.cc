@@ -9,7 +9,6 @@
 #include <signal.h>      // IWYU pragma: keep
 #include <sys/signal.h>  // IWYU pragma: keep
 #include <sys/socket.h>
-#include <sys/types.h>  // IWYU pragma: keep (pid_t on Linux)
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -133,7 +132,7 @@ class ValkeyServer {
  private:
   std::string binary_;
   uint16_t port_ = 0;
-  pid_t pid_ = -1;
+  decltype(fork()) pid_ = -1;
 };
 
 bool WaitUp(const ValkeyLimiter& limiter) {

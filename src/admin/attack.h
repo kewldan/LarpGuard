@@ -29,8 +29,12 @@ struct AttackEntry {
   int64_t until = 0;  // Unix seconds; 0 = until switched off.
   // Only clients with this signature: "ip_prefix" (as in events), "asn" or
   // "ja4", with `value`. Empty: every client of the host.
-  std::string kind;
-  std::string value;
+  // `{}`: GCC's -Wmissing-field-initializers skips members that have an
+  // initializer, and entries are built with designated initializers.
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::string kind{};
+  // NOLINTNEXTLINE(readability-redundant-member-init)
+  std::string value{};
   // Automatic entries: the requests/s threshold that tripped (per host, or
   // across all hosts for host "*").
   int64_t threshold = 0;
