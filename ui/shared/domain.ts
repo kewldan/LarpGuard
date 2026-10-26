@@ -99,7 +99,7 @@ export const RANGE_STEP_SECONDS: Record<Range, number> = {
   '7d': 168 * 60,
 };
 
-export const LIST_KINDS = ['ip', 'ja4', 'header_fp'] as const;
+export const LIST_KINDS = ['ip', 'ja4', 'header_fp', 'asn'] as const;
 export type ListKind = (typeof LIST_KINDS)[number];
 
 export const ROLES = ['viewer', 'operator'] as const;

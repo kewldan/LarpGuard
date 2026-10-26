@@ -388,7 +388,7 @@ function RequestDetailView({
 
   const listEntry = (
     action: 'allow' | 'block',
-    kind: 'ip' | 'ja4',
+    kind: 'ip' | 'ja4' | 'asn',
     value: string,
   ) => {
     addEntry.mutate(
@@ -736,6 +736,19 @@ function RequestDetailView({
                 disabled={addEntry.isPending}
               >
                 Block JA4
+              </Button>
+            ) : null}
+            {row.asn ? (
+              <Button
+                size="sm"
+                variant="dangerOutline"
+                title={asn?.org ?? undefined}
+                onClick={() => {
+                  listEntry('block', 'asn', String(row.asn));
+                }}
+                disabled={addEntry.isPending}
+              >
+                Block AS{row.asn}
               </Button>
             ) : null}
           </>

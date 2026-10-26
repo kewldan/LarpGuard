@@ -312,6 +312,50 @@ describe('changes', () => {
     ).toBe(409);
   });
 
+  it('extend list entries in place and revert that', async () => {
+    const app = build();
+    const session = await signIn(app);
+    const added = (await (
+      await send(app, session, 'POST', '/api/lists', {
+        kind: 'asn',
+        value: 'AS14061',
+        action: 'block',
+        ttl: '1h',
+        comment: 'hoster',
+      })
+    ).json()) as { id: number; value: string; expires_at: number };
+    expect(added.value).toBe('14061');
+    const changed = await send(
+      app,
+      session,
+      'PATCH',
+      `/api/lists/${added.id}`,
+      { ttl: '25h' },
+    );
+    expect(changed.status).toBe(200);
+    const after = (await changed.json()) as { expires_at: number };
+    expect(after.expires_at).toBeGreaterThan(added.expires_at);
+    expect(
+      (await send(app, session, 'PATCH', `/api/lists/${added.id}`, {})).status,
+    ).toBe(400);
+    expect(
+      (await send(app, session, 'PATCH', '/api/lists/9999', { ttl: '1h' }))
+        .status,
+    ).toBe(404);
+    const audit = (await (
+      await send(app, session, 'GET', '/api/audit')
+    ).json()) as { entries: { id: string; what: string }[] };
+    const entry = audit.entries.find((e) => e.what.startsWith('Changed'));
+    expect(entry).toBeDefined();
+    expect(
+      (await send(app, session, 'POST', `/api/audit/${entry?.id ?? ''}/revert`))
+        .status,
+    ).toBe(204);
+    const [restored] = await deps.admin.lists();
+    expect(restored?.expires_at).toBe(added.expires_at);
+    expect(restored?.comment).toBe('hoster');
+  });
+
   it('switch host modes and revert them', async () => {
     const app = build();
     const session = await signIn(app);

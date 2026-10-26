@@ -146,7 +146,7 @@ export async function getJson<T extends z.ZodType>(
 
 export async function sendJson<T extends z.ZodType>(
   schema: T,
-  method: 'POST' | 'PUT' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<z.output<T>> {
@@ -156,7 +156,7 @@ export async function sendJson<T extends z.ZodType>(
 
 // For changes that answer 204.
 export async function send(
-  method: 'POST' | 'PUT' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<void> {

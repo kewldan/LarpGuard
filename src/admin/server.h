@@ -68,7 +68,7 @@ struct AdminResponse {
 //   GET    /config           (the verdict set in effect, without secrets)
 //   GET    /policy[?host=<host>]
 //   POST   /policy           DELETE /policy/<host>   (console host modes)
-//   GET    /lists            POST /lists        DELETE /lists/<id>
+//   GET    /lists            POST /lists        PATCH|DELETE /lists/<id>
 //   GET    /decisions?limit=&host=&class=       GET /decisions/<request id>
 //   GET    /attack           POST /attack       DELETE /attack/<host>
 //   POST   /rules/test       (a condition on sample events)

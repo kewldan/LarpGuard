@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -34,6 +35,8 @@ bool ParseKind(std::string_view text, ListKind* kind) {
     *kind = ListKind::kJa4;
   } else if (text == "header_fp") {
     *kind = ListKind::kHeaderFp;
+  } else if (text == "asn") {
+    *kind = ListKind::kAsn;
   } else {
     return false;
   }
@@ -53,8 +56,44 @@ bool EntryMatches(const ListEntry& entry, const ListMatchInput& input) {
     case ListKind::kHeaderFp:
       return !input.header_fp.empty() &&
              GlobMatch(entry.value, input.header_fp);
+    case ListKind::kAsn:
+      return input.asn != 0 && entry.asn == input.asn;
   }
   return false;
+}
+
+// "64500", "AS64500" or "as64500".
+bool ParseAsn(std::string_view text, uint32_t* asn) {
+  if (text.size() > 2 && (text[0] == 'A' || text[0] == 'a') &&
+      (text[1] == 'S' || text[1] == 's')) {
+    text.remove_prefix(2);
+  }
+  // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
+  const char* begin = text.data();
+  const char* end = begin + text.size();
+  const auto [ptr, ec] = std::from_chars(begin, end, *asn);
+  return !text.empty() && ec == std::errc() && ptr == end && *asn != 0;
+}
+
+// Seconds from a "ttl" field: an integer or a duration like "1h".
+bool ParseTtl(const nlohmann::json& ttl, int64_t* seconds, std::string* error) {
+  *seconds = 0;
+  if (ttl.is_number_integer()) {
+    *seconds = ttl.get<int64_t>();
+  } else if (ttl.is_string()) {
+    std::chrono::milliseconds duration{0};
+    if (!ParseDuration(ttl.get<std::string>(), &duration)) {
+      *error = "ttl must be seconds or a duration like 1h";
+      return false;
+    }
+    *seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+  }
+  if (*seconds <= 0) {
+    *error = "ttl must be positive";
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
@@ -67,6 +106,8 @@ std::string_view ListKindName(ListKind kind) {
       return "ja4";
     case ListKind::kHeaderFp:
       return "header_fp";
+    case ListKind::kAsn:
+      return "asn";
   }
   return "?";
 }
@@ -101,7 +142,7 @@ bool ListStore::FromJson(const nlohmann::json& json, int64_t now,
   };
   ListEntry out;
   if (!ParseKind(string_field("kind"), &out.kind)) {
-    *error = "kind must be ip, ja4 or header_fp";
+    *error = "kind must be ip, ja4, header_fp or asn";
     return false;
   }
   out.value = string_field("value");
@@ -115,6 +156,12 @@ bool ListStore::FromJson(const nlohmann::json& json, int64_t now,
       return false;
     }
     out.value = out.network.ToString();
+  } else if (out.kind == ListKind::kAsn) {
+    if (!ParseAsn(out.value, &out.asn)) {
+      *error = std::format("'{}' is not an AS number", out.value);
+      return false;
+    }
+    out.value = std::to_string(out.asn);
   }
   if (!ParseAction(string_field("action"), &out.action) ||
       (out.action != Action::kAllow && out.action != Action::kBlock)) {
@@ -143,21 +190,7 @@ bool ListStore::FromJson(const nlohmann::json& json, int64_t now,
   }
   if (const auto it = json.find("ttl"); it != json.end()) {
     int64_t seconds = 0;
-    if (it->is_number_integer()) {
-      seconds = it->get<int64_t>();
-    } else if (it->is_string()) {
-      std::chrono::milliseconds duration{0};
-      if (!ParseDuration(it->get<std::string>(), &duration)) {
-        *error = "ttl must be seconds or a duration like 1h";
-        return false;
-      }
-      seconds =
-          std::chrono::duration_cast<std::chrono::seconds>(duration).count();
-    }
-    if (seconds <= 0) {
-      *error = "ttl must be positive";
-      return false;
-    }
+    if (!ParseTtl(*it, &seconds, error)) return false;
     out.expires_at = now + seconds;
   }
   *entry = std::move(out);
@@ -245,6 +278,56 @@ bool ListStore::Remove(uint64_t id, std::string* error) {
   entries_.erase(it);
   count_ = entries_.size();
   return SaveLocked(error);
+}
+
+bool ListStore::Update(uint64_t id, const nlohmann::json& patch, int64_t now,
+                       ListEntry* stored, bool* found, std::string* error) {
+  *found = false;
+  if (!patch.is_object() || patch.empty()) {
+    *error = R"(expected {"ttl": ...} and/or {"comment": ...})";
+    return false;
+  }
+  for (const auto& [key, value] : patch.items()) {
+    if (key != "ttl" && key != "comment") {
+      *error = std::format("cannot change '{}'", key);
+      return false;
+    }
+  }
+  int64_t expires_at = -1;  // Unchanged.
+  if (const auto it = patch.find("ttl"); it != patch.end()) {
+    int64_t seconds = 0;
+    if (it->is_null()) {
+      expires_at = 0;
+    } else if (!ParseTtl(*it, &seconds, error)) {
+      return false;
+    } else {
+      expires_at = now + seconds;
+    }
+  }
+  const auto comment = patch.find("comment");
+  if (comment != patch.end() && !comment->is_string()) {
+    *error = "comment must be a string";
+    return false;
+  }
+  std::scoped_lock lock(mutex_);
+  const auto it = std::ranges::find_if(entries_, [&](const ListEntry& e) {
+    return e.id == id && (e.expires_at == 0 || e.expires_at > now);
+  });
+  if (it == entries_.end()) {
+    *error = std::format("no entry {}", id);
+    return false;
+  }
+  *found = true;
+  ListEntry changed = *it;
+  if (expires_at >= 0) changed.expires_at = expires_at;
+  if (comment != patch.end()) changed.comment = comment->get<std::string>();
+  std::swap(*it, changed);  // `changed` keeps the old entry until saved.
+  if (!SaveLocked(error)) {
+    std::swap(*it, changed);
+    return false;
+  }
+  *stored = *it;
+  return true;
 }
 
 std::vector<ListEntry> ListStore::Entries(int64_t now) const {

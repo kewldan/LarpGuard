@@ -167,7 +167,9 @@ export function createMockAdmin(now: () => number): AdminApi {
     },
     lists: () => {
       sweep();
-      return Promise.resolve([...lists]);
+      // Copies, as the gateway's JSON would be: a later change in place
+      // must not show up in what a caller read before.
+      return Promise.resolve(lists.map((entry) => ({ ...entry })));
     },
     addList: (entry) => {
       const ttl = ttlSeconds(entry.ttl);
@@ -177,7 +179,9 @@ export function createMockAdmin(now: () => number): AdminApi {
         value:
           entry.kind === 'ip' && !entry.value.includes('/')
             ? `${entry.value}/${entry.value.includes(':') ? 128 : 32}`
-            : entry.value,
+            : entry.kind === 'asn'
+              ? entry.value.replace(/^as/i, '')
+              : entry.value,
         action: entry.action,
         host: entry.host ?? '',
         created_at: seconds(),
@@ -192,6 +196,17 @@ export function createMockAdmin(now: () => number): AdminApi {
       const index = lists.findIndex((entry) => entry.id === id);
       if (index >= 0) lists.splice(index, 1);
       return Promise.resolve(index >= 0);
+    },
+    updateList: (id, patch) => {
+      sweep();
+      const entry = lists.find((item) => item.id === id);
+      if (!entry) return Promise.resolve(null);
+      if (patch.ttl !== undefined) {
+        entry.expires_at =
+          patch.ttl === null ? 0 : seconds() + ttlSeconds(patch.ttl);
+      }
+      if (patch.comment !== undefined) entry.comment = patch.comment;
+      return Promise.resolve({ ...entry });
     },
     decision: () => Promise.resolve(null),
     attack: () => {

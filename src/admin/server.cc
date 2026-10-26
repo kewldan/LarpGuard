@@ -244,7 +244,7 @@ AdminResponse Lists(std::string_view method, std::string_view rest,
               stored.value);
     return {201, ListStore::ToJson(stored)};
   }
-  if (!rest.empty() && method == "DELETE") {
+  if (!rest.empty() && (method == "DELETE" || method == "PATCH")) {
     uint64_t id = 0;
     const std::string_view text = rest.substr(1);
     const auto [ptr, ec] =
@@ -253,6 +253,19 @@ AdminResponse Lists(std::string_view method, std::string_view rest,
       return Error(400, "expected /lists/<id>");
     }
     std::string error;
+    if (method == "PATCH") {
+      const nlohmann::json patch = nlohmann::json::parse(body, nullptr, false);
+      if (patch.is_discarded()) return Error(400, "body must be JSON");
+      ListEntry stored;
+      bool found = false;
+      if (!context.lists->Update(id, patch, now_seconds, &stored, &found,
+                                 &error)) {
+        return Error(found ? 500 : (error.starts_with("no entry") ? 404 : 400),
+                     error);
+      }
+      log::Info("admin: list entry {} changed", id);
+      return {200, ListStore::ToJson(stored)};
+    }
     if (!context.lists->Remove(id, &error)) return Error(404, error);
     log::Info("admin: list entry {} removed", id);
     return {200, {{"removed", id}}};

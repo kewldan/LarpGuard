@@ -547,6 +547,7 @@ class ConnectionObserver {
       list_input.ja4 = record_.ja4;
       list_input.header_fp = header_fp;
       list_input.host = host;
+      list_input.asn = record_.asn;
       list_input.now = UnixMillis() / 1000;
       if (const auto match = context_.lists->Match(list_input)) {
         override_action = match->action;

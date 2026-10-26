@@ -43,6 +43,7 @@ import {
   settingsHistorySchema,
   settingsSchema,
   statusSchema,
+  type UpdateListEntry,
 } from '../../shared/api.ts';
 
 import type { Range } from '../../shared/domain.ts';
@@ -366,6 +367,14 @@ export function useAddListEntry() {
   return useChange(
     (entry: NewListEntry) =>
       sendJson(listEntrySchema, 'POST', '/api/lists', entry),
+    [keys.lists],
+  );
+}
+
+export function useUpdateListEntry() {
+  return useChange(
+    ({ id, patch }: { id: number; patch: UpdateListEntry }) =>
+      sendJson(listEntrySchema, 'PATCH', `/api/lists/${id}`, patch),
     [keys.lists],
   );
 }

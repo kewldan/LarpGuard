@@ -278,6 +278,24 @@ log_level: info
       action: 'allow',
     });
     expect(bare).toMatchObject({ host: '', comment: '' });
+    // Extended in place, then made permanent.
+    const extended = await admin.updateList(full.id, {
+      ttl: '2h',
+      comment: 'longer',
+    });
+    expect(extended).toMatchObject({ id: full.id, comment: 'longer' });
+    expect(extended?.expires_at).toBeGreaterThan(full.expires_at);
+    expect((await admin.updateList(full.id, { ttl: null }))?.expires_at).toBe(
+      0,
+    );
+    expect(await admin.updateList(999_999, { ttl: '1h' })).toBeNull();
+    const asn = await admin.addList({
+      kind: 'asn',
+      value: 'AS64500',
+      action: 'block',
+    });
+    expect(asn.value).toBe('64500');
+    expect(await admin.removeList(asn.id)).toBe(true);
     const entries = await admin.lists();
     expect(entries.map((entry) => entry.id)).toEqual(
       expect.arrayContaining([full.id, bare.id]),

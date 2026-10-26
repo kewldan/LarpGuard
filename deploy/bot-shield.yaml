@@ -416,7 +416,7 @@ notify:
 # GET /status, GET /config, GET|POST /policy, DELETE /policy/<host>,
 # GET|POST /settings, POST /settings/validate, GET /settings/history,
 # POST /settings/rollback,
-# GET|POST /lists, DELETE /lists/<id>, GET /decisions[?limit=&host=&class=],
+# GET|POST /lists, PATCH|DELETE /lists/<id>, GET /decisions[?limit=&host=&class=],
 # GET /decisions/<request id>, GET|POST /attack, DELETE /attack/<host>,
 # POST /rules/test, GET /asn?numbers=, POST /reload. The web console
 # (ui/, deploy/console.yaml) uses it.

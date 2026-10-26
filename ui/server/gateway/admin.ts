@@ -23,6 +23,7 @@ import {
   settingsDiffSchema,
   settingsHistorySchema,
   settingsSchema,
+  type UpdateListEntry,
 } from '../../shared/api.ts';
 import type { HostMode } from '../../shared/domain.ts';
 
@@ -191,6 +192,8 @@ export interface AdminApi {
   lists(): Promise<ListEntry[]>;
   addList(entry: NewListEntry): Promise<ListEntry>;
   removeList(id: number): Promise<boolean>;
+  // Null: no such entry (or expired).
+  updateList(id: number, patch: UpdateListEntry): Promise<ListEntry | null>;
   decision(requestId: string): Promise<Decision | null>;
   attack(): Promise<z.infer<typeof attackStateSchema>>;
   enableAttack(host: string, ttl?: string): Promise<void>;
@@ -354,6 +357,8 @@ export function createAdminClient(socketPath: string): AdminApi {
     addList: (entry) => must(gatewayListEntry, 'POST', '/lists', entry),
     removeList: async (id) =>
       (await json(ok, 'DELETE', `/lists/${id}`, undefined, true)) !== null,
+    updateList: (id, patch) =>
+      json(gatewayListEntry, 'PATCH', `/lists/${id}`, patch, true),
     decision: (requestId) =>
       json(
         decisionSchema,

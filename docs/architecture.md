@@ -1199,7 +1199,8 @@ SYN-cookie в XDP требуют ядро ≥ 6.0 — не сделаны: яд�
   |--------------------------------|----------------------------------------------------------------|
   | `GET /status`                  | версия, uptime, режим, сертификаты, хосты из лейблов, соединения, ключи лимитов, NATS |
   | `GET /policy?host=<host>`      | итоговый режим и его источник (`policy.hosts` / `labels` / `mode`), маршрут, лимиты хоста |
-  | `GET /lists`, `POST /lists`    | оперативные allow/block: `kind` (`ip` — адрес или CIDR, `ja4`, `header_fp` — glob), `action`, `host`, `ttl`, `comment` |
+  | `GET /lists`, `POST /lists`    | оперативные allow/block: `kind` (`ip` — адрес или CIDR, `ja4`, `header_fp` — glob, `asn` — номер AS, `AS14061` или `14061`), `action`, `host`, `ttl`, `comment` |
+  | `PATCH /lists/<id>`            | изменить запись на месте: `ttl` — новый срок от сейчас (`null` — бессрочно), `comment` |
   | `DELETE /lists/<id>`           | удалить запись                                                 |
   | `GET /decisions?limit=&host=&class=` | последние решения (кольцевой буфер `admin.decisions`, в памяти) |
   | `GET /decisions/<request_id>`  | одно решение: сигналы, правила, действие, статус, длительность |

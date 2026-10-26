@@ -2,7 +2,7 @@
 // comments above each key. Do not edit; edit that file and regenerate.
 
 export const SETTINGS_HELP: Readonly<Record<string, string>> = {
-  "admin": "Admin API (JSON over a unix socket, mode 0600; no TCP port): curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status GET /status, GET /config, GET|POST /policy, DELETE /policy/<host>, GET|POST /settings, POST /settings/validate, GET /settings/history, POST /settings/rollback, GET|POST /lists, DELETE /lists/<id>, GET /decisions[?limit=&host=&class=], GET /decisions/<request id>, GET|POST /attack, DELETE /attack/<host>, POST /rules/test, GET /asn?numbers=, POST /reload. The web console (ui/, deploy/console.yaml) uses it.",
+  "admin": "Admin API (JSON over a unix socket, mode 0600; no TCP port): curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status GET /status, GET /config, GET|POST /policy, DELETE /policy/<host>, GET|POST /settings, POST /settings/validate, GET /settings/history, POST /settings/rollback, GET|POST /lists, PATCH|DELETE /lists/<id>, GET /decisions[?limit=&host=&class=], GET /decisions/<request id>, GET|POST /attack, DELETE /attack/<host>, POST /rules/test, GET /asn?numbers=, POST /reload. The web console (ui/, deploy/console.yaml) uses it.",
   "admin.attack_file": "Under-attack mode (entries and the history of activations, manual and automatic) survives restarts here (\"\" = memory only). Not a default.",
   "admin.decisions": "Recent decisions kept in memory for GET /decisions.",
   "admin.modes_file": "Host modes set from the console (POST /policy) survive restarts here; they beat policy.hosts and labels (\"\" = memory only). Not a default.",

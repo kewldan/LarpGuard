@@ -292,7 +292,7 @@ curl --unix-socket /run/bot-shield/admin.sock http://bot-shield/status
 | `GET /config` | The verdict settings in effect, without secrets |
 | `GET /policy?host=…` | The effective policy for a host (`GET /policy`: every host with a mode of its own) |
 | `POST /policy`, `DELETE /policy/<host>` | Host mode from the console; beats the config until removed |
-| `/lists` | Allow and block lists with TTLs (they win over rules) |
+| `/lists` | Allow and block lists (IP/CIDR, JA4, header order, AS) with TTLs that can be extended; they win over rules |
 | `GET /decisions/<id>` | Why a request was decided this way (from `X-Bot-Request-Id`) |
 | `/attack` | Under-attack mode: challenge everyone without a token |
 | `POST /rules/test` | Compile a rule condition and run it on sample events |

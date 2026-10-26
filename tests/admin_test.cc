@@ -80,6 +80,61 @@ TEST(ListStoreTest, ValidationAndTtl) {
   EXPECT_EQ(entry.host, "shop.test");
   json["ttl"] = 0;
   EXPECT_FALSE(ListStore::FromJson(json, kNow, &entry, &error));
+
+  ASSERT_TRUE(ListStore::FromJson(Entry("asn", "AS64500", "block"), kNow,
+                                  &entry, &error))
+      << error;
+  EXPECT_EQ(entry.value, "64500");
+  EXPECT_EQ(entry.asn, 64500u);
+  EXPECT_FALSE(
+      ListStore::FromJson(Entry("asn", "AS0", "block"), kNow, &entry, &error));
+  EXPECT_FALSE(
+      ListStore::FromJson(Entry("asn", "AS-1", "block"), kNow, &entry, &error));
+  EXPECT_FALSE(ListStore::FromJson(Entry("asn", "4294967296", "block"), kNow,
+                                   &entry, &error));
+}
+
+TEST(ListStoreTest, AsnEntriesAndUpdates) {
+  ListStore lists("");
+  ListEntry entry;
+  ListEntry stored;
+  std::string error;
+  auto json = Entry("asn", "as14061", "block");
+  json["ttl"] = 60;
+  ASSERT_TRUE(ListStore::FromJson(json, kNow, &entry, &error));
+  ASSERT_TRUE(lists.Add(entry, kNow, &stored, &error)) << error;
+  ListMatchInput input;
+  input.ip = make_address("198.51.100.7");
+  input.host = "shop.test";
+  input.now = kNow;
+  EXPECT_FALSE(lists.Match(input));  // AS unknown.
+  input.asn = 14061;
+  auto match = lists.Match(input);
+  ASSERT_TRUE(match);
+  EXPECT_EQ(match->action, Action::kBlock);
+  input.asn = 15169;
+  EXPECT_FALSE(lists.Match(input));
+
+  // Extended before it expires, then made permanent; comment replaced.
+  bool found = false;
+  ASSERT_TRUE(lists.Update(stored.id, {{"ttl", "1h"}, {"comment", "hoster"}},
+                           kNow + 30, &stored, &found, &error))
+      << error;
+  EXPECT_EQ(stored.expires_at, kNow + 30 + 3600);
+  EXPECT_EQ(stored.comment, "hoster");
+  input.asn = 14061;
+  input.now = kNow + 120;
+  EXPECT_TRUE(lists.Match(input));
+  ASSERT_TRUE(lists.Update(stored.id, {{"ttl", nullptr}}, kNow + 30, &stored,
+                           &found, &error));
+  EXPECT_EQ(stored.expires_at, 0);
+  EXPECT_FALSE(
+      lists.Update(stored.id, {{"value", "1"}}, kNow, &stored, &found, &error));
+  EXPECT_FALSE(found);
+  EXPECT_FALSE(
+      lists.Update(stored.id, {{"ttl", 0}}, kNow, &stored, &found, &error));
+  EXPECT_FALSE(lists.Update(999, {{"ttl", 60}}, kNow, &stored, &found, &error));
+  EXPECT_FALSE(found);
 }
 
 TEST(ListStoreTest, MatchingPrecedenceScopeAndExpiry) {
@@ -806,6 +861,22 @@ TEST_F(AdminServerTest, ListsCrud) {
   response = Call("GET", "/lists");
   ASSERT_EQ(response.body["entries"].size(), 1u);
   EXPECT_EQ(response.body["entries"][0]["comment"], "scraper");
+
+  // Extended (a new expiry from now) and re-commented in place.
+  const std::string path = "/lists/" + std::to_string(id);
+  response = Call("PATCH", path, R"({"ttl":"2h","comment":"still at it"})");
+  ASSERT_EQ(response.status, 200) << response.body.dump();
+  EXPECT_EQ(response.body["expires_at"], kNow + 7200);
+  EXPECT_EQ(response.body["comment"], "still at it");
+  EXPECT_EQ(Call("PATCH", path, R"({"kind":"asn"})").status, 400);
+  EXPECT_EQ(Call("PATCH", path, "{bad").status, 400);
+  EXPECT_EQ(Call("PATCH", "/lists/999", R"({"ttl":60})").status, 404);
+
+  response = Call("POST", "/lists",
+                  R"({"kind":"asn","value":"AS14061","action":"block"})");
+  ASSERT_EQ(response.status, 201) << response.body.dump();
+  EXPECT_EQ(response.body["value"], "14061");
+  EXPECT_EQ(Call("DELETE", "/lists/" + response.body["id"].dump()).status, 200);
 
   EXPECT_EQ(Call("POST", "/lists", "{bad").status, 400);
   EXPECT_EQ(Call("POST", "/lists", R"({"kind":"ip"})").status, 400);

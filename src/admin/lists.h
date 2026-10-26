@@ -18,7 +18,7 @@
 namespace bot_shield {
 
 // What an operational list entry matches on.
-enum class ListKind { kIp, kJa4, kHeaderFp };
+enum class ListKind { kIp, kJa4, kHeaderFp, kAsn };
 
 std::string_view ListKindName(ListKind kind);
 
@@ -26,7 +26,8 @@ std::string_view ListKindName(ListKind kind);
 struct ListEntry {
   uint64_t id = 0;
   ListKind kind = ListKind::kIp;
-  // IP or CIDR (normalized to a network) or a glob for ja4 / header_fp.
+  // IP or CIDR (normalized to a network), a glob for ja4 / header_fp, or
+  // an AS number ("64500"; "AS64500" is accepted and normalized).
   std::string value;
   Action action = Action::kBlock;
   // Host pattern ("shop.test", "*.shop.test"); empty: every host.
@@ -34,7 +35,8 @@ struct ListEntry {
   int64_t created_at = 0;  // Unix seconds.
   int64_t expires_at = 0;  // Unix seconds; 0: never.
   std::string comment;
-  Network network;  // For kIp.
+  Network network;   // For kIp.
+  uint32_t asn = 0;  // For kAsn.
 };
 
 struct ListMatchInput {
@@ -42,7 +44,8 @@ struct ListMatchInput {
   std::string_view ja4;
   std::string_view header_fp;
   std::string_view host;
-  int64_t now = 0;  // Unix seconds.
+  uint32_t asn = 0;  // 0: unknown (no ASN database or no match).
+  int64_t now = 0;   // Unix seconds.
 };
 
 struct ListMatch {
@@ -67,6 +70,11 @@ class ListStore {
   // Validates `entry` (id and created_at are assigned) and stores it.
   bool Add(ListEntry entry, int64_t now, ListEntry* stored, std::string* error);
   bool Remove(uint64_t id, std::string* error);
+  // Changes an entry in place: {"ttl": seconds or "1h"} sets a new expiry
+  // from `now` (null: never expires), {"comment": "..."} replaces the
+  // comment. False with `error` (and `*found` false) for an unknown id.
+  bool Update(uint64_t id, const nlohmann::json& patch, int64_t now,
+              ListEntry* stored, bool* found, std::string* error);
   std::vector<ListEntry> Entries(int64_t now) const;
   std::optional<ListMatch> Match(const ListMatchInput& input) const;
 

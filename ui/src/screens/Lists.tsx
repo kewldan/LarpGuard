@@ -1,5 +1,6 @@
 // Lists: the gateway's operational allow and block entries (addresses or
-// networks, JA4 and header-order globs), checked before rules and scoring.
+// networks, JA4 and header-order globs, autonomous systems), checked
+// before rules and scoring.
 
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { type SubmitEvent, useMemo, useState } from 'react';
@@ -13,6 +14,7 @@ import {
   useAddListEntry,
   useLists,
   useRemoveListEntry,
+  useUpdateListEntry,
 } from '../lib/queries.ts';
 import { Button } from '../ui/Button.tsx';
 import { PageHead } from '../ui/Card.tsx';
@@ -33,13 +35,18 @@ const KIND_NAMES: Record<ListKind, string> = {
   ip: 'ip / cidr',
   ja4: 'ja4',
   header_fp: 'header fp',
+  asn: 'asn',
 };
 
 const PLACEHOLDERS: Record<ListKind, string> = {
   ip: '203.0.113.0/24 or 2001:db8::/48',
   ja4: 't13d1312h2_f57a46bbacb6_* (glob)',
   header_fp: 'a1f3c9e2d4b5 (glob)',
+  asn: 'AS14061 or 14061',
 };
+
+// Lifetime added by "Extend", on top of what is left.
+const EXTEND_SECONDS = 24 * 3600;
 
 const TTLS = [
   { value: '1h', label: 'ttl 1h' },
@@ -88,6 +95,14 @@ function validValue(kind: ListKind, value: string): string | null {
   if (kind === 'ip') {
     const ok = v4(value) !== null || /^[0-9a-f:]+(\/\d{1,3})?$/i.test(value);
     return ok ? null : 'Expected an IPv4 or IPv6 address or network.';
+  }
+  if (kind === 'asn') {
+    const number = Number(value.replace(/^as/i, ''));
+    return /^(as)?\d{1,10}$/i.test(value) &&
+      number > 0 &&
+      number <= 4_294_967_295
+      ? null
+      : 'Expected an AS number like AS14061.';
   }
   return /^[\w*.:,-]+$/.test(value) ? null : 'Letters, digits and * only.';
 }
@@ -219,6 +234,7 @@ function AddForm({ tab }: { tab: 'allow' | 'block' }) {
 export function Lists() {
   const lists = useLists();
   const remove = useRemoveListEntry();
+  const update = useUpdateListEntry();
   const toast = useToast();
   const canOperate = useCanOperate();
   const search = useSearch({ from: '/lists' });
@@ -438,7 +454,7 @@ export function Lists() {
               style={{
                 display: 'grid',
                 gridTemplateColumns:
-                  '110px minmax(200px, 2fr) 130px minmax(160px, 2fr) 150px 90px 110px',
+                  '110px minmax(200px, 2fr) 130px minmax(160px, 2fr) 150px 90px 180px',
                 color: 'var(--color-text-3)',
                 fontSize: 12,
                 borderBottom: '1px solid var(--color-line)',
@@ -481,7 +497,7 @@ export function Lists() {
                   style={{
                     display: 'grid',
                     gridTemplateColumns:
-                      '110px minmax(200px, 2fr) 130px minmax(160px, 2fr) 150px 90px 110px',
+                      '110px minmax(200px, 2fr) 130px minmax(160px, 2fr) 150px 90px 180px',
                     alignItems: 'center',
                     minHeight: 48,
                     borderBottom: '1px solid var(--color-line)',
@@ -609,6 +625,35 @@ export function Lists() {
                     role="cell"
                     style={{ padding: '6px 14px', textAlign: 'right' }}
                   >
+                    {canOperate && left !== null ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`Extend ${entry.value} by 24 hours`}
+                        title="Add 24 hours to what is left"
+                        disabled={update.isPending}
+                        onClick={() => {
+                          update.mutate(
+                            {
+                              id: entry.id,
+                              patch: {
+                                ttl: `${Math.max(0, Math.round(left)) + EXTEND_SECONDS}s`,
+                              },
+                            },
+                            {
+                              onSuccess: () => {
+                                toast(`Extended #${entry.id} by 24h`);
+                              },
+                              onError: (error) => {
+                                toast(error.message);
+                              },
+                            },
+                          );
+                        }}
+                      >
+                        +24h
+                      </Button>
+                    ) : null}
                     {canOperate ? (
                       <Button
                         size="sm"

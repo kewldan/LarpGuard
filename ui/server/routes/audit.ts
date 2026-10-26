@@ -31,6 +31,26 @@ type Revert = (deps: Deps) => Promise<{ what: string; after?: unknown }>;
 function planRevert(entry: StoredEntry): Revert | null {
   if (entry.kind === 'list') {
     const added = listEntrySchema.safeParse(entry.after);
+    const removed = listEntrySchema.safeParse(entry.before);
+    if (added.success && removed.success) {
+      // A change in place: back to the old lifetime and comment.
+      const old = removed.data;
+      return async (deps) => {
+        const now = Math.floor(deps.now() / 1000);
+        if (old.expires_at !== 0 && old.expires_at <= now) {
+          fail(409, 'the old lifetime would have ended by now');
+        }
+        const restored = await deps.admin.updateList(old.id, {
+          ttl: old.expires_at === 0 ? null : `${old.expires_at - now}s`,
+          comment: old.comment,
+        });
+        if (!restored) fail(409, 'the entry is gone already');
+        return {
+          what: `Changed #${old.id} back: ${describeEntry(restored, deps.now())}`,
+          after: restored,
+        };
+      };
+    }
     if (added.success) {
       return async (deps) => {
         if (!(await deps.admin.removeList(added.data.id))) {
@@ -39,7 +59,6 @@ function planRevert(entry: StoredEntry): Revert | null {
         return { what: `Removed: ${describeEntry(added.data, deps.now())}` };
       };
     }
-    const removed = listEntrySchema.safeParse(entry.before);
     if (removed.success) {
       return async (deps) => {
         const restored = await restoreEntry(deps, removed.data);

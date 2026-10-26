@@ -772,6 +772,22 @@ export const newListEntrySchema = z.object({
 });
 export type NewListEntry = z.infer<typeof newListEntrySchema>;
 
+// PATCH /api/lists/:id: a new lifetime from now (null: never expires)
+// and/or a new comment.
+export const updateListEntrySchema = z
+  .object({
+    ttl: z
+      .string()
+      .regex(/^\d+(ms|s|m|h)$/)
+      .nullable()
+      .optional(),
+    comment: z.string().max(200).optional(),
+  })
+  .refine((patch) => patch.ttl !== undefined || patch.comment !== undefined, {
+    message: 'nothing to change',
+  });
+export type UpdateListEntry = z.infer<typeof updateListEntrySchema>;
+
 // --- Rate limits -------------------------------------------------------------
 
 export const limitsSchema = z.object({

@@ -1,5 +1,5 @@
-// GET /api/lists, POST /api/lists, DELETE /api/lists/:id: the gateway's
-// operational allow/block lists.
+// GET /api/lists, POST /api/lists, PATCH /api/lists/:id (extend, comment),
+// DELETE /api/lists/:id: the gateway's operational allow/block lists.
 
 import type { Hono } from 'hono';
 
@@ -8,6 +8,7 @@ import {
   listEntrySchema,
   listsSchema,
   newListEntrySchema,
+  updateListEntrySchema,
 } from '../../shared/api.ts';
 import type { AppEnv, Deps } from '../deps.ts';
 import { fail, jsonBody, parseOr400, send } from '../http.ts';
@@ -90,6 +91,37 @@ export function registerLists(app: Hono<AppEnv>): void {
       ],
     });
     return send(c, listEntrySchema, stored, 201);
+  });
+
+  app.patch('/api/lists/:id', requireRole('operator'), async (c) => {
+    const deps = c.get('deps');
+    const id = Number(c.req.param('id'));
+    if (!Number.isSafeInteger(id) || id <= 0) fail(400, 'invalid id');
+    const patch = parseOr400(updateListEntrySchema, await jsonBody(c));
+    const before = (await deps.admin.lists()).find((item) => item.id === id);
+    const after = before ? await deps.admin.updateList(id, patch) : null;
+    if (!before || !after) return fail(404, 'no such entry');
+    const ttl =
+      after.expires_at === 0
+        ? 'never expires'
+        : `expires in ${formatTtl(Math.max(1, after.expires_at - Math.floor(deps.now() / 1000)))}`;
+    deps.audit.append({
+      kind: 'list',
+      actor: actor(c),
+      what: `Changed #${id}: ${describeEntry(after, deps.now())}`,
+      before,
+      after,
+      facts: [
+        ['Entry', `#${id}`],
+        ...(patch.ttl !== undefined
+          ? ([['Lifetime', ttl]] as [string, string][])
+          : []),
+        ...(patch.comment !== undefined
+          ? ([['Comment', patch.comment]] as [string, string][])
+          : []),
+      ],
+    });
+    return send(c, listEntrySchema, after);
   });
 
   app.delete('/api/lists/:id', requireRole('operator'), async (c) => {
