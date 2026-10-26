@@ -3,9 +3,9 @@
 // what-if against live traffic; an operator applies the result to the
 // gateway's settings layer (ADR-018), or copies the YAML for the file.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import type { Limit, Limits } from '../../shared/api.ts';
+import type { ConsumerKey, Limit, Limits } from '../../shared/api.ts';
 import { useCanOperate } from '../app/session.ts';
 import { limitSpec, limitYaml, perSecond, rateOf } from '../lib/config-yaml.ts';
 import { compact, count, duration } from '../lib/format.ts';
@@ -32,8 +32,23 @@ function scope(limit: Limit): string {
   return parts.join(' · ');
 }
 
+// How a limit tells clients apart, as far as events can: by clearance
+// session, by address hash (key `ip`), else by network.
+function consumerKey(limit: Limit | undefined): ConsumerKey {
+  if (limit?.key.includes('session')) return 'session';
+  if (limit?.key.includes('ip')) return 'ip_hash';
+  return 'ip_prefix';
+}
+
+function consumerName(by: ConsumerKey, key: string, prefix: string): string {
+  if (by === 'session') return `session ${key.slice(0, 8)}…`;
+  if (by === 'ip_hash') return `client ${key.slice(0, 8)}… · ${prefix}`;
+  return key;
+}
+
 export function RateLimits() {
-  const limits = useLimits();
+  const [by, setBy] = useState<ConsumerKey>('ip_prefix');
+  const limits = useLimits(by);
   const copy = useCopy();
   const toast = useToast();
   const canOperate = useCanOperate();
@@ -65,6 +80,10 @@ export function RateLimits() {
   const setBurst = (value: number) => {
     setWhatIf({ key: limitKey, rps, burst: value });
   };
+  const wanted = consumerKey(current);
+  useEffect(() => {
+    if (wanted !== by) setBy(wanted);
+  }, [wanted, by]);
 
   if (limits.isError)
     return (
@@ -442,7 +461,7 @@ export function RateLimits() {
               const limited = c.refused > 0;
               return (
                 <div
-                  key={c.ip_prefix}
+                  key={c.key}
                   style={{
                     display: 'grid',
                     gridTemplateColumns: 'minmax(150px, 1.3fr) 2fr 64px 84px',
@@ -463,7 +482,11 @@ export function RateLimits() {
                         textOverflow: 'ellipsis',
                       }}
                     >
-                      {c.ip_prefix}
+                      {consumerName(
+                        limits.data.consumers_by,
+                        c.key,
+                        c.ip_prefix,
+                      )}
                     </div>
                     <div
                       style={{ fontSize: 11.5, color: 'var(--color-text-3)' }}
@@ -540,8 +563,12 @@ export function RateLimits() {
                 color: 'var(--color-text-3)',
               }}
             >
-              Bar = current rate of the network. Tick = the rate above. Events
-              carry networks, not addresses: one network can hold many clients.
+              Bar = current rate. Tick = the rate above.{' '}
+              {limits.data.consumers_by === 'session'
+                ? 'Grouped by clearance session, the key of this limit.'
+                : limits.data.consumers_by === 'ip_hash'
+                  ? 'Grouped by address hash (the key ip): events carry no full address.'
+                  : 'Grouped by network: one network can hold many clients.'}
             </div>
           </div>
         </section>

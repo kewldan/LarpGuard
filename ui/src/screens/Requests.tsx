@@ -375,6 +375,85 @@ const STEP_TEXT: Record<
   },
 };
 
+// One step of the crawler / signed agent check ("rdns:verified:x.com") in
+// words, and whether it speaks for the client.
+function crawlerStep(step: string): { text: string; ok: boolean | null } {
+  const [kind = '', ...rest] = step.split(':');
+  const value = rest.join(':');
+  switch (kind) {
+    case 'claim':
+      return { text: `User-Agent claims ${value}`, ok: null };
+    case 'ranges':
+      return {
+        text:
+          value === 'inside'
+            ? 'Address in its published IP ranges'
+            : value === 'outside'
+              ? 'Address outside its published IP ranges'
+              : value === 'none'
+                ? 'No published IP ranges (loaded) for it'
+                : 'IP ranges off (crawlers.ip_ranges)',
+        ok: value === 'inside' ? true : value === 'outside' ? false : null,
+      };
+    case 'rdns': {
+      const [outcome = '', domain = ''] = value.split(':');
+      const texts: Record<string, string> = {
+        verified: `Reverse DNS in ${domain}, forward lookup confirms the address`,
+        no_ptr: 'Reverse DNS: no PTR record',
+        outside_domains: "Reverse DNS: a name outside the crawler's domains",
+        forward_mismatch: 'Reverse DNS: the name does not resolve back',
+        queued: 'Reverse DNS: lookup running (scored as unverified meanwhile)',
+        skipped: 'Reverse DNS: not needed, the ranges decided',
+        no_domains: 'Reverse DNS: the crawler publishes no domains',
+        off: 'Reverse DNS off (crawlers.verify)',
+      };
+      return {
+        text: texts[outcome] ?? `Reverse DNS: ${value}`,
+        ok:
+          outcome === 'verified'
+            ? true
+            : ['no_ptr', 'outside_domains', 'forward_mismatch'].includes(
+                  outcome,
+                )
+              ? false
+              : null,
+      };
+    }
+    case 'web_bot_auth': {
+      const [outcome = '', agent = ''] = value.split(/:(.*)/s);
+      return {
+        text:
+          outcome === 'verified'
+            ? `Web Bot Auth signature of ${agent} verifies`
+            : outcome === 'invalid'
+              ? 'Web Bot Auth signature does not verify'
+              : 'Web Bot Auth: fetching the agent’s keys',
+        ok:
+          outcome === 'verified' ? true : outcome === 'invalid' ? false : null,
+      };
+    }
+    case 'result':
+      return {
+        text:
+          value === 'verified'
+            ? 'Verified crawler: not scored'
+            : value === 'trusted_agent'
+              ? 'Trusted signed agent: verified bot'
+              : value === 'fake'
+                ? 'Fake: signal fake_crawler'
+                : 'Not decided yet',
+        ok:
+          value === 'verified' || value === 'trusted_agent'
+            ? true
+            : value === 'fake'
+              ? false
+              : null,
+      };
+    default:
+      return { text: step, ok: null };
+  }
+}
+
 // The client's way through challenges around this request (same ip_hash).
 function ChallengeHistory({
   steps,
@@ -756,6 +835,52 @@ function RequestDetailView({
           ))}
         </div>
 
+        {row.crawler_check.length > 0 ? (
+          <>
+            <h3 className={styles.h3}>Crawler check · step by step</h3>
+            <ol
+              aria-label="Crawler check"
+              style={{
+                listStyle: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+                fontSize: 12.5,
+              }}
+            >
+              {row.crawler_check.map((step) => {
+                const look = crawlerStep(step);
+                return (
+                  <li key={step} style={{ display: 'flex', gap: 8 }}>
+                    <span
+                      role="img"
+                      aria-label={
+                        look.ok === null
+                          ? 'step'
+                          : look.ok
+                            ? 'passed'
+                            : 'failed'
+                      }
+                      style={{
+                        width: 14,
+                        color:
+                          look.ok === null
+                            ? 'var(--color-text-3)'
+                            : look.ok
+                              ? 'var(--color-healthy)'
+                              : 'var(--color-blocked-text)',
+                      }}
+                    >
+                      {look.ok === null ? '·' : look.ok ? '✓' : '✕'}
+                    </span>
+                    <span>{look.text}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          </>
+        ) : null}
+
         <h3 className={styles.h3}>Challenge history · this client</h3>
         <ChallengeHistory
           steps={detail.challenges}
@@ -782,6 +907,8 @@ function RequestDetailView({
             model {row.model_score === null ? '—' : row.model_score.toFixed(2)}
           </div>
           <div>rate limit {row.rate_limit || '—'}</div>
+          <div>alpn {row.alpn || '—'}</div>
+          <div>session {row.session ? `${row.session.slice(0, 8)}…` : '—'}</div>
         </div>
         <div
           style={{ fontSize: 11.5, color: 'var(--color-text-3)', marginTop: 8 }}

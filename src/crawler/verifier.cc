@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <unistd.h>  // IWYU pragma: keep (socklen_t on Linux)
 
+#include <algorithm>
 #include <array>
 #include <asio/ip/address.hpp>
 #include <asio/ip/address_v4.hpp>
@@ -13,8 +14,10 @@
 #include <cstring>
 #include <format>
 #include <mutex>
+#include <span>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -80,13 +83,17 @@ CrawlerVerifier::~CrawlerVerifier() {
 }
 
 CrawlerStatus CrawlerVerifier::Check(const KnownCrawler& crawler,
-                                     const asio::ip::address& peer,
-                                     int64_t now) {
+                                     const asio::ip::address& peer, int64_t now,
+                                     std::string* why) {
   const asio::ip::address ip = Normalize(peer);
   std::string key = std::format("{}|{}", crawler.id, ip.to_string());
+  if (why != nullptr) *why = "queued";
   const std::scoped_lock lock(mutex_);
   if (const auto it = cache_.find(key); it != cache_.end()) {
-    if (it->second.expires > now) return it->second.status;
+    if (it->second.expires > now) {
+      if (why != nullptr) *why = it->second.why;
+      return it->second.status;
+    }
     cache_.erase(it);
   }
   if (in_flight_.contains(key)) return CrawlerStatus::kPending;
@@ -117,7 +124,8 @@ void CrawlerVerifier::Run(const std::stop_token& stop) {
       queue_.pop_front();
       ++running_;
     }
-    const bool verified = Verify(*job.crawler, job.ip);
+    std::string why;
+    const bool verified = Verify(*job.crawler, job.ip, &why);
     (verified ? GlobalMetrics().crawlers_verified
               : GlobalMetrics().crawlers_failed)
         .Inc();
@@ -128,7 +136,7 @@ void CrawlerVerifier::Run(const std::stop_token& stop) {
     if (cache_.size() >= settings_.max_entries) cache_.clear();
     cache_[job.key] = {
         verified ? CrawlerStatus::kVerified : CrawlerStatus::kFailed,
-        job.queued + ttl};
+        job.queued + ttl, std::move(why)};
     in_flight_.erase(job.key);
     --running_;
     if (queue_.empty() && running_ == 0) idle_.notify_all();
@@ -136,12 +144,28 @@ void CrawlerVerifier::Run(const std::stop_token& stop) {
 }
 
 bool CrawlerVerifier::Verify(const KnownCrawler& crawler,
-                             const asio::ip::address& ip) const {
+                             const asio::ip::address& ip,
+                             std::string* why) const {
   const std::string name = resolver_.reverse(ip);
-  if (name.empty() || !HostnameInDomains(name, crawler.domains)) return false;
-  for (const asio::ip::address& address : resolver_.forward(name)) {
-    if (Normalize(address) == ip) return true;
+  if (name.empty()) {
+    *why = "no_ptr";
+    return false;
   }
+  const auto domain =
+      std::ranges::find_if(crawler.domains, [&](std::string_view candidate) {
+        return HostnameInDomains(name, std::span(&candidate, 1));
+      });
+  if (domain == crawler.domains.end()) {
+    *why = "outside_domains";
+    return false;
+  }
+  for (const asio::ip::address& address : resolver_.forward(name)) {
+    if (Normalize(address) == ip) {
+      *why = std::format("verified:{}", *domain);
+      return true;
+    }
+  }
+  *why = "forward_mismatch";
   return false;
 }
 

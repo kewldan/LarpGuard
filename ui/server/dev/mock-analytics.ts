@@ -308,23 +308,27 @@ export function createMockAnalytics(
       }
       return Promise.resolve(map);
     },
-    consumers(seconds) {
+    consumers(seconds, by) {
       return Promise.resolve(
         top(
-          [...groupBy(since(seconds), (e) => e.ip_prefix)].map(
-            ([prefix, group]) => ({
-              ip_prefix: prefix,
-              ip_hash_count: new Set(group.map((e) => e.ip_hash)).size,
-              host:
-                top(
-                  [...groupBy(group, (e) => e.host)],
-                  ([, g]) => g.length,
-                  1,
-                )[0]?.[0] ?? '',
-              rps: group.length / seconds,
-              refused: group.filter((e) => e.rate_limit !== '').length,
-            }),
-          ),
+          [
+            ...groupBy(
+              since(seconds).filter((e) => e[by] !== ''),
+              (e) => e[by],
+            ),
+          ].map(([key, group]) => ({
+            key,
+            ip_prefix: group[0]?.ip_prefix ?? '',
+            ip_hash_count: new Set(group.map((e) => e.ip_hash)).size,
+            host:
+              top(
+                [...groupBy(group, (e) => e.host)],
+                ([, g]) => g.length,
+                1,
+              )[0]?.[0] ?? '',
+            rps: group.length / seconds,
+            refused: group.filter((e) => e.rate_limit !== '').length,
+          })),
           (row) => row.rps,
           10,
         ),

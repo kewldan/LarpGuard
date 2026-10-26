@@ -6,6 +6,8 @@ import { z } from 'zod';
 
 import {
   type ChallengeStep,
+  type Consumer,
+  type ConsumerKey,
   type FingerprintKind,
   READINESS_EVIDENCE,
   type Readiness,
@@ -87,6 +89,7 @@ export interface SampleEvent {
   would_action: string;
   tcp_rtt_us: number | null;
   handshake_us: number | null;
+  alpn: string;
 }
 
 const sampleRow = z.object({
@@ -112,6 +115,7 @@ const sampleRow = z.object({
   would_action: z.string(),
   tcp_rtt_us: z.coerce.number().nullable(),
   handshake_us: z.coerce.number().nullable(),
+  alpn: z.string(),
 });
 
 export interface FingerprintStats {
@@ -241,15 +245,7 @@ export interface Analytics {
     samples: SampleEvent[];
   }>;
   refusedByLimit(seconds: number): Promise<Map<string, number>>;
-  consumers(seconds: number): Promise<
-    {
-      ip_prefix: string;
-      ip_hash_count: number;
-      host: string;
-      rps: number;
-      refused: number;
-    }[]
-  >;
+  consumers(seconds: number, by: ConsumerKey): Promise<Consumer[]>;
   hostStats(seconds: number): Promise<HostCounts[]>;
   impostors(seconds: number): Promise<
     {
@@ -476,10 +472,11 @@ export function createAnalytics(database: string, run: Run): Analytics {
 
     refusedByLimit: (seconds) => nameCounts(sql.refusedByLimit(seconds)),
 
-    consumers: (seconds) =>
+    consumers: (seconds, by) =>
       run(
-        sql.consumers(seconds, 10),
+        sql.consumers(seconds, 10, by),
         z.object({
+          key: z.string(),
           ip_prefix: z.string(),
           ip_hash_count: num,
           host: z.string(),

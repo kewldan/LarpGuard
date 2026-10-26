@@ -100,6 +100,33 @@ TEST(EventsTest, RequestEvent) {
 #endif
 }
 
+TEST(EventsTest, RequestEventWithOutcome) {
+  HttpRequest request;
+  request.version = "2";
+  request.method = "GET";
+  request.authority = "shop.test";
+  request.target = "/";
+  ConnectionRecord record = Record();
+  record.alpn = "h2";
+  RequestOutcome outcome;
+  outcome.status = 200;
+  outcome.session = "0123456789abcdef";
+  outcome.crawler_check = {"claim:google", "ranges:outside",
+                           "rdns:outside_domains", "result:fake"};
+  const EventSettings settings{"inst", "salt", true};
+  const auto json = nlohmann::json::parse(
+      RequestEventJson(record, request, 1, settings, 2000, &outcome));
+  EXPECT_EQ(json["alpn"], "h2");
+  EXPECT_EQ(json["session"], "0123456789abcdef");
+  EXPECT_EQ(json["crawler_check"].size(), 4u);
+  EXPECT_EQ(json["crawler_check"][3], "result:fake");
+  // Absent when nothing was claimed and there is no clearance.
+  const auto plain = nlohmann::json::parse(RequestEventJson(
+      record, request, 2, settings, 2000, &(outcome = RequestOutcome())));
+  EXPECT_FALSE(plain.contains("crawler_check"));
+  EXPECT_FALSE(plain.contains("session"));
+}
+
 TEST(EventsTest, InvalidUtf8IsReplaced) {
   HttpRequest request;
   request.version = "1.1";

@@ -274,6 +274,16 @@ export class MockTraffic {
     const handshake = client.relayed
       ? 120 + spread * 140
       : tcpRtt + 3 + spread * 12;
+    // In this order: the same random() calls as before the fields below.
+    const prefix = PREFIXES[Math.floor(random() * PREFIXES.length)] ?? '';
+    // A few thousand clients, so "clients" counts mean something.
+    const clientId = Math.floor(random() * 3000);
+    const ipHash = clientHash(clientId);
+    const crawler = reasons.find(
+      (reason) =>
+        reason.startsWith('verified_crawler:') ||
+        reason.startsWith('fake_crawler:'),
+    );
     events.push({
       ts,
       request_id: id,
@@ -281,9 +291,8 @@ export class MockTraffic {
       method: path === '/login' ? 'POST' : 'GET',
       path_group: path,
       path,
-      ip_prefix: PREFIXES[Math.floor(random() * PREFIXES.length)] ?? '',
-      // A few thousand clients, so "clients" counts mean something.
-      ip_hash: clientHash(Math.floor(random() * 3000)),
+      ip_prefix: prefix,
+      ip_hash: ipHash,
       asn: asnInfo?.asn ?? 0,
       score,
       class: client.class,
@@ -318,6 +327,27 @@ export class MockTraffic {
       model_score: null,
       tcp_rtt_us: Math.round(tcpRtt * 1000),
       handshake_us: Math.round(handshake * 1000),
+      alpn: client.h2_fp ? 'h2' : 'http/1.1',
+      // People who solved a challenge keep a session per client.
+      session:
+        client.class === 'human'
+          ? `${ipHash}${ipHash.slice(0, 8)}`.slice(0, 16)
+          : '',
+      crawler_check: crawler
+        ? crawler.startsWith('verified_crawler:')
+          ? [
+              `claim:${crawler.slice(17)}`,
+              'ranges:inside',
+              'rdns:skipped',
+              'result:verified',
+            ]
+          : [
+              `claim:${crawler.slice(13)}`,
+              'ranges:outside',
+              'rdns:outside_domains',
+              'result:fake',
+            ]
+        : [],
     });
   }
 }

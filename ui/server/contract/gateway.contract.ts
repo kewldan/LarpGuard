@@ -396,6 +396,7 @@ log_level: info
       ip_prefix: '192.0.2.0/24',
       tcp_rtt_us: 1200,
       handshake_us: null,
+      alpn: 'h2',
     };
     const result = await admin.testRule('path ~ "/admin*" and score >= 50', [
       sample,
@@ -404,6 +405,12 @@ log_level: info
     ]);
     expect(result.evaluated).toBe(3);
     expect(result.matched).toEqual([0]);
+    // ALPN is in events now: exact on samples.
+    const alpn = await admin.testRule('alpn == "h2"', [
+      sample,
+      { ...sample, alpn: 'http/1.1' },
+    ]);
+    expect(alpn.matched).toEqual([0]);
   });
 
   it('AS numbers', async () => {

@@ -140,7 +140,10 @@ CREATE TABLE IF NOT EXISTS bot_shield.req_queue
     signed_agent       String,
     asn                UInt32,
     tcp_rtt_us         Nullable(UInt32),
-    handshake_us       Nullable(UInt32)
+    handshake_us       Nullable(UInt32),
+    alpn               String,
+    session            String,
+    crawler_check      Array(String)
 )
 ENGINE = NATS
 SETTINGS nats_url = 'nats:4222',
@@ -216,7 +219,19 @@ CREATE TABLE IF NOT EXISTS bot_shield.req
     -- when unknown (QUIC, TLS 1.2, other platforms). Signal
     -- relayed_connection when the second is far larger.
     tcp_rtt_us         Nullable(UInt32),
-    handshake_us       Nullable(UInt32)
+    handshake_us       Nullable(UInt32),
+    -- Negotiated ALPN of the connection (h2, http/1.1; h3 for QUIC).
+    alpn               LowCardinality(String),
+    -- Clearance token session (16 hex digits of the token's hash): a
+    -- pseudonym that joins a client's requests, the rate limit key
+    -- "session"; empty without a valid token.
+    session            String,
+    -- Steps of the check of a claimed crawler or signed agent:
+    -- claim:<id>, ranges:inside|outside|none|off,
+    -- rdns:verified:<domain>|no_ptr|outside_domains|forward_mismatch|
+    -- queued|skipped|no_domains|off, web_bot_auth:verified:<agent>|
+    -- invalid|pending, result:verified|fake|pending|trusted_agent.
+    crawler_check      Array(LowCardinality(String))
 )
 ENGINE = MergeTree
 PARTITION BY toDate(ts)
@@ -234,6 +249,9 @@ ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS signed_agent LowCardinality(
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS asn UInt32;
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS tcp_rtt_us Nullable(UInt32);
 ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS handshake_us Nullable(UInt32);
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS alpn LowCardinality(String);
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS session String;
+ALTER TABLE bot_shield.req ADD COLUMN IF NOT EXISTS crawler_check Array(LowCardinality(String));
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS bot_shield.req_mv TO bot_shield.req AS
 SELECT fromUnixTimestamp64Milli(toInt64(ts_ms), 'UTC') AS ts, * EXCEPT ts_ms

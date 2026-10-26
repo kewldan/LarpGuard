@@ -13,6 +13,7 @@ import {
   attackSchema,
   auditSchema,
   type CandidateRange,
+  type ConsumerKey,
   candidatesSchema,
   crawlersSchema,
   type EnableAttack,
@@ -215,11 +216,12 @@ export function useLists() {
   });
 }
 
-export function useLimits() {
+export function useLimits(by: ConsumerKey) {
   return useQuery({
-    queryKey: keys.limits,
+    queryKey: [...keys.limits, by],
     queryFn: ({ signal }) =>
-      getJson(limitsSchema, '/api/limits', undefined, signal),
+      getJson(limitsSchema, '/api/limits', { by }, signal),
+    placeholderData: keepPreviousData,
     refetchInterval: 3000,
   });
 }

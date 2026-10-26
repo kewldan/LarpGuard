@@ -129,6 +129,17 @@ TEST(CrawlerVerifierTest, VerifiesWithReverseAndForwardLookups) {
   EXPECT_EQ(check("198.51.100.7"), CrawlerStatus::kFailed);
   EXPECT_EQ(check("192.0.2.1"), CrawlerStatus::kFailed);
   EXPECT_EQ(dns.reverse_lookups.load(), 4);  // Cached.
+  // Why, without the PTR name (it may spell the address).
+  const auto why = [&](std::string_view ip) {
+    std::string out;
+    verifier.Check(google, asio::ip::make_address(ip), kNow, &out);
+    return out;
+  };
+  EXPECT_EQ(why("66.249.66.1"), "verified:googlebot.com");
+  EXPECT_EQ(why("203.0.113.5"), "forward_mismatch");
+  EXPECT_EQ(why("198.51.100.7"), "outside_domains");
+  EXPECT_EQ(why("192.0.2.1"), "no_ptr");
+  EXPECT_EQ(why("192.0.2.99"), "queued");
 
   // The same address claiming another crawler is checked separately.
   EXPECT_EQ(verifier.Check(*FindCrawler("bingbot/2.0"),

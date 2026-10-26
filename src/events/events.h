@@ -100,6 +100,10 @@ struct RequestOutcome {
   std::string client_fp;
   // Host of a verified Web Bot Auth agent.
   std::string signed_agent;
+  // Steps of the crawler / signed agent check (Exchange::crawler_check).
+  std::vector<std::string> crawler_check;
+  // Clearance token session: a pseudonym, the rate limit key "session".
+  std::string session;
 };
 
 std::string RequestEventJson(const ConnectionRecord& record,

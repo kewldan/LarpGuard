@@ -120,6 +120,12 @@ class Exchange : public std::enable_shared_from_this<Exchange> {
   std::string client_fp;
   // Host of a verified Web Bot Auth agent.
   std::string signed_agent;
+  // How a claimed crawler or a signed agent was checked, step by step
+  // ("claim:googlebot", "ranges:outside", "rdns:verified:googlebot.com",
+  // "result:verified"); empty when nothing was claimed or signed.
+  std::vector<std::string> crawler_check;
+  // Session of a valid clearance token (16 hex digits of its hash).
+  std::string session;
   std::string mode;
   int64_t started_ms = 0;
   uint64_t response_bytes = 0;

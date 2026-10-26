@@ -854,7 +854,13 @@ events:
 would_action, rate_limit`; модель: `features, model_score`; `asn`, хеш
 проб браузера `client_fp`, проверенный агент `signed_agent`; RTT ядра
 `tcp_rtt_us` и TLS 1.3-рукопожатие `handshake_us` (микросекунды, сигнал
-`relayed_connection`). Новые колонки очереди NATS: `ALTER` её не меняет —
+`relayed_connection`); `alpn` соединения; `session` — сессия токена
+`__bs` (16 hex хеша токена, псевдоним клиента и ключ лимита `session`,
+пусто без токена); `crawler_check` — шаги проверки заявленного краулера
+или подписанного агента (`claim:<id>`, `ranges:inside|outside|none|off`,
+`rdns:verified:<домен>|no_ptr|outside_domains|forward_mismatch|queued|…`,
+`web_bot_auth:verified:<агент>|invalid|pending`, `result:…`; имени PTR
+нет — оно может содержать адрес). Новые колонки очереди NATS: `ALTER` её не меняет —
 `req_mv` и `req_queue` пересоздаются (`DROP` и повторный `schema.sql`).
 
 База ASN (`net/asn`): iptoasn.com `ip2asn-combined.tsv.gz` (public domain,

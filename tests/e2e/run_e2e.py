@@ -1180,6 +1180,16 @@ whoami: true
             expect("unverified_crawler" in reasons, reasons)
             time.sleep(0.05)
         expect("fake_crawler:google" in reasons, reasons)
+        # Each step of the check is in the event: no published ranges
+        # offline, the PTR lookup of 127.0.0.1 fails, so a fake.
+        event = nats.find(
+            "e2e.events.req",
+            lambda e: e.get("path_group") == "/crawler" and
+            "result:fake" in e.get("crawler_check", []))
+        expect(event["crawler_check"][0] == "claim:google", event)
+        expect(any(step.startswith("rdns:") and step != "rdns:queued"
+                   for step in event["crawler_check"]), event)
+        expect(event.get("alpn") == "http/1.1", event)
 
     def honeypot_and_behavior():
         # The trap itself, then the same client elsewhere (marked for 1s,

@@ -49,9 +49,13 @@ class CrawlerVerifier {
   CrawlerVerifier& operator=(const CrawlerVerifier&) = delete;
 
   // Cached result for `crawler` at `ip`; on a miss, queues a lookup and
-  // returns kPending. `now` in Unix seconds.
+  // returns kPending. `now` in Unix seconds. `why` (optional) gets how the
+  // lookup went, without the PTR name (it may carry the address):
+  // "verified:<domain>", "no_ptr", "outside_domains", "forward_mismatch",
+  // or "queued" while pending.
   CrawlerStatus Check(const KnownCrawler& crawler,
-                      const asio::ip::address& peer, int64_t now);
+                      const asio::ip::address& peer, int64_t now,
+                      std::string* why = nullptr);
 
   // Blocks until no lookup is queued or running (tests).
   void WaitIdle();
@@ -66,10 +70,13 @@ class CrawlerVerifier {
   struct Entry {
     CrawlerStatus status;
     int64_t expires;
+    std::string why;
   };
 
   void Run(const std::stop_token& stop);
-  bool Verify(const KnownCrawler& crawler, const asio::ip::address& ip) const;
+  // True when verified; `why` as in Check().
+  bool Verify(const KnownCrawler& crawler, const asio::ip::address& ip,
+              std::string* why) const;
 
   Resolver resolver_;
   Settings settings_;

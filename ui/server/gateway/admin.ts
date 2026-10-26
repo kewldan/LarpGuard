@@ -191,6 +191,7 @@ export interface RuleSampleEvent {
   ip_prefix: string;
   tcp_rtt_us: number | null;
   handshake_us: number | null;
+  alpn: string;
 }
 
 export interface AdminApi {

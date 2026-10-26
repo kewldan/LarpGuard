@@ -34,6 +34,9 @@ nlohmann::json DecisionToJson(const DecisionRecord& record) {
       {"duration_ms", record.duration_ms},
   };
   if (!record.rate_limit.empty()) json["rate_limit"] = record.rate_limit;
+  if (!record.crawler_check.empty()) {
+    json["crawler_check"] = record.crawler_check;
+  }
   return json;
 }
 

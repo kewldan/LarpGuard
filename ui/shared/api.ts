@@ -668,6 +668,12 @@ export const requestDetailSchema = z.object({
     // Kernel TCP round trip and TLS 1.3 handshake, microseconds.
     tcp_rtt_us: z.number().nullable(),
     handshake_us: z.number().nullable(),
+    alpn: z.string(),
+    // Clearance session (16 hex), "" without a valid token.
+    session: z.string(),
+    // Steps of the crawler / signed agent check ("claim:google",
+    // "ranges:outside", "rdns:no_ptr", "result:fake").
+    crawler_check: z.array(z.string()),
   }),
   asn: asnInfoSchema.nullable(),
   mode: hostModeInfoSchema.nullable(),
@@ -901,6 +907,23 @@ export type UpdateListEntry = z.infer<typeof updateListEntrySchema>;
 
 // --- Rate limits -------------------------------------------------------------
 
+// How consumers are told apart: by network, by address hash (limits keyed
+// by `ip`) or by clearance session (keyed by `session`).
+export const CONSUMER_KEYS = ['ip_prefix', 'ip_hash', 'session'] as const;
+export const consumerKeySchema = z.enum(CONSUMER_KEYS);
+export type ConsumerKey = z.infer<typeof consumerKeySchema>;
+
+export const consumerSchema = z.object({
+  key: z.string(),
+  // A network of the consumer (any one, for ip_hash and session).
+  ip_prefix: z.string(),
+  ip_hash_count: z.number(),
+  host: z.string(),
+  rps: z.number(),
+  refused: z.number(),
+});
+export type Consumer = z.infer<typeof consumerSchema>;
+
 export const limitsSchema = z.object({
   limits: z.array(
     limitSchema.extend({
@@ -909,17 +932,10 @@ export const limitsSchema = z.object({
     }),
   ),
   throttle: limitSchema.nullable(),
-  // Busiest clients of the last 60 s, by ip_prefix (events have no full
-  // address), with the host they hit most.
-  consumers: z.array(
-    z.object({
-      ip_prefix: z.string(),
-      ip_hash_count: z.number(),
-      host: z.string(),
-      rps: z.number(),
-      refused: z.number(),
-    }),
-  ),
+  // Busiest clients of the last 60 s by `consumers_by` (events have no
+  // full address), with the host they hit most.
+  consumers_by: consumerKeySchema,
+  consumers: z.array(consumerSchema),
   // As for rules: where `rate_limits` comes from, and whether the console
   // can change it (admin.settings_file) at which revision.
   source: settingSourceSchema,

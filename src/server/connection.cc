@@ -353,6 +353,7 @@ class ConnectionObserver {
                      : std::nullopt;
     session_ = clearance_ ? std::optional<std::string>(clearance_->session)
                           : std::nullopt;
+    if (session_) exchange.session = *session_;
     const std::string host = HostOnly(exchange.request.authority);
     const std::shared_ptr<const LabelPolicies> labels =
         context_.labels != nullptr ? context_.labels->snapshot() : nullptr;
@@ -404,24 +405,44 @@ class ConnectionObserver {
     bool verified_crawler = false;
     std::optional<Action> crawler_action;
     bool ai_robots = false;
+    std::vector<std::string>& check = exchange.crawler_check;
     if (crawler != nullptr) {
+      check.push_back(std::format("claim:{}", crawler->id));
       // Published IP ranges decide at once; reverse DNS otherwise.
       CrawlerStatus status = CrawlerStatus::kPending;
       bool decided_by_ranges = false;
       if (context_.crawler_ranges != nullptr) {
-        status = CheckCrawlerRanges(
-            *crawler, *context_.crawler_ranges->snapshot(), record_.peer);
+        const auto ranges = context_.crawler_ranges->snapshot();
+        status = CheckCrawlerRanges(*crawler, *ranges, record_.peer);
         decided_by_ranges = status != CrawlerStatus::kPending;
+        const auto own = ranges->find(crawler->id);
+        check.emplace_back(
+            own == ranges->end() || own->second.empty() ? "ranges:none"
+            : own->second.Contains(record_.peer)        ? "ranges:inside"
+                                                        : "ranges:outside");
         if (status == CrawlerStatus::kVerified) {
           GlobalMetrics().crawler_ranges_verified.Inc();
         } else if (status == CrawlerStatus::kFailed) {
           GlobalMetrics().crawler_ranges_failed.Inc();
         }
+      } else {
+        check.emplace_back("ranges:off");
       }
-      if (!decided_by_ranges && context_.crawler_verifier != nullptr &&
-          !crawler->domains.empty()) {
-        status = context_.crawler_verifier->Check(*crawler, record_.peer, now);
+      if (decided_by_ranges) {
+        check.emplace_back("rdns:skipped");
+      } else if (crawler->domains.empty()) {
+        check.emplace_back("rdns:no_domains");
+      } else if (context_.crawler_verifier == nullptr) {
+        check.emplace_back("rdns:off");
+      } else {
+        std::string why;
+        status =
+            context_.crawler_verifier->Check(*crawler, record_.peer, now, &why);
+        check.push_back("rdns:" + why);
       }
+      check.emplace_back(status == CrawlerStatus::kVerified ? "result:verified"
+                         : status == CrawlerStatus::kFailed ? "result:fake"
+                                                            : "result:pending");
       switch (status) {
         case CrawlerStatus::kVerified:
           verified_crawler = true;
@@ -463,6 +484,19 @@ class ConnectionObserver {
         request.HasHeader("signature-input")) {
       const WebBotAuthResult signed_result =
           context_.web_bot_auth->Check(request, now);
+      switch (signed_result.status) {
+        case WebBotAuthStatus::kVerified:
+          check.push_back("web_bot_auth:verified:" + signed_result.agent);
+          break;
+        case WebBotAuthStatus::kInvalid:
+          check.emplace_back("web_bot_auth:invalid");
+          break;
+        case WebBotAuthStatus::kPending:
+          check.emplace_back("web_bot_auth:pending");
+          break;
+        case WebBotAuthStatus::kNone:
+          break;
+      }
       if (signed_result.status == WebBotAuthStatus::kVerified) {
         GlobalMetrics().signed_verified.Inc();
         exchange.signed_agent = signed_result.agent;
@@ -471,6 +505,7 @@ class ConnectionObserver {
                   return HostMatches(pattern, signed_result.agent);
                 })) {
           verified_crawler = true;
+          check.emplace_back("result:trusted_agent");
           verdict.score = 0;
           verdict.bot_class = BotClass::kVerifiedBot;
           verdict.reasons = {
@@ -1272,6 +1307,8 @@ class ConnectionObserver {
     outcome.model_score = exchange.model_score;
     outcome.client_fp = exchange.client_fp;
     outcome.signed_agent = exchange.signed_agent;
+    outcome.crawler_check = exchange.crawler_check;
+    outcome.session = exchange.session;
     try {
       context_.events->Publish(
           "req",
@@ -1306,6 +1343,7 @@ class ConnectionObserver {
     record.status = exchange.response_started ? exchange.response.status : 0;
     record.local = exchange.local;
     record.duration_ms = SteadyMillis() - exchange.started_ms;
+    record.crawler_check = exchange.crawler_check;
     context_.decisions->Add(std::move(record));
   }
 

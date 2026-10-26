@@ -218,6 +218,10 @@ std::string RequestEventJson(const ConnectionRecord& record,
     if (outcome->model_score >= 0) json["model_score"] = outcome->model_score;
     SetIfNotEmpty(json, "client_fp", outcome->client_fp);
     SetIfNotEmpty(json, "signed_agent", outcome->signed_agent);
+    SetIfNotEmpty(json, "session", outcome->session);
+    if (!outcome->crawler_check.empty()) {
+      json["crawler_check"] = outcome->crawler_check;
+    }
   }
   if (record.asn != 0) json["asn"] = record.asn;
   if (record.tcp_rtt_us >= 0) json["tcp_rtt_us"] = record.tcp_rtt_us;
@@ -228,6 +232,7 @@ std::string RequestEventJson(const ConnectionRecord& record,
 #endif
   SetIfNotEmpty(json, "pseudo_order", pseudo);
   SetIfNotEmpty(json, "sni", record.server_name);
+  SetIfNotEmpty(json, "alpn", record.alpn);
   SetIfNotEmpty(json, "ja4", record.ja4);
   SetIfNotEmpty(json, "tcp_fp", record.tcp_fingerprint);
   SetIfNotEmpty(json, "h2_fp", record.h2_fingerprint);

@@ -31,7 +31,6 @@ const APPROXIMATE = new Set([
   'query()',
   'has_query()',
   'country',
-  'alpn',
   'cidr()',
   'path',
 ]);
@@ -57,6 +56,7 @@ function toEvent(sample: SampleEvent): RuleSampleEvent {
     ip_prefix: sample.ip_prefix,
     tcp_rtt_us: sample.tcp_rtt_us,
     handshake_us: sample.handshake_us,
+    alpn: sample.alpn,
   };
 }
 

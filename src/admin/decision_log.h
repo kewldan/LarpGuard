@@ -37,6 +37,8 @@ struct DecisionRecord {
   int status = 0;
   bool local = false;
   int64_t duration_ms = 0;
+  // Steps of the crawler / signed agent check (Exchange::crawler_check).
+  std::vector<std::string> crawler_check;
 };
 
 nlohmann::json DecisionToJson(const DecisionRecord& record);

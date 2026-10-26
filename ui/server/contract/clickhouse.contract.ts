@@ -104,6 +104,9 @@ function event(index: number, ago: number, fields: Record<string, unknown>) {
     asn: 64500,
     tcp_rtt_us: null,
     handshake_us: null,
+    alpn: 'h2',
+    session: '',
+    crawler_check: [],
     ...fields,
     _ts: ts,
   };
@@ -112,6 +115,7 @@ function event(index: number, ago: number, fields: Record<string, unknown>) {
 const EVENTS = [
   event(1, 1 * MINUTE, {
     reasons: ['token_valid'],
+    session: 'feedfacecafebeef',
     model_score: 0.25,
     tcp_rtt_us: 1500,
     handshake_us: 2000,
@@ -146,6 +150,12 @@ const EVENTS = [
     class: 'bot',
     score: 85,
     reasons: ['fake_crawler:googlebot', 'list:7'],
+    crawler_check: [
+      'claim:googlebot',
+      'ranges:outside',
+      'rdns:outside_domains',
+      'result:fake',
+    ],
     would_action: 'block',
   }),
   event(5, 5 * MINUTE, {
@@ -424,7 +434,20 @@ describe.skipIf(!ready)('ClickHouse analytics contract', () => {
       local: false,
       tcp_rtt_us: 1500,
       handshake_us: 2000,
+      alpn: 'h2',
+      session: 'feedfacecafebeef',
+      crawler_check: [],
     });
+    const fake = EVENTS[3];
+    if (!fake) throw new Error('fixture');
+    expect(
+      (await analytics.request(fake.request_id, fake._ts))?.crawler_check,
+    ).toEqual([
+      'claim:googlebot',
+      'ranges:outside',
+      'rdns:outside_domains',
+      'result:fake',
+    ]);
     expect(
       (await analytics.request(first.request_id, first._ts))?.model_score,
     ).toBeCloseTo(0.25);
@@ -437,6 +460,23 @@ describe.skipIf(!ready)('ClickHouse analytics contract', () => {
       tcp_rtt_us: null,
     });
     expect(await analytics.request('missing', NOW)).toBeNull();
+  });
+
+  it('challenge history', async () => {
+    const challenged = EVENTS[4];
+    if (!challenged) throw new Error('fixture');
+    expect(
+      await analytics.challengeHistory('eeee5555', challenged._ts),
+    ).toEqual([
+      expect.objectContaining({
+        request_id: challenged.request_id,
+        step: 'challenge',
+        host: 'b.test',
+      }),
+    ]);
+    expect(await analytics.challengeHistory('nobody', challenged._ts)).toEqual(
+      [],
+    );
   });
 
   it('fingerprints', async () => {
@@ -485,8 +525,9 @@ describe.skipIf(!ready)('ClickHouse analytics contract', () => {
   });
 
   it('consumers, hostStats, busiestHost', async () => {
-    const consumers = await analytics.consumers(3600);
+    const consumers = await analytics.consumers(3600, 'ip_prefix');
     expect(consumers).toContainEqual({
+      key: '198.51.100.0/24',
       ip_prefix: '198.51.100.0/24',
       ip_hash_count: 2,
       host: 'a.test',
@@ -496,6 +537,13 @@ describe.skipIf(!ready)('ClickHouse analytics contract', () => {
     expect(
       consumers.find((row) => row.ip_prefix === '203.0.113.0/24')?.refused,
     ).toBe(1);
+    // By clearance session: only the client that had one.
+    expect(await analytics.consumers(3600, 'session')).toEqual([
+      expect.objectContaining({ key: 'feedfacecafebeef', ip_hash_count: 1 }),
+    ]);
+    expect(
+      (await analytics.consumers(3600, 'ip_hash')).map((row) => row.key),
+    ).toContain('eeee5555');
     expect(await analytics.hostStats(3600)).toEqual([
       {
         host: 'a.test',

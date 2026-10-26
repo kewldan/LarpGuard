@@ -3,7 +3,11 @@
 // database name (checked against \w+ in the config) and a fingerprint
 // column picked from a fixed list.
 
-import type { FingerprintKind, RequestFilterParsed } from '../../shared/api.ts';
+import type {
+  ConsumerKey,
+  FingerprintKind,
+  RequestFilterParsed,
+} from '../../shared/api.ts';
 import {
   BLOCKING_ACTIONS,
   CHALLENGING_ACTIONS,
@@ -41,6 +45,12 @@ export const TONE_COLUMNS = `countIf(${BLOCKED}) AS blocked,
   countIf(${CHALLENGED}) AS challenged,
   countIf(NOT ${BLOCKED} AND NOT ${CHALLENGED}) AS allowed,
   countIf(${WOULD_BLOCK}) AS would_block`;
+
+const CONSUMER_COLUMNS: Record<ConsumerKey, string> = {
+  ip_prefix: 'ip_prefix',
+  ip_hash: 'ip_hash',
+  session: 'session',
+};
 
 const FINGERPRINT_COLUMNS: Record<FingerprintKind, string> = {
   ja4: 'ja4',
@@ -248,7 +258,7 @@ GROUP BY value ORDER BY requests DESC LIMIT 20`,
   header_names, pseudo_order, h2_fp, tcp_fp, ja4h, accept_language,
   sec_ch_ua, sec_ch_ua_platform, sec_ch_ua_mobile, sec_fetch_mode,
   sec_fetch_site, rate_limit, duration_ms, local, signed_agent, client_fp,
-  model_score, tcp_rtt_us, handshake_us
+  model_score, tcp_rtt_us, handshake_us, alpn, session, crawler_check
 FROM ${this.table}
 WHERE req.ts BETWEEN fromUnixTimestamp64Milli({from:Int64}) AND fromUnixTimestamp64Milli({to:Int64})
   AND request_id = {id:String}
@@ -338,7 +348,7 @@ GROUP BY name ORDER BY requests DESC LIMIT 500`,
       sql: `SELECT toUnixTimestamp64Milli(ts) AS ts, host, method,
   path_group AS path, http_version, sni, ja4, h2_fp, pseudo_order,
   header_fp, tcp_fp, user_agent, score, class, reasons, asn, signed_agent,
-  ip_prefix, action, would_action, tcp_rtt_us, handshake_us
+  ip_prefix, action, would_action, tcp_rtt_us, handshake_us, alpn
 FROM ${this.table}
 WHERE ${since(seconds)}
   AND cityHash64(request_id, conn_id, seq) % {modulo:UInt64} = 0
@@ -357,14 +367,18 @@ GROUP BY name`,
     };
   }
 
-  consumers(seconds: number, limit: number): Query {
+  // The busiest clients by a limit's key as events carry it: the network,
+  // the address hash (key `ip`) or the clearance session (key `session`).
+  consumers(seconds: number, limit: number, by: ConsumerKey): Query {
+    const column = CONSUMER_COLUMNS[by];
     return {
-      sql: `SELECT ip_prefix, uniq(ip_hash) AS ip_hash_count,
+      sql: `SELECT ${column} AS key, any(ip_prefix) AS ip_prefix,
+  uniq(ip_hash) AS ip_hash_count,
   topK(1)(host)[1] AS host, count() / {seconds:Float64} AS rps,
   countIf(rate_limit != '') AS refused
 FROM ${this.table}
-WHERE ${since(seconds)} AND ip_prefix != ''
-GROUP BY ip_prefix ORDER BY rps DESC LIMIT {limit:UInt32}`,
+WHERE ${since(seconds)} AND ${column} != ''
+GROUP BY key ORDER BY rps DESC LIMIT {limit:UInt32}`,
       params: { seconds, limit },
     };
   }
