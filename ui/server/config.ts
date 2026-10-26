@@ -87,6 +87,9 @@ export const consoleConfigSchema = z
       .strict()
       .nullable()
       .default(null),
+    // Traefik's read-only API on loopback (deploy/traefik.yml), for the
+    // routers and servers of each host; null: not shown.
+    traefik_api: z.url().nullable().default(null),
     audit_log: z.string().min(1),
     // Users added by an admin in the console (written by the console);
     // null: only console.yaml's users, none can be added.

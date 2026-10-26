@@ -169,6 +169,13 @@ test('an admin sees the users and the add form', async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
+test("a host shows Traefik's routers and their servers", async ({ page }) => {
+  await open(page, '/hosts?host=api.example.com');
+  const traefik = page.getByRole('region', { name: 'Traefik' });
+  await expect(traefik.getByText('api-v2@docker').first()).toBeVisible();
+  await expect(traefik.getByText('DOWN')).toBeVisible();
+});
+
 test('switch a host to enforce and back', async ({ page }) => {
   await open(page, '/hosts?host=shop.example.com');
   await page.getByRole('radio', { name: /ENFORCE/ }).click();

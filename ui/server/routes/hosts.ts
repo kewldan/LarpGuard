@@ -1,8 +1,10 @@
 // GET /api/hosts: every known host with its mode, route and traffic.
 // GET /api/hosts/readiness?host=&range=: is the host ready for enforce.
+// GET /api/hosts/traefik?host=: Traefik's routers and servers of a host.
 // POST /api/hosts/mode, DELETE /api/hosts/mode/:host: console host modes.
 
 import type { Hono } from 'hono';
+import { z } from 'zod';
 
 import {
   type HostRow,
@@ -10,6 +12,7 @@ import {
   readinessQuerySchema,
   readinessSchema,
   setModeSchema,
+  traefikRoutesSchema,
 } from '../../shared/api.ts';
 import { type HostMode, RANGE_SECONDS } from '../../shared/domain.ts';
 import type { AppEnv, Deps } from '../deps.ts';
@@ -82,6 +85,28 @@ export function registerHosts(app: Hono<AppEnv>): void {
       default_mode: overview.default,
       hosts: rows,
     });
+  });
+
+  app.get('/api/hosts/traefik', async (c) => {
+    const deps = c.get('deps');
+    const { host } = parseOr400(
+      z.object({ host: z.string().min(1).max(253) }),
+      c.req.query(),
+    );
+    if (!deps.traefik) {
+      return send(c, traefikRoutesSchema, { routes: null, error: null });
+    }
+    try {
+      const routes = await deps.traefik.routes(
+        host.toLowerCase().replace(/\.$/, ''),
+      );
+      return send(c, traefikRoutesSchema, { routes, error: null });
+    } catch (error) {
+      return send(c, traefikRoutesSchema, {
+        routes: [],
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   app.get('/api/hosts/readiness', async (c) => {

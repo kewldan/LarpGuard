@@ -19,6 +19,7 @@ import {
   useGatewayConfig,
   useHosts,
   useSetMode,
+  useTraefikRoutes,
 } from '../lib/queries.ts';
 import { Button } from '../ui/Button.tsx';
 import { Dialog } from '../ui/Overlay.tsx';
@@ -188,6 +189,112 @@ function PolicySettings({ config }: { config: GatewayConfig }) {
         </div>
       </section>
     </>
+  );
+}
+
+// Traefik's routers for the host and the servers behind them, from
+// Traefik's own API (the gateway only forwards to Traefik).
+function TraefikRoutes({ host }: { host: string }) {
+  const routes = useTraefikRoutes(host);
+  const data = routes.data;
+  return (
+    <section
+      aria-label="Traefik"
+      style={{
+        border: '1px solid var(--color-line)',
+        borderRadius: 12,
+        padding: 18,
+        marginTop: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <h2 style={{ fontSize: 15, fontWeight: 600 }}>In Traefik</h2>
+      {!data ? (
+        <Skeleton loading rows={2} label="Loading Traefik routes" />
+      ) : data.routes === null ? (
+        <div style={{ fontSize: 12.5, color: 'var(--color-text-3)' }}>
+          Set <span className="mono">traefik_api</span> in console.yaml (and
+          Traefik&apos;s API on loopback, deploy/traefik.yml) to see the routers
+          and servers of this host.
+        </div>
+      ) : data.error ? (
+        <div style={{ fontSize: 12.5, color: 'var(--color-blocked-text)' }}>
+          {data.error}
+        </div>
+      ) : data.routes.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: 'var(--color-text-3)' }}>
+          No Traefik router matches this host.
+        </div>
+      ) : (
+        data.routes.map((route) => (
+          <div
+            key={`${route.protocol}:${route.name}`}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              paddingTop: 10,
+              borderTop: '1px solid var(--color-line)',
+              fontSize: 12,
+            }}
+          >
+            <div
+              className="mono"
+              style={{ fontWeight: 500, overflowWrap: 'anywhere' }}
+            >
+              {route.name}
+              <span style={{ color: 'var(--color-text-3)', fontWeight: 400 }}>
+                {' '}
+                · {route.protocol} · {route.status || '?'}
+              </span>
+            </div>
+            <div
+              className="mono"
+              style={{ color: 'var(--color-text-2)', overflowWrap: 'anywhere' }}
+            >
+              {route.rule}
+            </div>
+            <div style={{ color: 'var(--color-text-3)' }}>
+              {route.entrypoints.join(', ') || 'all entrypoints'}
+              {route.passthrough ? ' · TLS passthrough' : ''}
+              {route.tls_options ? ` · TLS options ${route.tls_options}` : ''}
+              {route.middlewares.length
+                ? ` · ${route.middlewares.join(', ')}`
+                : ''}
+            </div>
+            <div className="mono" style={{ color: 'var(--color-text-3)' }}>
+              → {route.service}
+              {route.service_status ? ` (${route.service_status})` : ''}
+            </div>
+            {route.servers.map((server) => (
+              <div
+                key={server.target}
+                className="mono"
+                style={{ display: 'flex', gap: 8, paddingLeft: 12 }}
+              >
+                <span
+                  style={{
+                    color:
+                      server.status === 'DOWN'
+                        ? 'var(--color-blocked-text)'
+                        : server.status === 'UP'
+                          ? 'var(--color-healthy)'
+                          : 'var(--color-text-3)',
+                  }}
+                >
+                  {server.status ?? '—'}
+                </span>
+                <span style={{ overflowWrap: 'anywhere' }}>
+                  {server.target}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))
+      )}
+    </section>
   );
 }
 
@@ -627,6 +734,7 @@ export function Hosts() {
                   className={styles.code}
                 >{`policy:\n  hosts:\n    ${current.host}: ${current.mode}`}</pre>
               </section>
+              <TraefikRoutes host={current.host} />
             </div>
           </div>
         </section>

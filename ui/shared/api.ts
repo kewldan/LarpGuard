@@ -946,6 +946,33 @@ export const hostRowSchema = z.object({
 });
 export type HostRow = z.infer<typeof hostRowSchema>;
 
+// A Traefik router that serves the host (Traefik's API), with the servers
+// of its service and Traefik's view of their health.
+export const traefikRouteSchema = z.object({
+  protocol: z.enum(['http', 'tcp']),
+  name: z.string(),
+  rule: z.string(),
+  status: z.string(),
+  entrypoints: z.array(z.string()),
+  middlewares: z.array(z.string()),
+  tls_options: z.string().nullable(),
+  passthrough: z.boolean(),
+  service: z.string(),
+  service_status: z.string().nullable(),
+  servers: z.array(
+    z.object({ target: z.string(), status: z.string().nullable() }),
+  ),
+});
+export type TraefikRoute = z.infer<typeof traefikRouteSchema>;
+
+export const traefikRoutesSchema = z.object({
+  // Null when Traefik's API is not configured (console.yaml traefik_api).
+  routes: z.array(traefikRouteSchema).nullable(),
+  // Why the API could not be read, when it could not.
+  error: z.string().nullable(),
+});
+export type TraefikRoutes = z.infer<typeof traefikRoutesSchema>;
+
 export const hostsSchema = z.object({
   default_mode: z.enum(['shadow', 'enforce']),
   hosts: z.array(hostRowSchema),

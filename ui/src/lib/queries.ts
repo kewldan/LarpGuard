@@ -43,6 +43,7 @@ import {
   settingsHistorySchema,
   settingsSchema,
   statusSchema,
+  traefikRoutesSchema,
   type UpdateListEntry,
   type UserCredentials,
   userCredentialsSchema,
@@ -69,6 +70,7 @@ export const keys = {
   // Under `hosts`: a mode change refreshes it too.
   readiness: (host: string, range: ReadinessRange) =>
     ['hosts', 'readiness', host, range] as const,
+  traefik: (host: string) => ['hosts', 'traefik', host] as const,
   crawlers: ['crawlers'] as const,
   attack: ['attack'] as const,
   audit: ['audit'] as const,
@@ -238,6 +240,15 @@ export function useReadiness(host: string, range: ReadinessRange) {
       getJson(readinessSchema, '/api/hosts/readiness', { host, range }, signal),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
+  });
+}
+
+export function useTraefikRoutes(host: string) {
+  return useQuery({
+    queryKey: keys.traefik(host),
+    queryFn: ({ signal }) =>
+      getJson(traefikRoutesSchema, '/api/hosts/traefik', { host }, signal),
+    staleTime: 30_000,
   });
 }
 

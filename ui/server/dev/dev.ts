@@ -19,6 +19,7 @@ import type { MetricsApi } from '../gateway/metrics.ts';
 import { createMockAdmin, MOCK_SHADOW_HOSTS } from './mock-admin.ts';
 import { createMockAnalytics } from './mock-analytics.ts';
 import { MockTraffic } from './mock-data.ts';
+import { createMockTraefik } from './mock-traefik.ts';
 import { DEV_PASSWORD, DEV_TOTP_SECRET } from './users.ts';
 
 const port = Number(process.env['LG_PORT'] ?? 9901);
@@ -82,6 +83,7 @@ const app = createApp({
   admin,
   analytics: createMockAnalytics(events, now),
   metrics,
+  traefik: createMockTraefik(),
   audit: new AuditLog(null, now, {
     sign: (hash) => admin.signAudit(hash),
     key: () => admin.auditKey(),

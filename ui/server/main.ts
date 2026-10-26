@@ -20,6 +20,7 @@ import { newTotpSecret, otpauthUri } from './auth/totp.ts';
 import { loadConsoleConfig } from './config.ts';
 import { createAdminClient } from './gateway/admin.ts';
 import { createMetricsClient } from './gateway/metrics.ts';
+import { createTraefikClient } from './gateway/traefik.ts';
 
 function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -53,6 +54,9 @@ function serveCommand(argv: string[]): void {
         ? createAnalytics(config.clickhouse.database, clickhouse.run)
         : null,
     metrics: createMetricsClient(config.gateway.metrics_url),
+    traefik: config.traefik_api
+      ? createTraefikClient(config.traefik_api)
+      : null,
     // Each entry is sealed by the gateway's key when it has one.
     audit: new AuditLog(config.audit_log, Date.now, {
       sign: (hash) => admin.signAudit(hash),

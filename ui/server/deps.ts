@@ -10,6 +10,7 @@ import type { SessionData, SessionStore } from './auth/sessions.ts';
 import type { ConsoleConfig } from './config.ts';
 import type { AdminApi } from './gateway/admin.ts';
 import type { MetricsApi } from './gateway/metrics.ts';
+import type { TraefikApi } from './gateway/traefik.ts';
 
 export interface Deps {
   config: ConsoleConfig;
@@ -17,6 +18,8 @@ export interface Deps {
   // Null: no ClickHouse configured; analytics screens say so.
   analytics: Analytics | null;
   metrics: MetricsApi;
+  // Traefik's API (routers and services); null when not configured.
+  traefik?: TraefikApi | null;
   audit: AuditLog;
   sessions: SessionStore;
   // Null: passkeys are off (passkeys_file: null).

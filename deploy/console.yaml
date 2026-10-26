@@ -14,6 +14,10 @@ gateway:
   # The gateway's metrics.listen (/metrics and /health).
   metrics_url: http://127.0.0.1:9900
 
+# Traefik's API on loopback (deploy/traefik.yml): the Hosts screen shows the
+# routers and servers of each host. null: not shown.
+traefik_api: http://127.0.0.1:8081
+
 # Analytics; leave out (or null) to run without: the analytics screens then
 # say ClickHouse is not configured. Use a read-only user with readonly = 2
 # (read queries, may set limits like max_execution_time), for example:
